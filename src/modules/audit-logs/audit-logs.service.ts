@@ -54,6 +54,10 @@ export class AuditLogsService {
     }
   }
 
+  async countAll(): Promise<number> {
+    return this.auditLogModel.countDocuments();
+  }
+
   async clearAll(): Promise<void> {
     await this.auditLogModel.deleteMany({});
   }

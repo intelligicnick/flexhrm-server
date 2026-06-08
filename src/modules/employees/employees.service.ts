@@ -3,6 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
+import {
+  getBirthdayAge,
+  isValidDateParts,
+  MONTH_NAME_LIST,
+  parseDateOfBirth,
+} from '../../common/utils/date-of-birth.util';
 
 @Injectable()
 export class EmployeesService {
@@ -42,6 +48,9 @@ export class EmployeesService {
   async findAll(session?: AdminSessionPayload): Promise<Record<string, unknown>[]> {
     const filter = this.applyLocationScope({}, session);
     const docs = await this.employeeModel.find(filter).sort({ srNo: 1 }).exec();
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'employees.service.ts:findAll',message:'Employee query result',data:{count:docs.length,hasSession:!!session,sessionRole:session?.role??null},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     return docs.map((d) => this.toPlain(d));
   }
 
@@ -248,5 +257,64 @@ export class EmployeesService {
     const emp = await this.findById(id);
     if (!emp) throw new NotFoundException('Employee not found.');
     return emp;
+  }
+
+  async getBirthdaySummary(
+    session?: AdminSessionPayload,
+    month?: number,
+  ): Promise<{
+    today: Record<string, unknown>[];
+    month: Record<string, unknown>[];
+    todayMonth: number;
+    todayDay: number;
+    todayLabel: string;
+    monthName: string;
+    targetMonth: number;
+  }> {
+    const now = new Date();
+    const todayMonth = now.getMonth() + 1;
+    const todayDay = now.getDate();
+    const currentYear = now.getFullYear();
+    const targetMonth =
+      month && month >= 1 && month <= 12 ? month : todayMonth;
+
+    const all = await this.findAll(session);
+    const today: Record<string, unknown>[] = [];
+    const monthList: Record<string, unknown>[] = [];
+
+    for (const emp of all) {
+      const parsed = parseDateOfBirth(String(emp.dateOfBirth || ''));
+      if (!parsed || !isValidDateParts(parsed.year, parsed.month, parsed.day)) {
+        continue;
+      }
+
+      const entry = {
+        ...emp,
+        birthdayDay: parsed.day,
+        birthdayMonth: parsed.month,
+        age: getBirthdayAge(parsed.year, currentYear),
+      };
+
+      if (parsed.month === todayMonth && parsed.day === todayDay) {
+        today.push(entry);
+      }
+      if (parsed.month === targetMonth) {
+        monthList.push(entry);
+      }
+    }
+
+    monthList.sort(
+      (a, b) => Number(a.birthdayDay) - Number(b.birthdayDay),
+    );
+
+    return {
+      today,
+      month: monthList,
+      todayMonth,
+      todayDay,
+      todayLabel: `${MONTH_NAME_LIST[todayMonth - 1]} ${todayDay}`,
+      monthName: MONTH_NAME_LIST[targetMonth - 1],
+      targetMonth,
+    };
   }
 }

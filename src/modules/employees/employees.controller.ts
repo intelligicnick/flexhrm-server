@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import {
@@ -27,6 +28,10 @@ import {
   RenameLocationDto,
   RenameRoleDto,
 } from './dto/employee-ops.dto';
+import {
+  employeeDisplayName,
+  summarizeEmployeeChanges,
+} from '../../common/utils/audit-log-format.util';
 
 @Controller('employees')
 export class EmployeesController {
@@ -44,6 +49,19 @@ export class EmployeesController {
     return this.employeesService.findAll(user);
   }
 
+  @Get('birthdays')
+  @RequireAnyPermissions(['birthdays'], 'view')
+  findBirthdays(
+    @CurrentUser() user: AdminSessionPayload,
+    @Query('month') month?: string,
+  ) {
+    const monthNum = month ? parseInt(month, 10) : undefined;
+    return this.employeesService.getBirthdaySummary(
+      user,
+      Number.isFinite(monthNum) ? monthNum : undefined,
+    );
+  }
+
   @Post()
   @RequirePermissions('employees', 'edit')
   async create(@CurrentUsername() username: string, @Body() body: Record<string, unknown>) {
@@ -57,11 +75,24 @@ export class EmployeesController {
       );
     }
     const processed = await this.employeesService.create(body);
+    const displayName = employeeDisplayName(processed);
     await this.auditLogsService.append({
       username,
       action: 'ADD_EMPLOYEE',
-      target: `Record Created: Added new employee "${processed.nameAsPerAadhar}" (Code: ${processed.employeeCode}).`,
-      details: processed,
+      target:
+        `Employee Onboarding: New staff member "${displayName}" (Code: ${processed.employeeCode}) was registered in the HRMS employee directory` +
+        `${processed.location ? ` and assigned to "${processed.location}"` : ''}` +
+        `${processed.role ? ` with role "${processed.role}"` : ''}. ` +
+        `This creates their master profile used across attendance, payroll, and statutory reporting.`,
+      details: {
+        employeeCode: processed.employeeCode,
+        employeeName: displayName,
+        location: processed.location,
+        role: processed.role,
+        dateOfJoining: processed.dateOfJoining,
+        summary: `Onboarded ${displayName} (${processed.employeeCode}).`,
+        ...processed,
+      },
     });
     return processed;
   }
@@ -77,8 +108,16 @@ export class EmployeesController {
       await this.auditLogsService.append({
         username,
         action: 'BULK_IMPORT_EMPLOYEES',
-        target: `Bulk Ingestion: Imported and registered ${added} employee records successfully into HRMS registry (skipped ${skipped} duplicates).`,
-        details: { count: added, skipped },
+        target:
+          `Bulk Employee Import: ${added} new employee record(s) were imported into the HRMS registry` +
+          `${skipped > 0 ? `; ${skipped} duplicate employee code(s) were skipped to prevent overwriting existing profiles` : ''}. ` +
+          `Imported records are immediately available for attendance marking, salary calculation, and directory lookup.`,
+        details: {
+          count: added,
+          skipped,
+          skippedCodes,
+          summary: `Imported ${added} employee(s), skipped ${skipped} duplicate(s).`,
+        },
       });
     }
     return {
@@ -111,11 +150,30 @@ export class EmployeesController {
     const updated = await this.employeesService.update(id, body);
     if (!updated) throw new NotFoundException('Employee not found.');
 
+    const displayName = employeeDisplayName(updated);
+    const changedFields = summarizeEmployeeChanges(oldState, updated);
+    const changeText =
+      changedFields.length > 0
+        ? ` Modified fields: ${changedFields.join('; ')}.`
+        : ' No field-level differences were detected in the submitted payload.';
+
     await this.auditLogsService.append({
       username,
       action: 'UPDATE_EMPLOYEE',
-      target: `Record Mutation: Updated employee "${updated.nameAsPerAadhar}" (Code: ${updated.employeeCode}).`,
-      details: { previous: oldState, updated },
+      target:
+        `Employee Profile Update: "${displayName}" (Code: ${updated.employeeCode}) had their master record updated in the HRMS.` +
+        changeText +
+        ` Changes may affect payroll calculations, attendance eligibility, statutory compliance, and directory visibility.`,
+      details: {
+        employeeCode: updated.employeeCode,
+        employeeName: displayName,
+        location: updated.location,
+        role: updated.role,
+        changedFields,
+        summary: `Updated ${displayName} (${updated.employeeCode}) — ${changedFields.length} field(s) changed.`,
+        previous: oldState,
+        updated,
+      },
     });
     return updated;
   }
@@ -128,13 +186,30 @@ export class EmployeesController {
     }
     const { count, deleted } = await this.employeesService.deleteByIds(dto.ids.map(String));
     const delDetails = deleted
-      .map((e) => `${e.employeeCode} (${e.nameAsPerAadhar})`)
-      .join(', ');
+      .map((e) => {
+        const name = employeeDisplayName(e);
+        const location = e.location ? `, Location: ${e.location}` : '';
+        const role = e.role ? `, Role: ${e.role}` : '';
+        return `${name} [${e.employeeCode}]${location}${role}`;
+      })
+      .join('; ');
+    const summary =
+      count === 1
+        ? `Permanently removed 1 employee profile from the HRMS registry.`
+        : `Permanently removed ${count} employee profiles from the HRMS registry.`;
+
     await this.auditLogsService.append({
       username,
       action: 'DELETE_EMPLOYEES',
-      target: `Employee [${delDetails}] deleted`,
-      details: { count, ids: dto.ids, deletedEmployees: deleted },
+      target:
+        `Employee Deletion: ${summary} Deleted profile(s): ${delDetails || 'none captured'}. ` +
+        `This action removes the employee from attendance sheets, salary runs, and active directory listings. Historical payroll exports are not automatically reversed.`,
+      details: {
+        count,
+        ids: dto.ids,
+        deletedEmployees: deleted,
+        summary: `Deleted ${count} employee record(s).`,
+      },
     });
     return { success: true, count, total: await this.employeesService.count() };
   }
@@ -146,8 +221,14 @@ export class EmployeesController {
     await this.auditLogsService.append({
       username,
       action: 'RENAME_LOCATION',
-      target: `Registry Override: Renamed location/branch from "${dto.oldLocation}" to "${dto.newLocation}" across all ${count} assigned employee records.`,
-      details: { ...dto, count },
+      target:
+        `Location Rename: Branch/worksite label changed from "${dto.oldLocation}" to "${dto.newLocation}" ` +
+        `on ${count} employee record(s). All affected employees now appear under the new location in attendance filters, salary sheets, and directory views.`,
+      details: {
+        ...dto,
+        count,
+        summary: `Renamed location "${dto.oldLocation}" → "${dto.newLocation}" for ${count} employee(s).`,
+      },
     });
     return {
       success: true,
@@ -163,8 +244,14 @@ export class EmployeesController {
     await this.auditLogsService.append({
       username,
       action: 'RENAME_ROLE',
-      target: `Registry Override: Renamed job role from "${dto.oldRole}" to "${dto.newRole}" across all ${count} assigned employee records.`,
-      details: { ...dto, count },
+      target:
+        `Role Rename: Job designation changed from "${dto.oldRole}" to "${dto.newRole}" ` +
+        `on ${count} employee record(s). Updated role labels flow through payroll filters, attendance role filters, and reporting exports.`,
+      details: {
+        ...dto,
+        count,
+        summary: `Renamed role "${dto.oldRole}" → "${dto.newRole}" for ${count} employee(s).`,
+      },
     });
     return {
       success: true,
@@ -180,8 +267,14 @@ export class EmployeesController {
     await this.auditLogsService.append({
       username,
       action: 'DELETE_ROLES',
-      target: `Registry Purge: Cleared job role associations [${dto.roles.join(', ')}] across ${count} employee records.`,
-      details: { count, roles: dto.roles },
+      target:
+        `Role Removal: Cleared job role assignment(s) [${dto.roles.join(', ')}] from ${count} employee record(s). ` +
+        `Affected employees no longer carry these designations; payroll and filter views that depend on role will exclude the removed labels.`,
+      details: {
+        count,
+        roles: dto.roles,
+        summary: `Removed role(s) [${dto.roles.join(', ')}] from ${count} employee(s).`,
+      },
     });
     return {
       success: true,
@@ -197,8 +290,14 @@ export class EmployeesController {
     await this.auditLogsService.append({
       username,
       action: 'DELETE_LOCATIONS',
-      target: `Registry Purge: Permanently deleted branch/locations [${dto.locations.join(', ')}] and cleared assignments across all ${count} assigned employee records.`,
-      details: { count, locations: dto.locations },
+      target:
+        `Location Removal: Cleared branch/worksite assignment(s) [${dto.locations.join(', ')}] from ${count} employee record(s). ` +
+        `Employees previously tagged to these locations now have no location until reassigned; location-based payroll and attendance filters will not include them under the removed sites.`,
+      details: {
+        count,
+        locations: dto.locations,
+        summary: `Removed location(s) [${dto.locations.join(', ')}] from ${count} employee(s).`,
+      },
     });
     return {
       success: true,
@@ -214,8 +313,14 @@ export class EmployeesController {
     await this.auditLogsService.append({
       username,
       action: 'UPDATE_PAYROLL_LEDGER',
-      target: `Payroll Adjustment: Bulk modified advances, penalties, or perk parameters for ${count} employees.`,
-      details: { count, updates: dto.updates },
+      target:
+        `Payroll Ledger Update: Month-wise advance, penalty, uniform recovery, and perk values were saved for ${count} employee(s). ` +
+        `These ledger entries directly adjust net salary payable in the salary calculation sheet for the selected payroll month.`,
+      details: {
+        count,
+        updates: dto.updates,
+        summary: `Updated payroll ledger for ${count} employee(s).`,
+      },
     });
     return {
       success: true,

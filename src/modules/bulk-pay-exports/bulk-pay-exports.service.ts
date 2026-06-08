@@ -44,7 +44,29 @@ function decodeBase64Payload(fileBase64: string): Buffer {
     throw new BadRequestException('Bulk pay file payload decoded to an empty file.');
   }
 
+  validateBulkPayXlsBuffer(buffer);
+
   return buffer;
+}
+
+/** Reject corrupt uploads (e.g. plain text) so Saved Bulk Pay always has readable rows. */
+function validateBulkPayXlsBuffer(buffer: Buffer): void {
+  if (buffer.length < 512) {
+    throw new BadRequestException(
+      'Bulk pay file is too small to be a valid Excel workbook.',
+    );
+  }
+
+  const isOleCompound =
+    buffer[0] === 0xd0 &&
+    buffer[1] === 0xcf &&
+    buffer[2] === 0x11 &&
+    buffer[3] === 0xe0;
+  if (!isOleCompound) {
+    throw new BadRequestException(
+      'Bulk pay file is not a valid Excel 97–2003 (.xls) workbook.',
+    );
+  }
 }
 
 @Injectable()
@@ -119,7 +141,7 @@ export class BulkPayExportsService implements OnModuleInit {
     return toPublicBulkPayExport(record.toObject());
   }
 
-  async getFileForDownload(id: string): Promise<{
+  async getFileContent(id: string): Promise<{
     filename: string;
     buffer: Buffer;
   }> {
@@ -136,6 +158,25 @@ export class BulkPayExportsService implements OnModuleInit {
     } catch {
       throw new NotFoundException('Bulk pay export file missing on disk.');
     }
+  }
+
+  async getFileForDownload(id: string): Promise<{
+    filename: string;
+    buffer: Buffer;
+    downloadCount: number;
+  }> {
+    const { filename, buffer } = await this.getFileContent(id);
+
+    const updated = await this.bulkPayExportModel
+      .findOneAndUpdate({ id }, { $inc: { downloadCount: 1 } }, { new: true })
+      .lean()
+      .exec();
+
+    return {
+      filename,
+      buffer,
+      downloadCount: updated?.downloadCount ?? 1,
+    };
   }
 
   async remove(id: string): Promise<void> {

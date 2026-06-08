@@ -22,9 +22,16 @@ export class SeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    if (this.configService.get<boolean>('seedOnStartup') === false) return;
+    const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
+    const roleCountBefore = await this.rolesService.count();
+    const adminCountBefore = await this.adminsService.count();
+    const employeeCountBefore = await this.employeesService.findAll().then((e) => e.length);
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'seed.service.ts:onModuleInit',message:'Seed startup counts',data:{seedOnStartup,roleCountBefore,adminCountBefore,employeeCountBefore},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    if (!seedOnStartup) return;
 
-    const roleCount = await this.rolesService.count();
+    const roleCount = roleCountBefore;
     if (roleCount === 0) {
       await this.rolesService.replaceAll([...DEFAULT_ROLES]);
       this.logger.log('Seeded default roles');
@@ -48,6 +55,11 @@ export class SeedService implements OnModuleInit {
     }
 
     await this.syncMasterDataFromEmployees();
+
+    const employeeCountAfter = await this.employeesService.findAll().then((e) => e.length);
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'seed.service.ts:onModuleInit:end',message:'Seed complete',data:{employeeCountAfter,rolesSeeded:roleCount===0,adminSeeded:adminCountBefore===0},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
   }
 
   private async syncMasterDataFromEmployees(): Promise<void> {

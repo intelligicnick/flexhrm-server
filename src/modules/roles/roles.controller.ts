@@ -33,8 +33,13 @@ export class RolesController {
     await this.auditLogsService.append({
       username,
       action: 'SAVE_ROLE_MATRIX',
-      target: `Permissions Reconfigured: Updated custom view/edit rule matrix for security role "${cleanName}" (Rules: ${rulesList}).`,
-      details: dto as unknown as Record<string, unknown>,
+      target:
+        `Role Permissions Updated: Security role "${cleanName}" now has the following module access rules — ${rulesList}. ` +
+        `All administrators assigned this role will immediately inherit the updated view/edit permissions.`,
+      details: {
+        ...(dto as unknown as Record<string, unknown>),
+        summary: `Updated permission matrix for role "${cleanName}".`,
+      },
     });
     return { success: true, role: dto };
   }

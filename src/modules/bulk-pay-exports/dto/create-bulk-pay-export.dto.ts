@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsNumber,
@@ -24,6 +25,7 @@ export class CreateBulkPayExportDto {
   @Matches(/^\d{4}$/, { message: 'year must be a four-digit value' })
   year!: string;
 
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   recordCount!: number;
@@ -33,6 +35,7 @@ export class CreateBulkPayExportDto {
   fileBase64!: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   totalAmount?: number;

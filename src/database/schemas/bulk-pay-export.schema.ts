@@ -34,6 +34,9 @@ export class BulkPayExport {
 
   @Prop({ type: [String], default: [] })
   employeeIds!: string[];
+
+  @Prop({ default: 0 })
+  downloadCount!: number;
 }
 
 export const BulkPayExportSchema = SchemaFactory.createForClass(BulkPayExport);

@@ -4,6 +4,7 @@ import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { BulkAttendanceDto, UpsertAttendanceDto } from './dto/attendance.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { summarizeAttendanceBulk } from '../../common/utils/audit-log-format.util';
 
 @Controller('attendance')
 export class AttendanceController {
@@ -31,14 +32,14 @@ export class AttendanceController {
   @Post('bulk')
   @RequirePermissions('attendance', 'edit')
   async bulk(@CurrentUsername() username: string, @Body() dto: BulkAttendanceDto) {
-    const count = await this.attendanceService.bulkUpsert(
-      dto.entries.map((e) => ({ ...e, markedBy: username })),
-    );
+    const entries = dto.entries.map((e) => ({ ...e, markedBy: username }));
+    const count = await this.attendanceService.bulkUpsert(entries);
+    const { summary, details } = summarizeAttendanceBulk(entries);
     await this.auditLogsService.append({
       username,
       action: 'BULK_MARK_ATTENDANCE',
-      target: `Bulk attendance update: ${count} cell(s) marked.`,
-      details: { count },
+      target: summary,
+      details: { ...details, summary },
     });
     return { success: true, count };
   }

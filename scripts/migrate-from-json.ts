@@ -25,6 +25,14 @@ function readJson<T>(filename: string, fallback: T): T {
 async function main(): Promise<void> {
   console.info(`Connecting to MongoDB: ${MONGODB_URI}`);
   console.info(`Reading JSON from: ${SOURCE_DIR}`);
+  const sourceFiles = ['employees-db.json', 'admins-db.json', 'roles-db.json', 'audit-logs-db.json'];
+  for (const file of sourceFiles) {
+    const exists = fs.existsSync(path.join(SOURCE_DIR, file));
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',runId:'post-fix',location:'migrate-from-json.ts:main',message:'Migration source file check',data:{file,exists,sourceDir:SOURCE_DIR},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    console.info(`  ${file}: ${exists ? 'found' : 'missing'}`);
+  }
 
   await mongoose.connect(MONGODB_URI);
   const db = mongoose.connection.db;

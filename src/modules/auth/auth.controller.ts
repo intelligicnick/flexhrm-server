@@ -50,8 +50,13 @@ export class AuthController {
         await this.auditLogsService.append({
           username: dto.username,
           action: 'LOGIN_RESTRICTED',
-          target: `Access Restricted: Disabled administrator account "${dto.username}" attempted login, request blocked by security policy.`,
-          details: { username: dto.username },
+          target:
+            `Login Blocked: Administrator account "${dto.username}" attempted to sign in but access is disabled. ` +
+            `The session was rejected before any HRMS data could be accessed.`,
+          details: {
+            username: dto.username,
+            summary: `Blocked login for disabled account "${dto.username}".`,
+          },
         });
         throw new ForbiddenException(
           'Your administrator account has been restricted. Login is disabled.',
@@ -73,8 +78,14 @@ export class AuthController {
       await this.auditLogsService.append({
         username: admin.username,
         action: 'LOGIN_SUCCESS',
-        target: `Session Started: Administrator "${admin.username}" successfully authenticated with "${admin.role || 'admin'}" privileges.`,
-        details: { role: admin.role || 'admin' },
+        target:
+          `Login Success: Administrator "${admin.username}" signed in with role "${admin.role || 'admin'}". ` +
+          `An authenticated session was created granting module access according to their permission matrix.`,
+        details: {
+          role: admin.role || 'admin',
+          locations: admin.locations || [],
+          summary: `"${admin.username}" logged in successfully.`,
+        },
       });
 
       return {
@@ -89,8 +100,13 @@ export class AuthController {
     await this.auditLogsService.append({
       username: dto.username,
       action: 'LOGIN_FAILURE',
-      target: `Access Warning: Unsuccessful authentication attempt for account "${dto.username}" due to incorrect security credentials.`,
-      details: { username: dto.username },
+      target:
+        `Login Failed: Authentication attempt for account "${dto.username}" was rejected due to an invalid username or password. ` +
+        `No session was created and no HRMS modules were accessed.`,
+      details: {
+        username: dto.username,
+        summary: `Failed login attempt for "${dto.username}".`,
+      },
     });
     throw new UnauthorizedException('Invalid admin username or password details.');
   }
