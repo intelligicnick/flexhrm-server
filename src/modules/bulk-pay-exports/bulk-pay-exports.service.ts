@@ -114,6 +114,7 @@ export class BulkPayExportsService implements OnModuleInit {
 
     const records = await this.bulkPayExportModel
       .find(query)
+      .select('-fileDataBase64')
       .sort({ createdAt: -1 })
       .limit(500)
       .lean()
@@ -135,8 +136,13 @@ export class BulkPayExportsService implements OnModuleInit {
     const storedFilename = buildStoredFilename(id, filename);
     const absolutePath = path.join(this.storageDir, storedFilename);
     const buffer = decodeBase64Payload(dto.fileBase64);
+    const fileDataBase64 = buffer.toString('base64');
 
-    await fs.promises.writeFile(absolutePath, buffer);
+    try {
+      await fs.promises.writeFile(absolutePath, buffer);
+    } catch {
+      // Disk may be read-only or ephemeral on Hostinger — MongoDB payload still enables re-download.
+    }
 
     const record = await this.bulkPayExportModel.create({
       id,
@@ -148,6 +154,7 @@ export class BulkPayExportsService implements OnModuleInit {
       // Store filename only so preview/download survive server redeploys when
       // BULK_PAY_EXPORT_DIR points to persistent storage outside the app folder.
       storedPath: storedFilename,
+      fileDataBase64,
       recordCount: dto.recordCount,
       totalAmount: dto.totalAmount ?? 0,
       employeeIds: dto.employeeIds ?? [],
@@ -182,8 +189,26 @@ export class BulkPayExportsService implements OnModuleInit {
     }
 
     throw new NotFoundException(
-      'Bulk pay export file missing on disk. Re-save the bulk pay file or restore the archive folder on the server.',
+      'Bulk pay export file missing on disk and in database. Re-export bulk pay from the Salary tab.',
     );
+  }
+
+  /** Prefer on-disk copy; fall back to MongoDB payload after Hostinger redeploys. */
+  private async readArchiveBuffer(
+    record: Pick<BulkPayExport, 'id' | 'filename' | 'storedPath' | 'fileDataBase64'>,
+  ): Promise<Buffer> {
+    try {
+      const filePath = await this.resolveStoredFilePath(record);
+      return await fs.promises.readFile(filePath);
+    } catch {
+      const stored = record.fileDataBase64?.trim();
+      if (stored) {
+        return decodeBase64Payload(stored);
+      }
+      throw new NotFoundException(
+        'Bulk pay export file missing on disk. Re-export bulk pay from the Salary tab to regenerate this archive.',
+      );
+    }
   }
 
   async getFileContent(id: string): Promise<{
@@ -195,8 +220,7 @@ export class BulkPayExportsService implements OnModuleInit {
       throw new NotFoundException('Bulk pay export not found.');
     }
 
-    const filePath = await this.resolveStoredFilePath(record);
-    const buffer = await fs.promises.readFile(filePath);
+    const buffer = await this.readArchiveBuffer(record);
     const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
     const filename = buildAxisBulkPayFilename(record.month, record.year, createdAt);
 

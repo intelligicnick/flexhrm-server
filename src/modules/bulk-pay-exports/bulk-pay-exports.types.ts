@@ -1,7 +1,10 @@
 import { BulkPayExport } from '../../database/schemas/bulk-pay-export.schema';
 
-/** API-safe bulk pay record — never exposes server file paths. */
-export type PublicBulkPayExport = Omit<BulkPayExport, 'storedPath'>;
+/** API-safe bulk pay record — never exposes server file paths or file payload. */
+export type PublicBulkPayExport = Omit<
+  BulkPayExport,
+  'storedPath' | 'fileDataBase64'
+>;
 
 /** axis_bulkpay_{Month}_{Year}_{YYYY-MM-DD}.xls — matches Axis bank export naming. */
 export function buildAxisBulkPayFilename(
@@ -17,7 +20,11 @@ export function buildAxisBulkPayFilename(
 export function toPublicBulkPayExport(
   record: BulkPayExport | (BulkPayExport & { storedPath?: string }),
 ): PublicBulkPayExport {
-  const { storedPath: _storedPath, ...rest } = record as BulkPayExport;
+  const {
+    storedPath: _storedPath,
+    fileDataBase64: _fileDataBase64,
+    ...rest
+  } = record as BulkPayExport;
   const createdAt = rest.createdAt ? new Date(rest.createdAt) : new Date();
   return {
     ...rest,

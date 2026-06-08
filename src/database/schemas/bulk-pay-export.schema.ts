@@ -26,6 +26,10 @@ export class BulkPayExport {
   @Prop({ required: true })
   storedPath!: string;
 
+  /** Base64 workbook payload — survives Hostinger redeploys when disk storage is ephemeral. */
+  @Prop()
+  fileDataBase64?: string;
+
   @Prop({ required: true })
   recordCount!: number;
 
