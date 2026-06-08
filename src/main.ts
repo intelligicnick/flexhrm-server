@@ -45,11 +45,7 @@ async function bootstrap(): Promise<void> {
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      if (isAllowedCorsOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked origin: ${origin}`));
-      }
+      callback(null, isAllowedCorsOrigin(origin));
     },
     credentials: true,
   });
