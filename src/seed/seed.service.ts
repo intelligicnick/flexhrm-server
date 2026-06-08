@@ -1,0 +1,73 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { DEFAULT_ROLES } from '../common/constants/permissions.constants';
+import { hashPassword } from '../common/utils/password.util';
+import { AdminsService } from '../modules/admins/admins.service';
+import { RolesService } from '../modules/roles/roles.service';
+import { EmployeesService } from '../modules/employees/employees.service';
+import { LocationsService } from '../modules/locations/locations.service';
+import { JobRolesService } from '../modules/job-roles/job-roles.service';
+
+@Injectable()
+export class SeedService implements OnModuleInit {
+  private readonly logger = new Logger(SeedService.name);
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly adminsService: AdminsService,
+    private readonly rolesService: RolesService,
+    private readonly employeesService: EmployeesService,
+    private readonly locationsService: LocationsService,
+    private readonly jobRolesService: JobRolesService,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (this.configService.get<boolean>('seedOnStartup') === false) return;
+
+    const roleCount = await this.rolesService.count();
+    if (roleCount === 0) {
+      await this.rolesService.replaceAll([...DEFAULT_ROLES]);
+      this.logger.log('Seeded default roles');
+    }
+
+    const adminCount = await this.adminsService.count();
+    if (adminCount === 0) {
+      const password = this.configService.get<string>('defaultAdminPassword') ?? 'admin123';
+      await this.adminsService.create({
+        username: 'admin',
+        password: hashPassword(password),
+        invitedBy: 'System',
+        role: 'admin',
+        locations: [],
+        disabled: false,
+        createdAt: new Date().toISOString(),
+      });
+      this.logger.warn(
+        'Seeded default admin account (username: admin). Change password after first login.',
+      );
+    }
+
+    await this.syncMasterDataFromEmployees();
+  }
+
+  private async syncMasterDataFromEmployees(): Promise<void> {
+    const employees = await this.employeesService.findAll();
+    const locations = [
+      ...new Set(
+        employees
+          .map((e: Record<string, unknown>) => String(e.location || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    const roles = [
+      ...new Set(
+        employees
+          .map((e: Record<string, unknown>) => String(e.role || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (locations.length) await this.locationsService.syncFromEmployees(locations);
+    for (const role of roles) await this.jobRolesService.upsert(role);
+  }
+}

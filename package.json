@@ -1,0 +1,39 @@
+{
+  "name": "flex-hrm-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flex HRM — NestJS API with MongoDB",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/write-hostinger-entry.cjs",
+    "start": "node dist/main",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",
+    "migrate:json": "tsx scripts/migrate-from-json.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.12",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.0.12",
+    "@nestjs/mongoose": "^11.0.3",
+    "@nestjs/platform-express": "^11.0.12",
+    "@nestjs/throttler": "^6.4.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "compression": "^1.8.0",
+    "dotenv": "^17.2.3",
+    "helmet": "^8.1.0",
+    "mongoose": "^8.13.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "typescript": "~5.8.2",
+    "@types/compression": "^1.7.5",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.14.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.6",
+    "@nestjs/schematics": "^11.0.3",
+    "tsx": "^4.21.0"
+  }
+}

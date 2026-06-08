@@ -1,0 +1,88 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Admin, AdminDocument } from '../../database/schemas/admin.schema';
+
+@Injectable()
+export class AdminsService {
+  constructor(
+    @InjectModel(Admin.name) private readonly adminModel: Model<AdminDocument>,
+  ) {}
+
+  async findAllSafe(): Promise<Omit<Admin, 'password'>[]> {
+    const admins = await this.adminModel.find().lean().exec();
+    return admins.map(({ password: _p, ...rest }) => rest);
+  }
+
+  async findByUsername(username: string): Promise<AdminDocument | null> {
+    return this.adminModel
+      .findOne({
+        username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      })
+      .select('+password +passwordResetToken')
+      .exec();
+  }
+
+  async findProfile(username: string): Promise<Omit<Admin, 'password'> | null> {
+    const admin = await this.adminModel
+      .findOne({
+        username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      })
+      .lean()
+      .exec();
+    if (!admin) return null;
+    const { password: _p, ...rest } = admin;
+    return rest;
+  }
+
+  async create(data: Partial<Admin>): Promise<void> {
+    await this.adminModel.create({
+      ...data,
+      username: data.username!.trim(),
+      locations: data.locations ?? [],
+      disabled: data.disabled ?? false,
+      createdAt: data.createdAt ?? new Date().toISOString(),
+    });
+  }
+
+  async update(username: string, patch: Partial<Admin>): Promise<AdminDocument | null> {
+    return this.adminModel
+      .findOneAndUpdate(
+        {
+          username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        },
+        { $set: patch },
+        { new: true },
+      )
+      .select('+password')
+      .exec();
+  }
+
+  async replaceAll(admins: Partial<Admin>[]): Promise<void> {
+    await this.adminModel.deleteMany({});
+    if (admins.length) {
+      await this.adminModel.insertMany(admins);
+    }
+  }
+
+  async count(): Promise<number> {
+    return this.adminModel.countDocuments();
+  }
+
+  async ensureExists(username: string): Promise<AdminDocument> {
+    const admin = await this.findByUsername(username);
+    if (!admin) throw new NotFoundException('Administrator account not found.');
+    return admin;
+  }
+
+  async clearPasswordReset(username: string): Promise<void> {
+    await this.adminModel
+      .findOneAndUpdate(
+        {
+          username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        },
+        { $unset: { passwordResetToken: '', passwordResetExpires: '' } },
+      )
+      .exec();
+  }
+}
