@@ -13,7 +13,27 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(ConfigService);
   const port = config.get<number>('port') ?? 3001;
+  const nodeEnv = config.get<string>('nodeEnv') ?? 'development';
   const corsOrigins = config.get<string[]>('corsOrigins') ?? [];
+  const isProduction = nodeEnv === 'production';
+
+  function isAllowedCorsOrigin(origin: string | undefined): boolean {
+    if (!origin) return true;
+    if (corsOrigins.includes(origin)) return true;
+    try {
+      const { hostname } = new URL(origin);
+      if (hostname.endsWith('.hostingersite.com')) return true;
+    } catch {
+      return false;
+    }
+    if (!isProduction) {
+      return (
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:')
+      );
+    }
+    return false;
+  }
 
   app.setGlobalPrefix('api');
   app.use(json({ limit: '50mb' }));
@@ -21,7 +41,16 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.use(compression());
   app.enableCors({
-    origin: corsOrigins,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      if (isAllowedCorsOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked origin: ${origin}`));
+      }
+    },
     credentials: true,
   });
 
