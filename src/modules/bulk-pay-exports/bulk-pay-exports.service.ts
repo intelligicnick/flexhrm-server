@@ -69,6 +69,19 @@ function validateBulkPayXlsBuffer(buffer: Buffer): void {
   }
 }
 
+function buildStoredFilename(id: string, filename: string): string {
+  return `${id}_${filename}`;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(filePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class BulkPayExportsService implements OnModuleInit {
   private storageDir!: string;
@@ -119,11 +132,11 @@ export class BulkPayExportsService implements OnModuleInit {
     const year = dto.year.trim();
     const filename = buildAxisBulkPayFilename(month, year, createdAt);
 
-    const storedFilename = `${id}_${filename}`;
-    const storedPath = path.join(this.storageDir, storedFilename);
+    const storedFilename = buildStoredFilename(id, filename);
+    const absolutePath = path.join(this.storageDir, storedFilename);
     const buffer = decodeBase64Payload(dto.fileBase64);
 
-    await fs.promises.writeFile(storedPath, buffer);
+    await fs.promises.writeFile(absolutePath, buffer);
 
     const record = await this.bulkPayExportModel.create({
       id,
@@ -132,13 +145,45 @@ export class BulkPayExportsService implements OnModuleInit {
       month,
       year,
       filename,
-      storedPath,
+      // Store filename only so preview/download survive server redeploys when
+      // BULK_PAY_EXPORT_DIR points to persistent storage outside the app folder.
+      storedPath: storedFilename,
       recordCount: dto.recordCount,
       totalAmount: dto.totalAmount ?? 0,
       employeeIds: dto.employeeIds ?? [],
     });
 
     return toPublicBulkPayExport(record.toObject());
+  }
+
+  /** Resolve on-disk path after deploys (absolute paths from another host/dir). */
+  private async resolveStoredFilePath(
+    record: Pick<BulkPayExport, 'id' | 'filename' | 'storedPath'>,
+  ): Promise<string> {
+    const candidates = new Set<string>();
+    const stored = record.storedPath?.trim() ?? '';
+
+    if (stored) {
+      candidates.add(stored);
+      if (!path.isAbsolute(stored)) {
+        candidates.add(path.join(this.storageDir, stored));
+      }
+      candidates.add(path.join(this.storageDir, path.basename(stored)));
+    }
+
+    candidates.add(
+      path.join(this.storageDir, buildStoredFilename(record.id, record.filename)),
+    );
+
+    for (const candidate of candidates) {
+      if (await fileExists(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new NotFoundException(
+      'Bulk pay export file missing on disk. Re-save the bulk pay file or restore the archive folder on the server.',
+    );
   }
 
   async getFileContent(id: string): Promise<{
@@ -150,14 +195,20 @@ export class BulkPayExportsService implements OnModuleInit {
       throw new NotFoundException('Bulk pay export not found.');
     }
 
-    try {
-      const buffer = await fs.promises.readFile(record.storedPath);
-      const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
-      const filename = buildAxisBulkPayFilename(record.month, record.year, createdAt);
-      return { filename, buffer };
-    } catch {
-      throw new NotFoundException('Bulk pay export file missing on disk.');
+    const filePath = await this.resolveStoredFilePath(record);
+    const buffer = await fs.promises.readFile(filePath);
+    const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
+    const filename = buildAxisBulkPayFilename(record.month, record.year, createdAt);
+
+    const preferredStored = buildStoredFilename(record.id, record.filename);
+    if (record.storedPath !== preferredStored) {
+      await this.bulkPayExportModel
+        .updateOne({ id }, { $set: { storedPath: preferredStored } })
+        .exec()
+        .catch(() => undefined);
     }
+
+    return { filename, buffer };
   }
 
   async getFileForDownload(id: string): Promise<{
@@ -187,7 +238,8 @@ export class BulkPayExportsService implements OnModuleInit {
 
     await this.bulkPayExportModel.deleteOne({ id });
     try {
-      await fs.promises.unlink(record.storedPath);
+      const filePath = await this.resolveStoredFilePath(record);
+      await fs.promises.unlink(filePath);
     } catch {
       // File already removed — metadata cleanup is enough.
     }
