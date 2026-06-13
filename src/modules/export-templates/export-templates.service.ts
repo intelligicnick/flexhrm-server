@@ -24,6 +24,7 @@ export class ExportTemplatesService {
     type: 'report' | 'salary';
     name: string;
     columns: string[];
+    filters?: Record<string, unknown>;
   }): Promise<ExportTemplate> {
     const result = await this.templateModel
       .findOneAndUpdate(

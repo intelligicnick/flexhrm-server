@@ -27,6 +27,15 @@ import {
   BulkPayExportSchema,
 } from './schemas/bulk-pay-export.schema';
 import { AppMeta, AppMetaSchema } from './schemas/app-meta.schema';
+import { SchoolWork, SchoolWorkSchema } from './schemas/school-work.schema';
+import {
+  EmployeeChangeRequest,
+  EmployeeChangeRequestSchema,
+} from './schemas/employee-change-request.schema';
+import {
+  EmployeeDocument,
+  EmployeeDocumentSchema,
+} from './schemas/employee-document.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -42,6 +51,9 @@ const MODELS = [
   { name: ExportTemplate.name, schema: ExportTemplateSchema },
   { name: BulkPayExport.name, schema: BulkPayExportSchema },
   { name: AppMeta.name, schema: AppMetaSchema },
+  { name: SchoolWork.name, schema: SchoolWorkSchema },
+  { name: EmployeeChangeRequest.name, schema: EmployeeChangeRequestSchema },
+  { name: EmployeeDocument.name, schema: EmployeeDocumentSchema },
 ];
 
 @Module({
@@ -52,12 +64,6 @@ const MODELS = [
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const uri = config.get<string>('mongodbUri') ?? '';
-        // #region agent log
-        try {
-          const parsed = new URL(uri.replace('mongodb+srv://', 'https://').replace('mongodb://', 'http://'));
-          fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'database.module.ts:useFactory',message:'MongoDB URI resolved',data:{hostname:parsed.hostname,pathname:parsed.pathname,hasSrv:uri.includes('mongodb+srv')},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-        } catch { /* ignore parse errors */ }
-        // #endregion
         return { uri };
       },
     }),

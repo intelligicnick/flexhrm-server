@@ -16,6 +16,9 @@ export class ExportTemplate {
 
   @Prop({ type: [String], default: [] })
   columns!: string[];
+
+  @Prop({ type: Object, default: {} })
+  filters!: Record<string, unknown>;
 }
 
 export const ExportTemplateSchema = SchemaFactory.createForClass(ExportTemplate);

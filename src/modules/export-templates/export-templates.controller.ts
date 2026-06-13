@@ -26,6 +26,7 @@ export class ExportTemplatesController {
       type: dto.type,
       name: dto.name,
       columns: dto.columns,
+      filters: dto.filters,
     });
   }
 

@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -28,6 +29,10 @@ export class InviteAdminDto {
   @IsArray()
   @IsString({ each: true })
   locations?: string[];
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 }
 
 export class UpdateAdminDto {
@@ -47,6 +52,16 @@ export class UpdateAdminDto {
   @IsOptional()
   @IsBoolean()
   disabled?: boolean;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+}
+
+export class UpdateProfileDto {
+  @IsEmail()
+  @IsNotEmpty()
+  email!: string;
 }
 
 export class ChangePasswordDto {

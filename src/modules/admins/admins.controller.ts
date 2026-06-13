@@ -9,7 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { AdminsService } from './admins.service';
-import { InviteAdminDto, UpdateAdminDto, ChangePasswordDto } from './dto/admin.dto';
+import { InviteAdminDto, UpdateAdminDto, ChangePasswordDto, UpdateProfileDto } from './dto/admin.dto';
 import {
   RequirePermissions,
 } from '../../common/decorators/auth.decorators';
@@ -58,6 +58,7 @@ export class AdminsController {
       invitedBy: dto.invitedBy || actor || 'System',
       role: dto.role || '',
       locations: dto.locations ?? [],
+      email: dto.email?.trim().toLowerCase(),
       disabled: false,
       createdAt: new Date().toISOString(),
     });
@@ -94,6 +95,7 @@ export class AdminsController {
     if (dto.role !== undefined) patch.role = dto.role;
     if (dto.locations !== undefined) patch.locations = dto.locations;
     if (dto.disabled !== undefined) patch.disabled = dto.disabled;
+    if (dto.email !== undefined) patch.email = dto.email.trim().toLowerCase();
 
     const updated = await this.adminsService.update(dto.username, patch);
     const changedFields: string[] = [];
@@ -150,9 +152,36 @@ export class AdminsController {
       role: profile.role || 'admin',
       locations: profile.locations || [],
       disabled: !!profile.disabled,
+      email: profile.email || '',
       createdAt: profile.createdAt || new Date().toISOString(),
       invitedBy: profile.invitedBy || 'System',
     };
+  }
+
+  @Post('update-profile')
+  async updateProfile(
+    @CurrentUser() user: AdminSessionPayload,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const email = dto.email.trim().toLowerCase();
+    const existingWithEmail = await this.adminsService.findByEmail(email);
+    if (
+      existingWithEmail &&
+      existingWithEmail.username.toLowerCase() !== user.username.toLowerCase()
+    ) {
+      throw new BadRequestException('This email is already registered to another administrator.');
+    }
+
+    await this.adminsService.update(user.username, { email });
+
+    await this.auditLogsService.append({
+      username: user.username,
+      action: 'UPDATE_ADMIN_PROFILE',
+      target: `Profile Updated: Recovery email set for administrator "${user.username}".`,
+      details: { email },
+    });
+
+    return { success: true, email };
   }
 
   @Post('change-password')

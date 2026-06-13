@@ -22,6 +22,7 @@ import {
 } from '../../common/utils/password.util';
 import { AdminsService } from '../admins/admins.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { EmailService } from '../email/email.service';
 import { RolesService } from '../roles/roles.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { LoginDto } from './dto/login.dto';
@@ -36,6 +37,7 @@ export class AuthController {
     private readonly auditLogsService: AuditLogsService,
     private readonly rolesService: RolesService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
   ) {}
 
   @Public()
@@ -116,14 +118,14 @@ export class AuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 900000 } })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    const username = dto.username.trim();
-    const admin = await this.adminsService.findByUsername(username);
+    const identifier = dto.username.trim();
+    const admin = await this.adminsService.findByUsernameOrEmail(identifier);
 
     if (!admin || admin.disabled) {
       return {
         success: true,
         message:
-          'If an account with that username exists, a reset code has been generated. Check the code shown below or contact your system administrator.',
+          'If an account with that username or email exists, a reset code has been sent to the registered email address.',
       };
     }
 
@@ -142,12 +144,37 @@ export class AuthController {
       details: { username: admin.username },
     });
 
-    return {
+    const response: Record<string, unknown> = {
       success: true,
-      message: 'Use the reset code below to set a new password. The code expires in 15 minutes.',
-      resetToken: resetCode,
       username: admin.username,
     };
+
+    if (admin.email && this.emailService.isConfigured()) {
+      const sent = await this.emailService.sendPasswordResetCode(
+        admin.email,
+        admin.username,
+        resetCode,
+      );
+      if (sent) {
+        response.message =
+          'A reset code has been sent to your registered email address. It expires in 15 minutes.';
+        return response;
+      }
+    }
+
+    if (admin.email && !this.emailService.isConfigured()) {
+      response.message =
+        'Your account has a recovery email on file, but email delivery is not configured on this server. Use the reset code shown below. Ask your system administrator to configure SMTP for email delivery.';
+    } else if (!admin.email) {
+      response.message =
+        'No recovery email is registered for this account. Add your email in My Info after signing in, or use the reset code shown below.';
+    } else {
+      response.message =
+        'Use the reset code below to set a new password. The code expires in 15 minutes.';
+    }
+
+    response.resetToken = resetCode;
+    return response;
   }
 
   @Public()

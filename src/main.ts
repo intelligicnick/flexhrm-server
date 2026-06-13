@@ -61,13 +61,6 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   await app.listen(port, '0.0.0.0');
-  const mongodbUri = config.get<string>('mongodbUri') ?? '';
-  // #region agent log
-  try {
-    const parsed = new URL(mongodbUri.replace('mongodb+srv://', 'https://').replace('mongodb://', 'http://'));
-    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'main.ts:bootstrap',message:'Backend started',data:{port,hostname:parsed.hostname,dbName:parsed.pathname.replace(/^\//,'')},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-  } catch { /* ignore */ }
-  // #endregion
   console.log(`Flex HRM API running on http://0.0.0.0:${port}/api [mongodb]`);
 }
 

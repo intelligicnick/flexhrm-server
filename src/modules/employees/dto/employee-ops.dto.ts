@@ -1,8 +1,21 @@
-import { IsArray, IsNotEmpty, IsString } from 'class-validator';
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class BulkDeleteDto {
   @IsArray()
   ids!: string[];
+}
+
+export class BulkMarkExitDto {
+  @IsArray()
+  ids!: string[];
+
+  @IsString()
+  @IsNotEmpty()
+  exitDate!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  exitReason!: string;
 }
 
 export class RenameLocationDto {
@@ -38,6 +51,39 @@ export class DeleteLocationsDto {
 }
 
 export class PayrollLedgerBulkDto {
+  @IsString()
+  @IsNotEmpty()
+  monthKey!: string;
+
   @IsArray()
   updates!: Record<string, unknown>[];
+}
+
+export class EmployeeChangeUpdateDto {
+  @IsString()
+  @IsNotEmpty()
+  employeeId!: string;
+
+  @IsNotEmpty()
+  changes!: Record<string, unknown>;
+}
+
+export class BulkApplyEmployeeChangesDto {
+  @IsArray()
+  updates!: EmployeeChangeUpdateDto[];
+}
+
+export class SubmitEmployeeChangesDto {
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsArray()
+  updates!: EmployeeChangeUpdateDto[];
+}
+
+export class ReviewEmployeeChangesDto {
+  @IsOptional()
+  @IsString()
+  reviewNotes?: string;
 }

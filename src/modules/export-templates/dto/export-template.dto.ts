@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsNotEmpty, IsString } from 'class-validator';
+import { IsArray, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class UpsertExportTemplateDto {
   @IsIn(['report', 'salary'])
@@ -11,4 +11,8 @@ export class UpsertExportTemplateDto {
   @IsArray()
   @IsString({ each: true })
   columns!: string[];
+
+  @IsOptional()
+  @IsObject()
+  filters?: Record<string, unknown>;
 }

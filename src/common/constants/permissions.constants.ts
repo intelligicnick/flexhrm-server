@@ -1,5 +1,6 @@
 export const PERMISSION_MODULES = [
   'employees',
+  'schoolWork',
   'salary',
   'ledger',
   'attendance',
@@ -32,6 +33,7 @@ export const DEFAULT_ROLES = [
       'Can view and edit employees, attendance, and leaves; can only view salary and ledgers.',
     permissions: {
       employees: { view: true, edit: true },
+      schoolWork: { view: true, edit: true },
       salary: { view: true, edit: false },
       ledger: { view: true, edit: false },
       attendance: { view: true, edit: true },
@@ -46,6 +48,7 @@ export const DEFAULT_ROLES = [
     description: 'Read-only access across all HRMS categories.',
     permissions: {
       employees: { view: true, edit: false },
+      schoolWork: { view: true, edit: false },
       salary: { view: true, edit: false },
       ledger: { view: true, edit: false },
       attendance: { view: true, edit: false },

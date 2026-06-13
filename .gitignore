@@ -35,3 +35,9 @@ Thumbs.db
 # Archived Axis Bulk Pay Excel files (generated at runtime)
 data/bulk-pay-exports/*
 !data/bulk-pay-exports/.gitkeep
+
+# Employee uploads (photos, documents, ID cards — generated at runtime)
+data/employee-assets/
+
+# Python cache
+scripts/__pycache__/

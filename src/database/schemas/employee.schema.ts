@@ -85,6 +85,9 @@ export class Employee {
   @Prop({ default: '' })
   exitDate!: string;
 
+  @Prop({ default: '' })
+  exitReason!: string;
+
   @Prop({ default: false })
   complianceEnabled!: boolean;
 
@@ -204,6 +207,21 @@ export class Employee {
 
   @Prop({ enum: ['active', 'exited'], default: 'active' })
   status!: string;
+
+  @Prop({ default: '' })
+  photo!: string;
+
+  @Prop({ default: '' })
+  photoDataBase64!: string;
+
+  @Prop({ default: '' })
+  idCard!: string;
+
+  @Prop({ default: '' })
+  idCardDataBase64!: string;
+
+  @Prop({ default: '' })
+  idCardGeneratedAt!: string;
 }
 
 export const EmployeeSchema = SchemaFactory.createForClass(Employee);

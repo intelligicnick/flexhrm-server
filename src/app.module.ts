@@ -9,6 +9,7 @@ import { RolesModule } from './modules/roles/roles.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AdminsModule } from './modules/admins/admins.module';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { SchoolWorksModule } from './modules/school-works/school-works.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { JobRolesModule } from './modules/job-roles/job-roles.module';
@@ -28,6 +29,7 @@ import { SeedModule } from './seed/seed.module';
     AuthModule,
     AdminsModule,
     EmployeesModule,
+    SchoolWorksModule,
     AuditLogsModule,
     LocationsModule,
     JobRolesModule,

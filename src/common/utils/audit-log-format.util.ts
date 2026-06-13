@@ -19,7 +19,15 @@ export function summarizeEmployeeChanges(
   previous: Record<string, unknown>,
   updated: Record<string, unknown>,
 ): string[] {
-  const skip = new Set(['id', 'employeeCode', 'srNo']);
+  const skip = new Set([
+    'id',
+    'employeeCode',
+    'srNo',
+    'photo',
+    'photoDataBase64',
+    'idCard',
+    'idCardDataBase64',
+  ]);
   const changed: string[] = [];
   const keys = new Set([...Object.keys(previous), ...Object.keys(updated)]);
 

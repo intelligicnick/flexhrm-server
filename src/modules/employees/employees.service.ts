@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
+import { Employee, EmployeeDocument, LedgerEntry } from '../../database/schemas/employee.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import {
   getBirthdayAge,
@@ -9,12 +9,35 @@ import {
   MONTH_NAME_LIST,
   parseDateOfBirth,
 } from '../../common/utils/date-of-birth.util';
+import {
+  composeIdCardNumber,
+  isValidStoredIdCardNumber,
+} from '../../common/utils/id-card-number.util';
+import {
+  EmployeeAssetRecord,
+  EmployeeAssetsService,
+} from './employee-assets.service';
+import { EmployeeDocumentsService } from './employee-documents.service';
+
+const INTERNAL_ASSET_FIELDS = ['photoDataBase64', 'idCardDataBase64'] as const;
+
+const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
+  'id',
+  'srNo',
+  'photo',
+  'photoDataBase64',
+  'idCard',
+  'idCardDataBase64',
+  'monthlyLedger',
+]);
 
 @Injectable()
 export class EmployeesService {
   constructor(
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<EmployeeDocument>,
+    private readonly employeeAssetsService: EmployeeAssetsService,
+    private readonly employeeDocumentsService: EmployeeDocumentsService,
   ) {}
 
   private applyLocationScope(
@@ -42,15 +65,77 @@ export class EmployeesService {
       string,
       unknown
     >;
+    for (const key of INTERNAL_ASSET_FIELDS) {
+      delete rest[key];
+    }
     return rest;
+  }
+
+  private toAssetRecord(data: Record<string, unknown>): EmployeeAssetRecord {
+    return {
+      id: String(data.id || data.employeeCode || ''),
+      employeeCode: String(data.employeeCode || data.id || ''),
+      nameAsPerAadhar: String(data.nameAsPerAadhar || ''),
+      dateOfBirth: String(data.dateOfBirth || ''),
+      role: String(data.role || ''),
+      location: String(data.location || ''),
+      employeeMobile: String(data.employeeMobile || ''),
+      pfJoiningDate: String(data.pfJoiningDate || ''),
+      photo: String(data.photo || ''),
+      photoDataBase64: String(data.photoDataBase64 || ''),
+      customFields: Array.isArray(data.customFields)
+        ? (data.customFields as Array<{ name: string; value: string }>)
+        : undefined,
+    };
+  }
+
+  private async processEmployeeAssets(
+    employeeId: string,
+    raw: Record<string, unknown>,
+    existing?: Record<string, unknown> | null,
+  ): Promise<Record<string, unknown>> {
+    const processed = { ...raw };
+    const previous = existing ?? null;
+
+    if (this.employeeAssetsService.isPhotoUploadPayload(processed.photo)) {
+      const savedPhoto = await this.employeeAssetsService.savePhoto(
+        employeeId,
+        String(processed.photo),
+      );
+      processed.photo = savedPhoto.photo;
+      processed.photoDataBase64 = savedPhoto.photoDataBase64;
+    } else if (previous?.photo && processed.photo === undefined) {
+      processed.photo = previous.photo;
+      processed.photoDataBase64 = previous.photoDataBase64;
+    } else if (typeof processed.photo === 'string' && !processed.photo.trim()) {
+      processed.photo = '';
+      processed.photoDataBase64 = '';
+    } else if (previous && processed.photo === previous.photo) {
+      processed.photoDataBase64 = previous.photoDataBase64;
+    }
+
+    return processed;
+  }
+
+  async getPhotoContent(id: string): Promise<{ buffer: Buffer; contentType: string }> {
+    const emp = await this.ensureExists(id);
+    const buffer = await this.employeeAssetsService.readPhotoBuffer(
+      this.toAssetRecord(emp),
+    );
+    if (!buffer) {
+      throw new NotFoundException('Employee photo not found.');
+    }
+    return {
+      buffer,
+      contentType: this.employeeAssetsService.getPhotoContentType(
+        String(emp.photo || `${id}.jpg`),
+      ),
+    };
   }
 
   async findAll(session?: AdminSessionPayload): Promise<Record<string, unknown>[]> {
     const filter = this.applyLocationScope({}, session);
     const docs = await this.employeeModel.find(filter).sort({ srNo: 1 }).exec();
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2742dd'},body:JSON.stringify({sessionId:'2742dd',location:'employees.service.ts:findAll',message:'Employee query result',data:{count:docs.length,hasSession:!!session,sessionRole:session?.role??null},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     return docs.map((d) => this.toPlain(d));
   }
 
@@ -73,7 +158,7 @@ export class EmployeesService {
     const count = await this.count();
     const employeeCode = String(raw.employeeCode || raw.id || '').trim();
     const id = String(raw.id || employeeCode);
-    const processed = {
+    let processed: Record<string, unknown> = {
       ...raw,
       id,
       employeeCode,
@@ -82,6 +167,7 @@ export class EmployeesService {
       basicSalary: Number(raw.basicSalary) || 0,
       monthlyLedger: raw.monthlyLedger || {},
     };
+    processed = await this.processEmployeeAssets(id, processed);
     const doc = await this.employeeModel.create(processed);
     return this.toPlain(doc);
   }
@@ -93,13 +179,24 @@ export class EmployeesService {
     const existing = await this.employeeModel.findOne({ id }).exec();
     if (!existing) return null;
 
-    const merged = {
-      ...existing.toObject(),
+    let merged: Record<string, unknown> = {
+      ...(existing.toObject() as unknown as Record<string, unknown>),
       ...updates,
       id: String(updates.id || updates.employeeCode || id),
       grossSalary: Number(updates.grossSalary ?? existing.grossSalary) || 0,
       basicSalary: Number(updates.basicSalary ?? existing.basicSalary) || 0,
     };
+
+    merged = await this.processEmployeeAssets(
+      id,
+      merged,
+      existing.toObject() as unknown as Record<string, unknown>,
+    );
+
+    if (updates.exitDate !== undefined) {
+      merged.status =
+        updates.exitDate && String(updates.exitDate).trim() ? 'exited' : 'active';
+    }
 
     const doc = await this.employeeModel
       .findOneAndUpdate({ id }, { $set: merged }, { new: true })
@@ -110,6 +207,17 @@ export class EmployeesService {
   async deleteByIds(ids: string[]): Promise<{ count: number; deleted: Record<string, unknown>[] }> {
     const deletedDocs = await this.employeeModel.find({ id: { $in: ids } }).exec();
     const deleted = deletedDocs.map((d) => this.toPlain(d));
+    await Promise.all(
+      deletedDocs.map((doc) =>
+        (async () => {
+          const record = this.toAssetRecord(
+            doc.toObject() as unknown as Record<string, unknown>,
+          );
+          await this.employeeAssetsService.deletePhoto(record);
+          await this.employeeDocumentsService.deleteAllForEmployee(doc.id);
+        })(),
+      ),
+    );
     const result = await this.employeeModel.deleteMany({ id: { $in: ids } });
     const remaining = await this.employeeModel.find().sort({ srNo: 1 }).exec();
     for (let i = 0; i < remaining.length; i++) {
@@ -117,6 +225,34 @@ export class EmployeesService {
       await remaining[i].save();
     }
     return { count: result.deletedCount ?? 0, deleted };
+  }
+
+  async markExitByIds(
+    ids: string[],
+    exitDate: string,
+    exitReason: string,
+  ): Promise<{ count: number; updated: Record<string, unknown>[] }> {
+    const trimmedDate = exitDate.trim();
+    const trimmedReason = exitReason.trim();
+    if (!trimmedDate || !trimmedReason) {
+      return { count: 0, updated: [] };
+    }
+
+    const docs = await this.employeeModel.find({ id: { $in: ids } }).exec();
+    if (docs.length === 0) {
+      return { count: 0, updated: [] };
+    }
+
+    await this.employeeModel.updateMany(
+      { id: { $in: ids } },
+      { $set: { exitDate: trimmedDate, exitReason: trimmedReason, status: 'exited' } },
+    );
+
+    const updatedDocs = await this.employeeModel.find({ id: { $in: ids } }).exec();
+    return {
+      count: updatedDocs.length,
+      updated: updatedDocs.map((d) => this.toPlain(d)),
+    };
   }
 
   async bulkInsert(
@@ -139,18 +275,77 @@ export class EmployeesService {
         continue;
       }
       srNo++;
-      await this.employeeModel.create({
+      const employeeId = code;
+      let processed: Record<string, unknown> = {
         ...raw,
-        id: code,
+        id: employeeId,
         employeeCode: code,
         srNo,
         grossSalary: Number(raw.grossSalary) || 0,
         basicSalary: Number(raw.basicSalary) || 0,
         monthlyLedger: raw.monthlyLedger || {},
-      });
+      };
+      processed = await this.processEmployeeAssets(employeeId, processed);
+      await this.employeeModel.create(processed);
       added++;
     }
     return { added, skipped, skippedCodes };
+  }
+
+  async bulkApplyUpdates(
+    updates: Array<{ employeeId: string; changes: Record<string, unknown> }>,
+  ): Promise<{ applied: number; employeeCount: number; fieldChangeCount: number }> {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new BadRequestException('At least one employee update is required.');
+    }
+
+    let applied = 0;
+    let fieldChangeCount = 0;
+
+    for (const item of updates) {
+      const employeeId = String(item.employeeId || '').trim();
+      if (!employeeId) {
+        throw new BadRequestException('Each update must include an employeeId.');
+      }
+
+      const existing = await this.findById(employeeId);
+      if (!existing) {
+        throw new NotFoundException(`Employee not found: ${employeeId}`);
+      }
+
+      const delta: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(item.changes || {})) {
+        if (BULK_UPDATE_IMMUTABLE_FIELDS.has(key)) continue;
+        const before = existing[key];
+        if (JSON.stringify(before) !== JSON.stringify(value)) {
+          delta[key] = value;
+        }
+      }
+
+      if (Object.keys(delta).length === 0) continue;
+
+      if (delta.employeeCode && delta.employeeCode !== employeeId) {
+        if (
+          await this.existsByCode(String(delta.employeeCode), employeeId)
+        ) {
+          throw new BadRequestException(
+            `Employee code ${delta.employeeCode} is already used by another record.`,
+          );
+        }
+      }
+
+      const updated = await this.update(employeeId, delta);
+      if (updated) {
+        applied++;
+        fieldChangeCount += Object.keys(delta).length;
+      }
+    }
+
+    if (applied === 0) {
+      throw new BadRequestException('No field changes detected in the submitted batch.');
+    }
+
+    return { applied, employeeCount: applied, fieldChangeCount };
   }
 
   async renameLocation(oldLocation: string, newLocation: string): Promise<number> {
@@ -214,23 +409,53 @@ export class EmployeesService {
   }
 
   async updatePayrollLedger(
+    monthKey: string,
     updates: Array<Record<string, unknown>>,
   ): Promise<number> {
+    const ledgerFields = [
+      'advance',
+      'penalty',
+      'uniform',
+      'foodPerk',
+      'accommodationPerk',
+      'conveyancePerk',
+      'paymentStatus',
+    ] as const;
+
     let count = 0;
     for (const upd of updates) {
-      const existing = await this.employeeModel.findOne({ id: String(upd.id) }).exec();
+      const id = String(upd.id ?? '');
+      if (!id) continue;
+
+      const existing = await this.employeeModel.findOne({ id }).exec();
       if (!existing) continue;
-      const patch: Record<string, unknown> = {};
-      for (const key of [
-        'advance',
-        'penalty',
-        'foodPerk',
-        'accommodationPerk',
-        'conveyancePerk',
-      ]) {
-        if (upd[key] !== undefined) patch[key] = Number(upd[key]);
+
+      const monthlyLedger: Record<string, LedgerEntry> = {
+        ...(existing.monthlyLedger ?? {}),
+      };
+      const existingEntry = monthlyLedger[monthKey];
+      const monthEntry: LedgerEntry = {
+        advance: existingEntry?.advance ?? 0,
+        penalty: existingEntry?.penalty ?? 0,
+        uniform: existingEntry?.uniform ?? 0,
+        foodPerk: existingEntry?.foodPerk ?? 0,
+        accommodationPerk: existingEntry?.accommodationPerk ?? 0,
+        conveyancePerk: existingEntry?.conveyancePerk ?? 0,
+        penaltyReason: existingEntry?.penaltyReason ?? '',
+        paymentStatus: existingEntry?.paymentStatus ?? 'Unpaid',
+      };
+
+      for (const key of ledgerFields) {
+        if (upd[key] === undefined) continue;
+        if (key === 'paymentStatus') {
+          monthEntry.paymentStatus = String(upd[key]);
+        } else {
+          monthEntry[key] = Number(upd[key]);
+        }
       }
-      await this.employeeModel.updateOne({ id: String(upd.id) }, { $set: patch });
+
+      monthlyLedger[monthKey] = monthEntry;
+      await this.employeeModel.updateOne({ id }, { $set: { monthlyLedger } });
       count++;
     }
     return count;
@@ -257,6 +482,45 @@ export class EmployeesService {
     const emp = await this.findById(id);
     if (!emp) throw new NotFoundException('Employee not found.');
     return emp;
+  }
+
+  /** Assigns IS{empCode}{srNo}{cardSeq} (e.g. IS0111) and persists on the employee. */
+  async ensureIdCard(
+    id: string,
+  ): Promise<{ idCard: string; idCardGeneratedAt: string }> {
+    const emp = await this.ensureExists(id);
+    const existing = String(emp.idCard || '').trim();
+    if (existing && isValidStoredIdCardNumber(existing)) {
+      return {
+        idCard: existing,
+        idCardGeneratedAt: String(emp.idCardGeneratedAt || ''),
+      };
+    }
+
+    const employeeCode = String(emp.employeeCode || emp.id || '');
+    const srNo = Number(emp.srNo) || 0;
+    let idCard = '';
+
+    for (let cardSeq = 1; cardSeq <= 9999; cardSeq += 1) {
+      const candidate = composeIdCardNumber(employeeCode, srNo, cardSeq);
+      const taken = await this.employeeModel
+        .findOne({ idCard: candidate, id: { $ne: id } })
+        .select('_id')
+        .lean();
+      if (!taken) {
+        idCard = candidate;
+        break;
+      }
+    }
+
+    if (!idCard) {
+      idCard = composeIdCardNumber(employeeCode, srNo, Date.now() % 10000);
+    }
+
+    const idCardGeneratedAt = new Date().toISOString();
+    await this.employeeModel.updateOne({ id }, { idCard, idCardGeneratedAt });
+
+    return { idCard, idCardGeneratedAt };
   }
 
   async getBirthdaySummary(

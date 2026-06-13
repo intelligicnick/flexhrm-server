@@ -23,6 +23,21 @@ export class AdminsService {
       .exec();
   }
 
+  async findByEmail(email: string): Promise<AdminDocument | null> {
+    return this.adminModel
+      .findOne({ email: email.trim().toLowerCase() })
+      .select('+password +passwordResetToken')
+      .exec();
+  }
+
+  async findByUsernameOrEmail(identifier: string): Promise<AdminDocument | null> {
+    const trimmed = identifier.trim();
+    if (trimmed.includes('@')) {
+      return this.findByEmail(trimmed);
+    }
+    return this.findByUsername(trimmed);
+  }
+
   async findProfile(username: string): Promise<Omit<Admin, 'password'> | null> {
     const admin = await this.adminModel
       .findOne({

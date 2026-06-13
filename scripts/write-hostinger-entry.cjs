@@ -3,8 +3,25 @@ const path = require('path');
 
 const distDir = path.join(__dirname, '..', 'dist');
 const entryPath = path.join(distDir, 'server.js');
+const assetsSource = path.join(__dirname, '..', 'assets');
+const assetsTarget = path.join(distDir, 'assets');
+
+function copyDirRecursive(source, target) {
+  if (!fs.existsSync(source)) return;
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name);
+    const to = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(from, to);
+    } else {
+      fs.copyFileSync(from, to);
+    }
+  }
+}
 
 fs.mkdirSync(distDir, { recursive: true });
+copyDirRecursive(assetsSource, assetsTarget);
 fs.writeFileSync(
   entryPath,
   [

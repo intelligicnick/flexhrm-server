@@ -11,6 +11,9 @@ export class Admin {
   @Prop({ required: true, select: false })
   password!: string;
 
+  @Prop({ lowercase: true, trim: true, sparse: true, unique: true })
+  email?: string;
+
   @Prop({ default: 'System' })
   invitedBy!: string;
 
