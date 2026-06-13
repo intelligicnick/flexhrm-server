@@ -1,5 +1,19 @@
 function formatDate(value: string | undefined): string {
   if (!value?.trim()) return '—';
+  const str = value.trim();
+  const excelMatch = str.match(/^(\d{4,5})(?:\.\d+)?$/);
+  if (excelMatch) {
+    const serial = parseFloat(str);
+    const utcDays = Math.floor(serial - 25569);
+    const date = new Date(utcDays * 86400000);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    }
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleDateString('en-IN', {
