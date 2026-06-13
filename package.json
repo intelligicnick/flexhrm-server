@@ -21,6 +21,7 @@
     "@types/compression": "^1.7.5",
     "@types/express": "^5.0.1",
     "@types/node": "^22.14.0",
+    "@types/nodemailer": "^8.0.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "compression": "^1.8.0",
@@ -35,7 +36,6 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.6",
     "@nestjs/schematics": "^11.0.3",
-    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.21.0"
   }
 }
