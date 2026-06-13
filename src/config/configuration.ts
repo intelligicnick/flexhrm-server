@@ -32,5 +32,5 @@ export default () => ({
   smtpFrom: process.env.SMTP_FROM ?? '',
   idCardVerifyBaseUrl:
     process.env.ID_CARD_VERIFY_BASE_URL ??
-    'https://flexhrm.intelligic.org/employee',
+    'https://greenyellow-woodpecker-750354.hostingersite.com/employee',
 });

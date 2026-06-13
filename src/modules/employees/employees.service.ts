@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import { Employee, EmployeeDocument, LedgerEntry } from '../../database/schemas/employee.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
@@ -13,6 +14,11 @@ import {
   composeIdCardNumber,
   isValidStoredIdCardNumber,
 } from '../../common/utils/id-card-number.util';
+import {
+  formatIdCardDob,
+  resolveIdCardExpiryDate,
+  resolveIdCardIssueDate,
+} from '../../common/utils/id-card-verify.util';
 import {
   EmployeeAssetRecord,
   EmployeeAssetsService,
@@ -31,6 +37,25 @@ const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
   'monthlyLedger',
 ]);
 
+function bulkUpdateValuesEqual(before: unknown, after: unknown): boolean {
+  if (before === after) return true;
+  if (before == null && after == null) return true;
+
+  if (typeof before === 'number' || typeof after === 'number') {
+    const beforeNum = Number(before);
+    const afterNum = Number(after);
+    if (Number.isFinite(beforeNum) || Number.isFinite(afterNum)) {
+      return beforeNum === afterNum;
+    }
+  }
+
+  if (typeof before === 'boolean' || typeof after === 'boolean') {
+    return Boolean(before) === Boolean(after);
+  }
+
+  return JSON.stringify(before) === JSON.stringify(after);
+}
+
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -38,6 +63,7 @@ export class EmployeesService {
     private readonly employeeModel: Model<EmployeeDocument>,
     private readonly employeeAssetsService: EmployeeAssetsService,
     private readonly employeeDocumentsService: EmployeeDocumentsService,
+    private readonly config: ConfigService,
   ) {}
 
   private applyLocationScope(
@@ -317,7 +343,7 @@ export class EmployeesService {
       for (const [key, value] of Object.entries(item.changes || {})) {
         if (BULK_UPDATE_IMMUTABLE_FIELDS.has(key)) continue;
         const before = existing[key];
-        if (JSON.stringify(before) !== JSON.stringify(value)) {
+        if (!bulkUpdateValuesEqual(before, value)) {
           delta[key] = value;
         }
       }
@@ -521,6 +547,53 @@ export class EmployeesService {
     await this.employeeModel.updateOne({ id }, { idCard, idCardGeneratedAt });
 
     return { idCard, idCardGeneratedAt };
+  }
+
+  async findByIdCard(idCard: string): Promise<Record<string, unknown> | null> {
+    const normalized = idCard.trim();
+    if (!normalized || !isValidStoredIdCardNumber(normalized)) {
+      return null;
+    }
+    const doc = await this.employeeModel.findOne({ idCard: normalized }).exec();
+    return doc ? this.toPlain(doc) : null;
+  }
+
+  async verifyByIdCard(idCard: string): Promise<Record<string, unknown>> {
+    const emp = await this.findByIdCard(idCard);
+    if (!emp) {
+      throw new NotFoundException('ID card not found or invalid.');
+    }
+
+    const issueDate = resolveIdCardIssueDate(emp);
+    const exitDate = String(emp.exitDate || '').trim();
+    const hasPhoto = Boolean(String(emp.photo || '').trim());
+
+    return {
+      verified: true,
+      idCard: String(emp.idCard || idCard),
+      employeeCode: String(emp.employeeCode || emp.id || ''),
+      name: String(emp.nameAsPerAadhar || '').trim() || '—',
+      designation: String(emp.role || '').trim() || '—',
+      dob: formatIdCardDob(String(emp.dateOfBirth || '')),
+      issueDate,
+      expiryDate: resolveIdCardExpiryDate(issueDate),
+      location: String(emp.location || '').trim() || '—',
+      status: exitDate ? 'exited' : 'active',
+      exitDate: exitDate || undefined,
+      companyName: this.config.get<string>('companyName') ?? 'INTELLIGIC SOLUTIONS',
+      companyPhone: this.config.get<string>('companyPhone') ?? '',
+      hasPhoto,
+    };
+  }
+
+  async getPhotoContentByIdCard(
+    idCard: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const emp = await this.findByIdCard(idCard);
+    if (!emp) {
+      throw new NotFoundException('ID card not found or invalid.');
+    }
+    return this.getPhotoContent(String(emp.id || emp.employeeCode || ''));
   }
 
   async getBirthdaySummary(

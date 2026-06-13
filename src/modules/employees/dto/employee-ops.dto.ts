@@ -1,4 +1,5 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class BulkDeleteDto {
   @IsArray()
@@ -65,11 +66,14 @@ export class EmployeeChangeUpdateDto {
   employeeId!: string;
 
   @IsNotEmpty()
+  @IsObject()
   changes!: Record<string, unknown>;
 }
 
 export class BulkApplyEmployeeChangesDto {
   @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EmployeeChangeUpdateDto)
   updates!: EmployeeChangeUpdateDto[];
 }
 

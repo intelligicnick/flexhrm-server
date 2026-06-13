@@ -17,6 +17,7 @@ import { EmployeeChangeRequestsService } from './employee-change-requests.servic
 import {
   RequireAnyPermissions,
   RequirePermissions,
+  Public,
 } from '../../common/decorators/auth.decorators';
 import {
   CurrentUser,
@@ -178,6 +179,22 @@ export class EmployeesController {
       },
     });
     return { success: true, request };
+  }
+
+  @Get('id-card/:idCard/verify')
+  @Public()
+  verifyIdCard(@Param('idCard') idCard: string) {
+    return this.employeesService.verifyByIdCard(idCard);
+  }
+
+  @Get('id-card/:idCard/photo')
+  @Public()
+  async getPhotoByIdCard(@Param('idCard') idCard: string, @Res() res: Response) {
+    const { buffer, contentType } =
+      await this.employeesService.getPhotoContentByIdCard(idCard);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(buffer);
   }
 
   @Post(':id/id-card/ensure')
