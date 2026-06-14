@@ -14,6 +14,8 @@ import {
   verifyPassword,
 } from '../../common/utils/password.util';
 import { SessionsService } from '../sessions/sessions.service';
+import { SUPERVISOR_ONLINE_THRESHOLD_MS } from '../../common/constants/permissions.constants';
+import { SupervisorActivityService } from '../supervisor-activity/supervisor-activity.service';
 
 const BLOCKED_APPS_META_KEY = 'supervisor_blocked_apps';
 
@@ -25,6 +27,7 @@ export class SchoolSupervisorsService {
     @InjectModel(AppMeta.name)
     private readonly appMetaModel: Model<AppMetaDocument>,
     private readonly sessionsService: SessionsService,
+    private readonly supervisorActivityService: SupervisorActivityService,
   ) {}
 
   private normalizePhoneDigits(phone: string): string {
@@ -44,16 +47,17 @@ export class SchoolSupervisorsService {
   }
 
   async findAll(): Promise<Record<string, unknown>[]> {
-    const [docs, onlineActivity] = await Promise.all([
+    const [docs, lastActivity] = await Promise.all([
       this.supervisorModel.find().sort({ name: 1 }).exec(),
-      this.sessionsService.getOnlineSupervisorActivity(),
+      this.sessionsService.getSupervisorLastActivity(),
     ]);
+    const onlineCutoff = Date.now() - SUPERVISOR_ONLINE_THRESHOLD_MS;
     return docs.map((doc) => {
       const plain = this.toPlain(doc);
-      const lastActiveAt = onlineActivity.get(String(doc.id));
+      const lastActiveAt = lastActivity.get(String(doc.id));
       return {
         ...plain,
-        isOnline: !!lastActiveAt,
+        isOnline: lastActiveAt ? lastActiveAt.getTime() >= onlineCutoff : false,
         lastActiveAt: lastActiveAt ? lastActiveAt.toISOString() : null,
       };
     });
@@ -271,6 +275,12 @@ export class SchoolSupervisorsService {
       { upsert: true },
     );
     return normalized;
+  }
+
+  async getActivityHistory(supervisorId: string) {
+    const supervisor = await this.supervisorModel.findOne({ id: supervisorId }).exec();
+    if (!supervisor) throw new NotFoundException('School supervisor not found.');
+    return this.supervisorActivityService.getHistory(supervisorId);
   }
 
   async isDeviceRegistered(supervisorId: string, deviceId: string): Promise<boolean> {

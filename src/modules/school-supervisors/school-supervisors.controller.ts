@@ -60,6 +60,12 @@ export class SchoolSupervisorsController {
     return { blockedAppsToUninstall };
   }
 
+  @Get(':id/activity-history')
+  @RequirePermissions('schoolWork', 'view')
+  getActivityHistory(@Param('id') id: string) {
+    return this.supervisorsService.getActivityHistory(id);
+  }
+
   @Put(':id')
   @RequirePermissions('schoolWork', 'edit')
   async update(

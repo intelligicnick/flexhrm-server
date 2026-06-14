@@ -4,16 +4,17 @@ import { Model } from 'mongoose';
 import {
   SESSION_DURATION_MS,
   SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS,
-  SUPERVISOR_ONLINE_THRESHOLD_MS,
 } from '../../common/constants/permissions.constants';
 import { generateToken } from '../../common/utils/password.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { Session, SessionDocument } from '../../database/schemas/session.schema';
+import { SupervisorActivityService } from '../supervisor-activity/supervisor-activity.service';
 
 @Injectable()
 export class SessionsService {
   constructor(
     @InjectModel(Session.name) private readonly sessionModel: Model<SessionDocument>,
+    private readonly supervisorActivityService: SupervisorActivityService,
   ) {}
 
   async createSession(
@@ -42,6 +43,15 @@ export class SessionsService {
       expiresAt: new Date(now.getTime() + SESSION_DURATION_MS),
       lastActiveAt: now,
     });
+
+    if (
+      options?.userType === 'supervisor' &&
+      !options?.impersonated &&
+      options?.employeeId
+    ) {
+      void this.supervisorActivityService.startSessionOnLogin(options.employeeId, now);
+    }
+
     return token;
   }
 
@@ -69,9 +79,10 @@ export class SessionsService {
 
     if (
       session.userType === 'supervisor' &&
-      !session.impersonated
+      !session.impersonated &&
+      session.employeeId
     ) {
-      void this.touchSupervisorActivity(token);
+      void this.touchSupervisorActivity(token, session.employeeId);
     }
 
     return {
@@ -87,6 +98,17 @@ export class SessionsService {
   }
 
   async destroySession(token: string): Promise<void> {
+    const session = await this.sessionModel.findOne({ token }).exec();
+    if (
+      session?.userType === 'supervisor' &&
+      !session.impersonated &&
+      session.employeeId
+    ) {
+      void this.supervisorActivityService.endSession(
+        session.employeeId,
+        session.lastActiveAt || new Date(),
+      );
+    }
     await this.sessionModel.deleteOne({ token });
   }
 
@@ -101,9 +123,10 @@ export class SessionsService {
     return result.deletedCount ?? 0;
   }
 
-  private async touchSupervisorActivity(token: string): Promise<void> {
+  private async touchSupervisorActivity(token: string, supervisorId: string): Promise<void> {
+    const now = new Date();
     const touchBefore = new Date(Date.now() - SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS);
-    await this.sessionModel.updateOne(
+    const result = await this.sessionModel.updateOne(
       {
         token,
         $or: [
@@ -111,14 +134,14 @@ export class SessionsService {
           { lastActiveAt: { $exists: false } },
         ],
       },
-      { $set: { lastActiveAt: new Date() } },
+      { $set: { lastActiveAt: now } },
     );
+    if (result.modifiedCount > 0) {
+      void this.supervisorActivityService.recordActivity(supervisorId, now);
+    }
   }
 
-  async getOnlineSupervisorActivity(
-    thresholdMs = SUPERVISOR_ONLINE_THRESHOLD_MS,
-  ): Promise<Map<string, Date>> {
-    const cutoff = new Date(Date.now() - thresholdMs);
+  async getSupervisorLastActivity(): Promise<Map<string, Date>> {
     const now = new Date();
     const sessions = await this.sessionModel
       .find({
@@ -126,10 +149,6 @@ export class SessionsService {
         impersonated: { $ne: true },
         expiresAt: { $gt: now },
         employeeId: { $ne: '' },
-        $or: [
-          { lastActiveAt: { $gte: cutoff } },
-          { lastActiveAt: { $exists: false }, createdAt: { $gte: cutoff } },
-        ],
       })
       .select('employeeId lastActiveAt createdAt')
       .lean()

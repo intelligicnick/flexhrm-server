@@ -58,6 +58,10 @@ import {
   Notification,
   NotificationSchema,
 } from './schemas/notification.schema';
+import {
+  SupervisorActivitySession,
+  SupervisorActivitySessionSchema,
+} from './schemas/supervisor-activity-session.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -86,6 +90,7 @@ const MODELS = [
   { name: SupervisorRequest.name, schema: SupervisorRequestSchema },
   { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
   { name: Notification.name, schema: NotificationSchema },
+  { name: SupervisorActivitySession.name, schema: SupervisorActivitySessionSchema },
 ];
 
 @Module({
