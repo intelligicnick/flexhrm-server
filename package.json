@@ -9,7 +9,8 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",
-    "migrate:json": "tsx scripts/migrate-from-json.ts"
+    "migrate:json": "tsx scripts/migrate-from-json.ts",
+    "seed:amour": "tsx scripts/seed-amour-schools.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.12",

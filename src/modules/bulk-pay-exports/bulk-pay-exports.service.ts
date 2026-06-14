@@ -103,13 +103,19 @@ export class BulkPayExportsService implements OnModuleInit {
   async findAll(filters?: {
     month?: string;
     year?: string;
+    source?: 'salary' | 'school';
   }): Promise<PublicBulkPayExport[]> {
-    const query: Record<string, string> = {};
+    const query: Record<string, unknown> = {};
     if (filters?.month?.trim()) {
       query.month = filters.month.trim();
     }
     if (filters?.year?.trim()) {
       query.year = filters.year.trim();
+    }
+    if (filters?.source === 'school') {
+      query.source = 'school';
+    } else if (filters?.source === 'salary') {
+      query.$or = [{ source: 'salary' }, { source: { $exists: false } }];
     }
 
     const records = await this.bulkPayExportModel
@@ -158,6 +164,7 @@ export class BulkPayExportsService implements OnModuleInit {
       recordCount: dto.recordCount,
       totalAmount: dto.totalAmount ?? 0,
       employeeIds: dto.employeeIds ?? [],
+      source: dto.source === 'school' ? 'school' : 'salary',
     });
 
     return toPublicBulkPayExport(record.toObject());

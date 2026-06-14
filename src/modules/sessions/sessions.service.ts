@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { SESSION_DURATION_MS } from '../../common/constants/permissions.constants';
+import {
+  SESSION_DURATION_MS,
+  SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS,
+  SUPERVISOR_ONLINE_THRESHOLD_MS,
+} from '../../common/constants/permissions.constants';
 import { generateToken } from '../../common/utils/password.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { Session, SessionDocument } from '../../database/schemas/session.schema';
@@ -16,6 +20,12 @@ export class SessionsService {
     username: string,
     role: string,
     locations: string[],
+    options?: {
+      userType?: 'admin' | 'supervisor';
+      employeeId?: string;
+      assignedBlocks?: string[];
+      impersonated?: boolean;
+    },
   ): Promise<string> {
     const token = generateToken();
     const now = new Date();
@@ -24,10 +34,30 @@ export class SessionsService {
       username,
       role: role || 'admin',
       locations: Array.isArray(locations) ? locations : [],
+      userType: options?.userType || 'admin',
+      employeeId: options?.employeeId || '',
+      assignedBlocks: options?.assignedBlocks || [],
+      impersonated: !!options?.impersonated,
       createdAt: now,
       expiresAt: new Date(now.getTime() + SESSION_DURATION_MS),
+      lastActiveAt: now,
     });
     return token;
+  }
+
+  async createSupervisorSession(params: {
+    phone: string;
+    employeeId: string;
+    name: string;
+    assignedBlocks: string[];
+    impersonated?: boolean;
+  }): Promise<string> {
+    return this.createSession(params.phone, 'supervisor', params.assignedBlocks, {
+      userType: 'supervisor',
+      employeeId: params.employeeId,
+      assignedBlocks: params.assignedBlocks,
+      impersonated: params.impersonated,
+    });
   }
 
   async validateToken(token: string): Promise<AdminSessionPayload | null> {
@@ -36,11 +66,23 @@ export class SessionsService {
       expiresAt: { $gt: new Date() },
     });
     if (!session) return null;
+
+    if (
+      session.userType === 'supervisor' &&
+      !session.impersonated
+    ) {
+      void this.touchSupervisorActivity(token);
+    }
+
     return {
       token: session.token,
       username: session.username,
       role: session.role || 'admin',
       locations: session.locations || [],
+      userType: (session.userType as 'admin' | 'supervisor') || 'admin',
+      employeeId: session.employeeId || '',
+      assignedBlocks: session.assignedBlocks || [],
+      impersonated: !!session.impersonated,
     };
   }
 
@@ -57,5 +99,56 @@ export class SessionsService {
       expiresAt: { $lte: new Date() },
     });
     return result.deletedCount ?? 0;
+  }
+
+  private async touchSupervisorActivity(token: string): Promise<void> {
+    const touchBefore = new Date(Date.now() - SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS);
+    await this.sessionModel.updateOne(
+      {
+        token,
+        $or: [
+          { lastActiveAt: { $lt: touchBefore } },
+          { lastActiveAt: { $exists: false } },
+        ],
+      },
+      { $set: { lastActiveAt: new Date() } },
+    );
+  }
+
+  async getOnlineSupervisorActivity(
+    thresholdMs = SUPERVISOR_ONLINE_THRESHOLD_MS,
+  ): Promise<Map<string, Date>> {
+    const cutoff = new Date(Date.now() - thresholdMs);
+    const now = new Date();
+    const sessions = await this.sessionModel
+      .find({
+        userType: 'supervisor',
+        impersonated: { $ne: true },
+        expiresAt: { $gt: now },
+        employeeId: { $ne: '' },
+        $or: [
+          { lastActiveAt: { $gte: cutoff } },
+          { lastActiveAt: { $exists: false }, createdAt: { $gte: cutoff } },
+        ],
+      })
+      .select('employeeId lastActiveAt createdAt')
+      .lean()
+      .exec();
+
+    const activityBySupervisor = new Map<string, Date>();
+    for (const session of sessions) {
+      const supervisorId = String(session.employeeId || '').trim();
+      if (!supervisorId) continue;
+
+      const activeAt = session.lastActiveAt
+        ? new Date(session.lastActiveAt)
+        : new Date(session.createdAt);
+      const existing = activityBySupervisor.get(supervisorId);
+      if (!existing || activeAt > existing) {
+        activityBySupervisor.set(supervisorId, activeAt);
+      }
+    }
+
+    return activityBySupervisor;
   }
 }

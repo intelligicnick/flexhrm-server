@@ -2,6 +2,17 @@
 
 NestJS 11 REST API with MongoDB. Runs on port `3001` under `/api`.
 
+**Repository:** https://github.com/intelligicnick/flexhrm-server
+
+## Live deployment
+
+| Service | URL |
+|---------|-----|
+| **API** | https://midnightblue-partridge-476451.hostingersite.com/api |
+| **Frontend (CORS)** | https://greenyellow-woodpecker-750354.hostingersite.com |
+
+Production URLs are defined in `src/config/deploy-urls.ts` and overridden via environment variables.
+
 ## Quick start
 
 ```bash

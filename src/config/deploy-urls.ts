@@ -1,0 +1,15 @@
+/** Live Hostinger deployments (override via env at runtime). */
+
+export const PRODUCTION_API_BASE =
+  "https://midnightblue-partridge-476451.hostingersite.com";
+
+export const PRODUCTION_FRONTEND_ORIGIN =
+  "https://greenyellow-woodpecker-750354.hostingersite.com";
+
+export const PRODUCTION_ID_CARD_VERIFY_BASE = `${PRODUCTION_FRONTEND_ORIGIN}/employee`;
+
+export const PRODUCTION_CORS_ORIGINS = [
+  PRODUCTION_FRONTEND_ORIGIN,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+];

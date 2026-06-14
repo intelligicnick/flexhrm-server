@@ -1,4 +1,5 @@
 import { envListOrDevDefault, envOrDevDefault } from './env';
+import { PRODUCTION_ID_CARD_VERIFY_BASE } from './deploy-urls';
 
 export default () => ({
   port: parseInt(process.env.PORT ?? '3001', 10),
@@ -31,6 +32,5 @@ export default () => ({
   smtpPass: process.env.SMTP_PASS ?? '',
   smtpFrom: process.env.SMTP_FROM ?? '',
   idCardVerifyBaseUrl:
-    process.env.ID_CARD_VERIFY_BASE_URL ??
-    'https://greenyellow-woodpecker-750354.hostingersite.com/employee',
+    process.env.ID_CARD_VERIFY_BASE_URL ?? PRODUCTION_ID_CARD_VERIFY_BASE,
 });

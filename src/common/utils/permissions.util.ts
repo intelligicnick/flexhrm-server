@@ -10,6 +10,10 @@ export interface AdminSessionPayload {
   role: string;
   locations: string[];
   token: string;
+  userType?: 'admin' | 'supervisor';
+  employeeId?: string;
+  assignedBlocks?: string[];
+  impersonated?: boolean;
 }
 
 export interface RoleDocumentLike {

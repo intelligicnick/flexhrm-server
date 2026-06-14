@@ -654,4 +654,39 @@ export class EmployeesService {
       targetMonth,
     };
   }
+
+  private normalizePhoneDigits(phone: string): string {
+    return String(phone || '').replace(/\D/g, '').slice(-10);
+  }
+
+  async findSupervisorByPhone(phone: string): Promise<Record<string, unknown> | null> {
+    const digits = this.normalizePhoneDigits(phone);
+    if (digits.length < 10) return null;
+
+    const docs = await this.employeeModel
+      .find({
+        'supervisorLogin.enabled': true,
+        role: { $regex: /supervisor/i },
+      })
+      .select('+supervisorLogin.passwordHash')
+      .exec();
+
+    for (const doc of docs) {
+      const login = doc.supervisorLogin;
+      const loginDigits = this.normalizePhoneDigits(login?.phone || '');
+      const mobileDigits = this.normalizePhoneDigits(doc.employeeMobile || '');
+      if (loginDigits === digits || mobileDigits === digits) {
+        return this.toPlain(doc);
+      }
+    }
+    return null;
+  }
+
+  async findByRole(rolePattern: string): Promise<Record<string, unknown>[]> {
+    const docs = await this.employeeModel
+      .find({ role: { $regex: new RegExp(rolePattern, 'i') } })
+      .sort({ srNo: 1 })
+      .exec();
+    return docs.map((d) => this.toPlain(d));
+  }
 }

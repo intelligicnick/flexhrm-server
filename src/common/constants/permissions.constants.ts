@@ -22,6 +22,8 @@ export interface RolePermission {
 export type PermissionsMap = Record<PermissionModule, RolePermission>;
 
 export const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+export const SUPERVISOR_ONLINE_THRESHOLD_MS = 3 * 60 * 1000;
+export const SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS = 60 * 1000;
 export const MAX_AUDIT_LOGS_HOT = 10000;
 export const MAX_LOGIN_ATTEMPTS = 10;
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;

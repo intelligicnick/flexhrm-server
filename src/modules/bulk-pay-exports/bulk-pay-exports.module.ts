@@ -5,6 +5,7 @@ import {
   BulkPayExportSchema,
 } from '../../database/schemas/bulk-pay-export.schema';
 import { BulkPayExportsController } from './bulk-pay-exports.controller';
+import { SchoolBulkPayExportsController } from './school-bulk-pay-exports.controller';
 import { BulkPayExportsService } from './bulk-pay-exports.service';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 
@@ -15,7 +16,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     ]),
     AuditLogsModule,
   ],
-  controllers: [BulkPayExportsController],
+  controllers: [BulkPayExportsController, SchoolBulkPayExportsController],
   providers: [BulkPayExportsService],
   exports: [BulkPayExportsService],
 })

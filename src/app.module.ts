@@ -10,6 +10,11 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AdminsModule } from './modules/admins/admins.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { SchoolWorksModule } from './modules/school-works/school-works.module';
+import { SchoolMonthlyBillingsModule } from './modules/school-monthly-billings/school-monthly-billings.module';
+import { SchoolVisitsModule } from './modules/school-visits/school-visits.module';
+import { SchoolPartnersModule } from './modules/school-partners/school-partners.module';
+import { SchoolSupervisorsModule } from './modules/school-supervisors/school-supervisors.module';
+import { SchoolGeographyModule } from './modules/school-geography/school-geography.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { JobRolesModule } from './modules/job-roles/job-roles.module';
@@ -18,6 +23,10 @@ import { HelplinesModule } from './modules/helplines/helplines.module';
 import { ExportTemplatesModule } from './modules/export-templates/export-templates.module';
 import { BulkPayExportsModule } from './modules/bulk-pay-exports/bulk-pay-exports.module';
 import { HealthModule } from './modules/health/health.module';
+import { PlannedVisitsModule } from './modules/planned-visits/planned-visits.module';
+import { SupervisorRequestsModule } from './modules/supervisor-requests/supervisor-requests.module';
+import { CommitmentDiaryModule } from './modules/commitment-diary/commitment-diary.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SeedModule } from './seed/seed.module';
 
 @Module({
@@ -30,6 +39,15 @@ import { SeedModule } from './seed/seed.module';
     AdminsModule,
     EmployeesModule,
     SchoolWorksModule,
+    SchoolMonthlyBillingsModule,
+    SchoolVisitsModule,
+    SchoolPartnersModule,
+    SchoolSupervisorsModule,
+    PlannedVisitsModule,
+    SupervisorRequestsModule,
+    CommitmentDiaryModule,
+    NotificationsModule,
+    SchoolGeographyModule,
     AuditLogsModule,
     LocationsModule,
     JobRolesModule,

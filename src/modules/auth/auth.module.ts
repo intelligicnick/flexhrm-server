@@ -4,10 +4,11 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { EmailModule } from '../email/email.module';
 import { RolesModule } from '../roles/roles.module';
 import { SessionsModule } from '../sessions/sessions.module';
+import { SchoolSupervisorsModule } from '../school-supervisors/school-supervisors.module';
 import { AuthController } from './auth.controller';
 
 @Module({
-  imports: [AdminsModule, SessionsModule, AuditLogsModule, RolesModule, EmailModule],
+  imports: [AdminsModule, SessionsModule, AuditLogsModule, RolesModule, EmailModule, SchoolSupervisorsModule],
   controllers: [AuthController],
 })
 export class AuthModule {}

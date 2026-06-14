@@ -30,6 +30,7 @@ export class BulkPayExportsController {
     return this.bulkPayExportsService.findAll({
       month: query.month,
       year: query.year,
+      source: 'salary',
     });
   }
 

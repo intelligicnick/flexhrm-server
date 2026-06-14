@@ -39,6 +39,10 @@ export class BulkPayExport {
   @Prop({ type: [String], default: [] })
   employeeIds!: string[];
 
+  /** salary = employee payroll; school = partner payments */
+  @Prop({ default: 'salary', index: true })
+  source!: 'salary' | 'school';
+
   @Prop({ default: 0 })
   downloadCount!: number;
 }

@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -44,4 +45,9 @@ export class CreateBulkPayExportDto {
   @IsArray()
   @IsString({ each: true })
   employeeIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['salary', 'school'])
+  source?: 'salary' | 'school';
 }

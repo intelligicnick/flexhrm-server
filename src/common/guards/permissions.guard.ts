@@ -61,6 +61,12 @@ export class PermissionsGuard implements CanActivate {
     );
     if (!permissionMeta) return true;
 
+    if (user?.userType === 'supervisor') {
+      throw new ForbiddenException(
+        'Supervisor accounts cannot access administrator modules.',
+      );
+    }
+
     const roles = await this.rolesService.findAll();
     const permissions = buildPermissions(user.role, roles);
 

@@ -6,12 +6,58 @@ import {
   SchoolWorkDocument,
 } from '../../database/schemas/school-work.schema';
 
+
+export function isSecondarySchoolCategory(category: string): boolean {
+  const norm = String(category || '').toLowerCase();
+  return (
+    norm.includes('high school') ||
+    norm.includes('highschool') ||
+    norm === 'uhs' ||
+    norm === 'umv' ||
+    norm.includes('uchh madhyamik') ||
+    norm.includes('upgraded h') ||
+    norm.includes('utkramit h') ||
+    norm.includes('janta high')
+  );
+}
+
+export function defaultRatesForCategory(category: string): {
+  govtUnitRate: number;
+  partnerMonthlyPay: number;
+} {
+  if (isSecondarySchoolCategory(category)) {
+    return { govtUnitRate: 100, partnerMonthlyPay: 4500 };
+  }
+  return { govtUnitRate: 50, partnerMonthlyPay: 3750 };
+}
+
 @Injectable()
 export class SchoolWorksService {
   constructor(
     @InjectModel(SchoolWork.name)
     private readonly schoolWorkModel: Model<SchoolWorkDocument>,
   ) {}
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private buildBlockDistrictQuery(
+    block: string,
+    district?: string,
+  ): Record<string, unknown> {
+    const query: Record<string, unknown> = {
+      block: {
+        $regex: new RegExp(`^${this.escapeRegex(block)}$`, 'i'),
+      },
+    };
+    if (district) {
+      query.district = {
+        $regex: new RegExp(`^${this.escapeRegex(district)}$`, 'i'),
+      };
+    }
+    return query;
+  }
 
   toPlain(doc: SchoolWorkDocument | Record<string, unknown>): Record<string, unknown> {
     const obj =
@@ -39,6 +85,14 @@ export class SchoolWorksService {
     return doc ? this.toPlain(doc) : null;
   }
 
+  async findByBlock(block: string): Promise<Record<string, unknown>[]> {
+    const docs = await this.schoolWorkModel
+      .find({ block: String(block || '').trim() })
+      .sort({ srNo: 1 })
+      .exec();
+    return docs.map((d) => this.toPlain(d));
+  }
+
   async existsByUdise(udise: string, excludeId?: string): Promise<boolean> {
     const query: Record<string, unknown> = { udise };
     if (excludeId) query.id = { $ne: excludeId };
@@ -51,9 +105,15 @@ export class SchoolWorksService {
     string,
     {
       material: number;
+      trek: number;
       miscellaneous: number;
       materialRemark?: string;
+      trekRemark?: string;
       miscellaneousRemark?: string;
+      materialDate?: string;
+      trekDate?: string;
+      miscellaneousDate?: string;
+      materialItems?: { item: string; qty: number; cost: number }[];
     }
   > {
     if (!raw || typeof raw !== 'object') return {};
@@ -61,9 +121,15 @@ export class SchoolWorksService {
       string,
       {
         material: number;
+        trek: number;
         miscellaneous: number;
         materialRemark?: string;
+        trekRemark?: string;
         miscellaneousRemark?: string;
+        materialDate?: string;
+        trekDate?: string;
+        miscellaneousDate?: string;
+        materialItems?: { item: string; qty: number; cost: number }[];
       }
     > = {};
     for (const [monthKey, entry] of Object.entries(
@@ -71,12 +137,53 @@ export class SchoolWorksService {
     )) {
       if (!entry || typeof entry !== 'object') continue;
       const e = entry as Record<string, unknown>;
+      const materialItems = Array.isArray(e.materialItems)
+        ? e.materialItems.map((item) => {
+            const row = item as Record<string, unknown>;
+            return {
+              item: String(row.item || ''),
+              qty: Number(row.qty) || 0,
+              cost: Number(row.cost) || 0,
+            };
+          })
+        : [];
       out[monthKey] = {
         material: Number(e.material) || 0,
+        trek: Number(e.trek) || 0,
         miscellaneous: Number(e.miscellaneous) || 0,
         materialRemark: String(e.materialRemark || ''),
+        trekRemark: String(e.trekRemark || ''),
         miscellaneousRemark: String(e.miscellaneousRemark || ''),
+        materialDate: String(e.materialDate || ''),
+        trekDate: String(e.trekDate || ''),
+        miscellaneousDate: String(e.miscellaneousDate || ''),
+        materialItems,
       };
+    }
+    return out;
+  }
+
+  private normalizeMonthlyWorkdaysLedger(
+    raw: unknown,
+  ): Record<string, { cleaningDays: number; billingToilets?: number }> {
+    if (!raw || typeof raw !== 'object') return {};
+    const out: Record<string, { cleaningDays: number; billingToilets?: number }> =
+      {};
+    for (const [monthKey, entry] of Object.entries(
+      raw as Record<string, unknown>,
+    )) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const cleaningDays = Number(e.cleaningDays);
+      if (!Number.isFinite(cleaningDays) || cleaningDays < 1) continue;
+      const normalized: { cleaningDays: number; billingToilets?: number } = {
+        cleaningDays: Math.min(31, Math.round(cleaningDays)),
+      };
+      const billingToilets = Number(e.billingToilets);
+      if (Number.isFinite(billingToilets) && billingToilets >= 0) {
+        normalized.billingToilets = Math.round(billingToilets);
+      }
+      out[monthKey] = normalized;
     }
     return out;
   }
@@ -94,25 +201,44 @@ export class SchoolWorksService {
   private normalize(raw: Record<string, unknown>): Record<string, unknown> {
     const udise = String(raw.udise || raw.id || '').trim();
     const id = String(raw.id || udise);
+    const schoolCategory = String(raw.schoolCategory || '');
+    const defaults = defaultRatesForCategory(schoolCategory);
+    const govtUnitRate =
+      Number(raw.govtUnitRate) ||
+      (Number(raw.rates) > 0 && Number(raw.rates) <= 100
+        ? Number(raw.rates)
+        : defaults.govtUnitRate);
+    const partnerMonthlyPay =
+      Number(raw.partnerMonthlyPay) ||
+      (Number(raw.rates) > 100 ? Number(raw.rates) : defaults.partnerMonthlyPay);
+
     return {
       ...raw,
       id,
       udise,
       schoolName: String(raw.schoolName || ''),
+      schoolCategory,
       headmasterName: String(raw.headmasterName || ''),
       headmasterNumber: String(raw.headmasterNumber || ''),
       sweeperName: String(raw.sweeperName || ''),
       accountHolderName: String(raw.accountHolderName || ''),
       accountNumber: String(raw.accountNumber || ''),
       ifscCode: String(raw.ifscCode || ''),
+      paymentMethod: String(raw.paymentMethod || ''),
       noOfToilets: Number(raw.noOfToilets) || 0,
-      rates: Number(raw.rates) || 0,
+      rates: Number(raw.rates) || partnerMonthlyPay,
+      govtUnitRate,
+      partnerMonthlyPay,
       rateExplanation: String(raw.rateExplanation || ''),
       block: String(raw.block || ''),
       district: String(raw.district || ''),
+      assignedSupervisorId: String(raw.assignedSupervisorId || ''),
       materialCost: Number(raw.materialCost) || 0,
       remarks: String(raw.remarks || ''),
       monthlyExpenseLedger: this.normalizeMonthlyLedger(raw.monthlyExpenseLedger),
+      monthlyWorkdaysLedger: this.normalizeMonthlyWorkdaysLedger(
+        raw.monthlyWorkdaysLedger,
+      ),
     };
   }
 
@@ -133,10 +259,11 @@ export class SchoolWorksService {
     const existing = await this.schoolWorkModel.findOne({ id }).exec();
     if (!existing) return null;
 
-    const merged = {
-      ...existing.toObject(),
-      ...this.normalize({ ...existing.toObject(), ...updates, id }),
-    };
+    const merged = this.normalize({
+      ...this.toPlain(existing),
+      ...updates,
+      id,
+    });
 
     const doc = await this.schoolWorkModel
       .findOneAndUpdate({ id }, { $set: merged }, { new: true })
@@ -187,20 +314,47 @@ export class SchoolWorksService {
     return { added, skipped, skippedCodes };
   }
 
+  async upsertByUdise(
+    raw: Record<string, unknown>,
+  ): Promise<{ action: 'created' | 'updated'; record: Record<string, unknown> }> {
+    const udise = String(raw.udise || '').trim();
+    if (!udise) throw new Error('UDISE is required for upsert.');
+    const existing = await this.schoolWorkModel.findOne({ udise }).exec();
+    if (existing) {
+      const updated = await this.update(existing.id, {
+        ...existing.toObject(),
+        ...raw,
+        id: existing.id,
+        udise,
+      });
+      return { action: 'updated', record: updated! };
+    }
+    const created = await this.create(raw);
+    return { action: 'created', record: created };
+  }
+
   async distributeBlockExpense(params: {
     block: string;
+    district?: string;
     monthKey: string;
-    materialAmount: number;
-    miscellaneousAmount: number;
+    materialAmount?: number;
+    trekAmount?: number;
+    miscellaneousAmount?: number;
     materialRemark?: string;
+    trekRemark?: string;
     miscellaneousRemark?: string;
+    materialDate?: string;
+    trekDate?: string;
+    miscellaneousDate?: string;
   }): Promise<{
     updatedCount: number;
     schools: Record<string, unknown>[];
     perSchoolMaterial: number;
+    perSchoolTrek: number;
     perSchoolMiscellaneous: number;
   }> {
     const block = String(params.block || '').trim();
+    const district = String(params.district || '').trim();
     const monthKey = String(params.monthKey || '').trim();
     if (!block) {
       throw new Error('Block is required.');
@@ -209,13 +363,23 @@ export class SchoolWorksService {
       throw new Error('Month is required.');
     }
 
-    const schools = await this.schoolWorkModel.find({ block }).sort({ srNo: 1 }).exec();
+    const schools = await this.schoolWorkModel
+      .find(this.buildBlockDistrictQuery(block, district || undefined))
+      .sort({ srNo: 1 })
+      .exec();
     if (schools.length === 0) {
-      throw new Error(`No schools found for block "${block}".`);
+      const scope = district
+        ? `block "${block}" in district "${district}"`
+        : `block "${block}"`;
+      throw new Error(`No schools found for ${scope}.`);
     }
 
     const materialShares = this.splitAmountEqually(
       Number(params.materialAmount) || 0,
+      schools.length,
+    );
+    const trekShares = this.splitAmountEqually(
+      Number(params.trekAmount) || 0,
       schools.length,
     );
     const miscShares = this.splitAmountEqually(
@@ -224,17 +388,42 @@ export class SchoolWorksService {
     );
 
     const materialRemark = String(params.materialRemark || '').trim();
+    const trekRemark = String(params.trekRemark || '').trim();
     const miscellaneousRemark = String(params.miscellaneousRemark || '').trim();
+    const materialDate = String(params.materialDate || '').trim();
+    const trekDate = String(params.trekDate || '').trim();
+    const miscellaneousDate = String(params.miscellaneousDate || '').trim();
+    const updateMaterial =
+      (Number(params.materialAmount) || 0) > 0 || materialRemark.length > 0;
+    const updateTrek = (Number(params.trekAmount) || 0) > 0 || trekRemark.length > 0;
+    const updateMiscellaneous =
+      (Number(params.miscellaneousAmount) || 0) > 0 || miscellaneousRemark.length > 0;
     const updated: Record<string, unknown>[] = [];
 
     for (let i = 0; i < schools.length; i++) {
       const school = schools[i];
       const ledger = this.normalizeMonthlyLedger(school.monthlyExpenseLedger);
+      const prev = ledger[monthKey] || {
+        material: 0,
+        trek: 0,
+        miscellaneous: 0,
+        materialItems: [],
+      };
       ledger[monthKey] = {
-        material: materialShares[i] ?? 0,
-        miscellaneous: miscShares[i] ?? 0,
-        materialRemark,
-        miscellaneousRemark,
+        ...prev,
+        material: updateMaterial ? (materialShares[i] ?? 0) : prev.material,
+        trek: updateTrek ? (trekShares[i] ?? 0) : prev.trek,
+        miscellaneous: updateMiscellaneous ? (miscShares[i] ?? 0) : prev.miscellaneous,
+        materialRemark: updateMaterial ? materialRemark : prev.materialRemark,
+        trekRemark: updateTrek ? trekRemark : prev.trekRemark,
+        miscellaneousRemark: updateMiscellaneous
+          ? miscellaneousRemark
+          : prev.miscellaneousRemark,
+        materialDate: updateMaterial ? materialDate : prev.materialDate,
+        trekDate: updateTrek ? trekDate : prev.trekDate,
+        miscellaneousDate: updateMiscellaneous
+          ? miscellaneousDate
+          : prev.miscellaneousDate,
       };
       school.monthlyExpenseLedger = ledger;
       await school.save();
@@ -245,7 +434,154 @@ export class SchoolWorksService {
       updatedCount: updated.length,
       schools: updated,
       perSchoolMaterial: materialShares[0] ?? 0,
+      perSchoolTrek: trekShares[0] ?? 0,
       perSchoolMiscellaneous: miscShares[0] ?? 0,
     };
+  }
+
+  async deleteBlockExpense(params: {
+    block: string;
+    district?: string;
+    monthKey: string;
+    expenseType: 'material' | 'trek' | 'miscellaneous';
+  }): Promise<{ updatedCount: number; schools: Record<string, unknown>[] }> {
+    const block = String(params.block || '').trim();
+    const district = String(params.district || '').trim();
+    const monthKey = String(params.monthKey || '').trim();
+    const expenseType = params.expenseType;
+    if (!block) {
+      throw new Error('Block is required.');
+    }
+    if (!monthKey) {
+      throw new Error('Month is required.');
+    }
+    if (!['material', 'trek', 'miscellaneous'].includes(expenseType)) {
+      throw new Error('Invalid expense type.');
+    }
+
+    const schools = await this.schoolWorkModel
+      .find(this.buildBlockDistrictQuery(block, district || undefined))
+      .sort({ srNo: 1 })
+      .exec();
+    if (schools.length === 0) {
+      const scope = district
+        ? `block "${block}" in district "${district}"`
+        : `block "${block}"`;
+      throw new Error(`No schools found for ${scope}.`);
+    }
+
+    const updated: Record<string, unknown>[] = [];
+
+    for (const school of schools) {
+      const ledger = this.normalizeMonthlyLedger(school.monthlyExpenseLedger);
+      const prev = ledger[monthKey];
+      if (!prev) continue;
+
+      const next = { ...prev };
+      if (expenseType === 'material') {
+        next.material = 0;
+        next.materialRemark = '';
+        next.materialDate = '';
+      } else if (expenseType === 'trek') {
+        next.trek = 0;
+        next.trekRemark = '';
+        next.trekDate = '';
+      } else {
+        next.miscellaneous = 0;
+        next.miscellaneousRemark = '';
+        next.miscellaneousDate = '';
+      }
+
+      ledger[monthKey] = next;
+      school.monthlyExpenseLedger = ledger;
+      await school.save();
+      updated.push(this.toPlain(school));
+    }
+
+    return { updatedCount: updated.length, schools: updated };
+  }
+
+  async bulkUpdateWorkdays(params: {
+    block: string;
+    district?: string;
+    monthKey: string;
+    defaultDays?: number;
+    updates: Array<{ id: string; cleaningDays: number; billingToilets?: number }>;
+  }): Promise<{ updatedCount: number; schools: Record<string, unknown>[] }> {
+    const block = String(params.block || '').trim();
+    const monthKey = String(params.monthKey || '').trim();
+    if (!block || !monthKey) {
+      throw new Error('Block and month are required.');
+    }
+
+    const district = String(params.district || '').trim();
+    const schools = await this.schoolWorkModel
+      .find(this.buildBlockDistrictQuery(block, district || undefined))
+      .sort({ srNo: 1 })
+      .exec();
+    if (schools.length === 0) {
+      const scope = district
+        ? `block "${block}" in district "${district}"`
+        : `block "${block}"`;
+      throw new Error(`No schools found for ${scope}.`);
+    }
+
+    const updateMap = new Map(
+      (params.updates || []).map((u) => [
+        String(u.id || '').trim(),
+        {
+          cleaningDays: Math.min(
+            31,
+            Math.max(1, Math.round(Number(u.cleaningDays) || 24)),
+          ),
+          billingToilets:
+            u.billingToilets === undefined || u.billingToilets === null
+              ? undefined
+              : Math.max(0, Math.round(Number(u.billingToilets) || 0)),
+        },
+      ]),
+    );
+    const fallbackDays = Math.min(
+      31,
+      Math.max(1, Math.round(Number(params.defaultDays) || 24)),
+    );
+    const updated: Record<string, unknown>[] = [];
+
+    for (const school of schools) {
+      const update =
+        updateMap.get(String(school.id)) ??
+        updateMap.get(String(school.udise));
+      const days = update?.cleaningDays ?? fallbackDays;
+      const ledger = this.normalizeMonthlyWorkdaysLedger(
+        school.monthlyWorkdaysLedger,
+      );
+      const entry: { cleaningDays: number; billingToilets?: number } = {
+        cleaningDays: days,
+      };
+      if (update?.billingToilets !== undefined) {
+        entry.billingToilets = update.billingToilets;
+      } else if (ledger[monthKey]?.billingToilets !== undefined) {
+        entry.billingToilets = ledger[monthKey].billingToilets;
+      }
+      ledger[monthKey] = entry;
+      school.monthlyWorkdaysLedger = ledger;
+      await school.save();
+      updated.push(this.toPlain(school));
+    }
+
+    return { updatedCount: updated.length, schools: updated };
+  }
+
+  async bulkUpdate(
+    updates: Array<{ id: string; changes: Record<string, unknown> }>,
+  ): Promise<{ updated: number; records: Record<string, unknown>[] }> {
+    const records: Record<string, unknown>[] = [];
+    for (const item of updates) {
+      const id = String(item.id || '').trim();
+      if (!id || !item.changes || typeof item.changes !== 'object') continue;
+      const updated = await this.update(id, item.changes);
+      if (updated) records.push(updated);
+    }
+    return { updated: records.length, records };
   }
 }

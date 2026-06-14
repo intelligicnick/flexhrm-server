@@ -23,6 +23,13 @@ export class CustomField {
   @Prop() value!: string;
 }
 
+@Schema({ _id: false })
+export class SupervisorLogin {
+  @Prop({ default: '' }) phone!: string;
+  @Prop({ default: '', select: false }) passwordHash!: string;
+  @Prop({ default: false }) enabled!: boolean;
+}
+
 @Schema({ timestamps: true, collection: 'employees' })
 export class Employee {
   @Prop({ required: true, unique: true, index: true })
@@ -222,6 +229,12 @@ export class Employee {
 
   @Prop({ default: '' })
   idCardGeneratedAt!: string;
+
+  @Prop({ type: SupervisorLogin, default: {} })
+  supervisorLogin!: SupervisorLogin;
+
+  @Prop({ type: [String], default: [] })
+  assignedBlocks!: string[];
 }
 
 export const EmployeeSchema = SchemaFactory.createForClass(Employee);

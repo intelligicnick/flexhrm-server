@@ -3,6 +3,9 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
+  Param,
+  Patch,
   Post,
   UnauthorizedException,
   BadRequestException,
@@ -10,9 +13,10 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
-import { Public } from '../../common/decorators/auth.decorators';
+import { Public, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUser, CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AdminSessionPayload, buildPermissions } from '../../common/utils/permissions.util';
+import { assertSupervisorRegisteredDevice } from '../../common/utils/supervisor-device.util';
 import {
   hashPassword,
   isPasswordHashed,
@@ -28,6 +32,8 @@ import { SessionsService } from '../sessions/sessions.service';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
+import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateDto, SupervisorRegisterDeviceDto } from '../school-visits/dto/school-visit.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -38,6 +44,7 @@ export class AuthController {
     private readonly rolesService: RolesService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly schoolSupervisorsService: SchoolSupervisorsService,
   ) {}
 
   @Public()
@@ -267,8 +274,269 @@ export class AuthController {
     };
   }
 
+  @Public()
+  @Get('supervisor/portal-policy')
+  async supervisorPortalPolicy() {
+    const blockedAppsToUninstall =
+      await this.schoolSupervisorsService.getBlockedAppsToUninstall();
+    return { blockedAppsToUninstall };
+  }
+
+  @Public()
+  @Post('supervisor/login')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 900000 } })
+  async supervisorLogin(@Body() dto: SupervisorLoginDto) {
+    const supervisor = await this.schoolSupervisorsService.findByPhone(dto.phone);
+    if (!supervisor) {
+      throw new UnauthorizedException('Invalid supervisor phone or password.');
+    }
+
+    const login = supervisor.login as {
+      passwordHash?: string;
+      enabled?: boolean;
+      phone?: string;
+    };
+    if (!login?.enabled || !login.passwordHash) {
+      throw new ForbiddenException('Supervisor login is not enabled for this account.');
+    }
+
+    if (!verifyPassword(dto.password, login.passwordHash)) {
+      throw new UnauthorizedException('Invalid supervisor phone or password.');
+    }
+
+    const deviceId = String(dto.deviceId || '').trim();
+    const deviceName = String(dto.deviceName || '').trim();
+    if (!deviceId) {
+      throw new BadRequestException('Device registration is required. Please update the app.');
+    }
+
+    const supervisorId = String(supervisor.id);
+    const registeredDeviceId = String(supervisor.registeredDeviceId || '');
+    let needsDeviceRegistration = !registeredDeviceId;
+
+    if (registeredDeviceId && registeredDeviceId !== deviceId) {
+      const otp = String(dto.deviceOtp || '').trim();
+      if (!otp) {
+        throw new ForbiddenException({
+          code: 'DEVICE_MISMATCH',
+          message:
+            'This account is registered on another device. Contact your admin for a device change OTP.',
+        });
+      }
+      const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
+        supervisorId,
+        deviceId,
+        otp,
+        deviceName,
+      );
+      if (!verified) {
+        throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
+      }
+      needsDeviceRegistration = false;
+    } else if (registeredDeviceId && deviceName) {
+      await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+    }
+
+    const assignedBlocks = Array.isArray(supervisor.assignedBlocks)
+      ? (supervisor.assignedBlocks as string[])
+      : [];
+    const phone = String(login.phone || supervisor.phone || dto.phone);
+    const token = await this.sessionsService.createSupervisorSession({
+      phone,
+      employeeId: supervisorId,
+      name: String(supervisor.name || phone),
+      assignedBlocks,
+    });
+
+    return {
+      success: true,
+      token,
+      userType: 'supervisor',
+      supervisorId,
+      name: supervisor.name,
+      phone,
+      assignedBlocks,
+      needsDeviceRegistration,
+      deviceRegistered: !needsDeviceRegistration,
+    };
+  }
+
+  @Post('supervisor/register-device')
+  @HttpCode(200)
+  async supervisorRegisterDevice(
+    @CurrentUser() user: AdminSessionPayload,
+    @Body() dto: SupervisorRegisterDeviceDto,
+  ) {
+    if (user.userType !== 'supervisor') {
+      throw new ForbiddenException('Supervisor session required.');
+    }
+    if (user.impersonated) {
+      throw new ForbiddenException('Device registration is not available in admin preview mode.');
+    }
+
+    const supervisorId = String(user.employeeId || '');
+    const raw = await this.schoolSupervisorsService.getRawById(supervisorId);
+    if (!raw) {
+      throw new BadRequestException('Supervisor not found.');
+    }
+
+    const deviceId = String(dto.deviceId || '').trim();
+    const deviceName = String(dto.deviceName || '').trim();
+    if (!deviceId) {
+      throw new BadRequestException('Device ID is required.');
+    }
+
+    const registeredDeviceId = String(raw.registeredDeviceId || '');
+
+    if (registeredDeviceId && registeredDeviceId !== deviceId) {
+      const otp = String(dto.deviceOtp || '').trim();
+      if (!otp) {
+        throw new ForbiddenException({
+          code: 'DEVICE_MISMATCH',
+          message:
+            'This account is registered on another device. Contact your admin for a device change OTP.',
+        });
+      }
+      const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
+        supervisorId,
+        deviceId,
+        otp,
+        deviceName,
+      );
+      if (!verified) {
+        throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
+      }
+    } else if (!registeredDeviceId) {
+      await this.schoolSupervisorsService.registerDevice(supervisorId, deviceId, deviceName);
+    } else if (deviceName) {
+      await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+    }
+
+    const updated = await this.schoolSupervisorsService.getRawById(supervisorId);
+    return {
+      success: true,
+      hasRegisteredDevice: !!updated?.registeredDeviceId,
+      registeredDeviceId: updated?.registeredDeviceId || '',
+      registeredDeviceName: updated?.registeredDeviceName || '',
+      deviceRegisteredAt: updated?.deviceRegisteredAt || null,
+    };
+  }
+
+  @Post('supervisor/impersonate/:supervisorId')
+  @HttpCode(200)
+  @RequirePermissions('schoolWork', 'edit')
+  async impersonateSupervisor(
+    @CurrentUsername() username: string,
+    @Param('supervisorId') supervisorId: string,
+  ) {
+    const supervisor = await this.schoolSupervisorsService.findById(supervisorId);
+    if (!supervisor) {
+      throw new BadRequestException('Supervisor not found.');
+    }
+
+    const assignedBlocks = Array.isArray(supervisor.assignedBlocks)
+      ? (supervisor.assignedBlocks as string[])
+      : [];
+    const login = supervisor.login as { phone?: string } | undefined;
+    const phone = String(login?.phone || supervisor.phone || '');
+    const name = String(supervisor.name || phone);
+
+    const token = await this.sessionsService.createSupervisorSession({
+      phone,
+      employeeId: String(supervisor.id),
+      name,
+      assignedBlocks,
+      impersonated: true,
+    });
+
+    await this.auditLogsService.append({
+      username,
+      action: 'SUPERVISOR_IMPERSONATE',
+      target: `Opened supervisor portal as "${name}".`,
+      details: { supervisorId, phone },
+    });
+
+    return {
+      success: true,
+      token,
+      userType: 'supervisor',
+      supervisorId: supervisor.id,
+      name,
+      phone,
+      assignedBlocks,
+    };
+  }
+
+  @Get('supervisor/me')
+  async supervisorMe(@CurrentUser() user: AdminSessionPayload) {
+    if (user.userType !== 'supervisor') {
+      throw new ForbiddenException('Supervisor session required.');
+    }
+    const supervisor = await this.schoolSupervisorsService.findById(user.employeeId || '');
+    const raw = await this.schoolSupervisorsService.getRawById(user.employeeId || '');
+    return {
+      userType: 'supervisor',
+      supervisorId: user.employeeId,
+      phone: user.username,
+      assignedBlocks: user.assignedBlocks || [],
+      name: supervisor?.name || user.username,
+      profilePhotoBase64: raw?.profilePhotoBase64 || '',
+      hasRegisteredDevice: !!raw?.registeredDeviceId,
+      registeredDeviceId: raw?.registeredDeviceId || '',
+      registeredDeviceName: raw?.registeredDeviceName || '',
+      deviceRegisteredAt: raw?.deviceRegisteredAt || null,
+      defaultLanguage: raw?.defaultLanguage === 'hi' ? 'hi' : 'en',
+      email: raw?.email || '',
+      alternatePhone: raw?.alternatePhone || '',
+      designation: raw?.designation || '',
+      bio: raw?.bio || '',
+      status: supervisor?.status || 'active',
+      impersonated: !!user.impersonated,
+    };
+  }
+
+  @Patch('supervisor/profile')
+  @HttpCode(200)
+  async supervisorProfileUpdate(
+    @CurrentUser() user: AdminSessionPayload,
+    @Headers('x-supervisor-device-id') deviceId: string,
+    @Body() dto: SupervisorProfileUpdateDto,
+  ) {
+    if (user.userType !== 'supervisor') {
+      throw new ForbiddenException('Supervisor session required.');
+    }
+    await assertSupervisorRegisteredDevice(user, deviceId, this.schoolSupervisorsService);
+    await this.schoolSupervisorsService.updateProfile(user.employeeId || '', dto);
+    return { success: true };
+  }
+
+  @Post('supervisor/profile-photo')
+  @HttpCode(200)
+  async supervisorProfilePhoto(
+    @CurrentUser() user: AdminSessionPayload,
+    @Headers('x-supervisor-device-id') deviceId: string,
+    @Body() dto: { photoDataBase64: string },
+  ) {
+    if (user.userType !== 'supervisor') {
+      throw new ForbiddenException('Supervisor session required.');
+    }
+    await assertSupervisorRegisteredDevice(user, deviceId, this.schoolSupervisorsService);
+    if (!dto.photoDataBase64?.trim()) {
+      throw new BadRequestException('Photo data is required.');
+    }
+    await this.schoolSupervisorsService.updateProfilePhoto(
+      user.employeeId || '',
+      dto.photoDataBase64,
+    );
+    return { success: true };
+  }
+
   @Get('me')
   async me(@CurrentUser() user: AdminSessionPayload) {
+    if (user.userType === 'supervisor') {
+      throw new ForbiddenException('Use /auth/supervisor/me for supervisor sessions.');
+    }
     const roles = await this.rolesService.findAll();
     return {
       username: user.username,

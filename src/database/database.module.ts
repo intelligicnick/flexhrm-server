@@ -29,6 +29,16 @@ import {
 import { AppMeta, AppMetaSchema } from './schemas/app-meta.schema';
 import { SchoolWork, SchoolWorkSchema } from './schemas/school-work.schema';
 import {
+  SchoolMonthlyBilling,
+  SchoolMonthlyBillingSchema,
+} from './schemas/school-monthly-billing.schema';
+import { SchoolVisit, SchoolVisitSchema } from './schemas/school-visit.schema';
+import { SchoolPartner, SchoolPartnerSchema } from './schemas/school-partner.schema';
+import { SchoolSupervisor, SchoolSupervisorSchema } from './schemas/school-supervisor.schema';
+import { PlannedVisit, PlannedVisitSchema } from './schemas/planned-visit.schema';
+import { SchoolDistrict, SchoolDistrictSchema } from './schemas/school-district.schema';
+import { SchoolBlock, SchoolBlockSchema } from './schemas/school-block.schema';
+import {
   EmployeeChangeRequest,
   EmployeeChangeRequestSchema,
 } from './schemas/employee-change-request.schema';
@@ -36,6 +46,18 @@ import {
   EmployeeDocument,
   EmployeeDocumentSchema,
 } from './schemas/employee-document.schema';
+import {
+  SupervisorRequest,
+  SupervisorRequestSchema,
+} from './schemas/supervisor-request.schema';
+import {
+  CommitmentDiary,
+  CommitmentDiarySchema,
+} from './schemas/commitment-diary.schema';
+import {
+  Notification,
+  NotificationSchema,
+} from './schemas/notification.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -52,8 +74,18 @@ const MODELS = [
   { name: BulkPayExport.name, schema: BulkPayExportSchema },
   { name: AppMeta.name, schema: AppMetaSchema },
   { name: SchoolWork.name, schema: SchoolWorkSchema },
+  { name: SchoolMonthlyBilling.name, schema: SchoolMonthlyBillingSchema },
+  { name: SchoolVisit.name, schema: SchoolVisitSchema },
+  { name: SchoolPartner.name, schema: SchoolPartnerSchema },
+  { name: SchoolSupervisor.name, schema: SchoolSupervisorSchema },
+  { name: PlannedVisit.name, schema: PlannedVisitSchema },
+  { name: SchoolDistrict.name, schema: SchoolDistrictSchema },
+  { name: SchoolBlock.name, schema: SchoolBlockSchema },
   { name: EmployeeChangeRequest.name, schema: EmployeeChangeRequestSchema },
   { name: EmployeeDocument.name, schema: EmployeeDocumentSchema },
+  { name: SupervisorRequest.name, schema: SupervisorRequestSchema },
+  { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
+  { name: Notification.name, schema: NotificationSchema },
 ];
 
 @Module({

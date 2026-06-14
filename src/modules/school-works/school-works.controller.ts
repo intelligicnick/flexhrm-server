@@ -10,22 +10,23 @@ import {
 } from '@nestjs/common';
 import { SchoolWorksService } from './school-works.service';
 import {
-  RequireAnyPermissions,
   RequirePermissions,
 } from '../../common/decorators/auth.decorators';
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { BulkDeleteSchoolWorksDto, DistributeBlockExpenseDto } from './dto/school-work-ops.dto';
+import { SchoolPartnersService } from '../school-partners/school-partners.service';
+import { BulkDeleteSchoolWorksDto, BulkUpdateSchoolWorksDto, BulkUpdateWorkdaysDto, DeleteBlockExpenseDto, DistributeBlockExpenseDto } from './dto/school-work-ops.dto';
 
 @Controller('school-works')
 export class SchoolWorksController {
   constructor(
     private readonly schoolWorksService: SchoolWorksService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly schoolPartnersService: SchoolPartnersService,
   ) {}
 
   @Get()
-  @RequireAnyPermissions(['schoolWork', 'employees'], 'view')
+  @RequirePermissions('schoolWork', 'view')
   findAll() {
     return this.schoolWorksService.findAll();
   }
@@ -47,6 +48,7 @@ export class SchoolWorksController {
       );
     }
     const processed = await this.schoolWorksService.create(body);
+    await this.schoolPartnersService.upsertFromSchoolRecord(processed);
     await this.auditLogsService.append({
       username,
       action: 'ADD_SCHOOL_WORK',
@@ -68,6 +70,7 @@ export class SchoolWorksController {
     const { added, skipped, skippedCodes } =
       await this.schoolWorksService.bulkInsert(body);
     if (added > 0) {
+      await this.schoolPartnersService.syncFromSchools();
       await this.auditLogsService.append({
         username,
         action: 'BULK_IMPORT_SCHOOL_WORKS',
@@ -94,9 +97,11 @@ export class SchoolWorksController {
     const oldState = await this.schoolWorksService.findById(id);
     if (!oldState) throw new NotFoundException('School record not found.');
 
-    if (body.udise && body.udise !== id) {
+    const newUdise = body.udise ? String(body.udise).trim() : '';
+    const oldUdise = String(oldState.udise || '').trim();
+    if (newUdise && newUdise !== oldUdise) {
       if (
-        await this.schoolWorksService.existsByUdise(String(body.udise), id)
+        await this.schoolWorksService.existsByUdise(newUdise, id)
       ) {
         throw new BadRequestException(
           `UDISE ${body.udise} belongs to another record.`,
@@ -106,6 +111,7 @@ export class SchoolWorksController {
 
     const updated = await this.schoolWorksService.update(id, body);
     if (!updated) throw new NotFoundException('School record not found.');
+    await this.schoolPartnersService.upsertFromSchoolRecord(updated);
 
     await this.auditLogsService.append({
       username,
@@ -125,25 +131,35 @@ export class SchoolWorksController {
     try {
       const result = await this.schoolWorksService.distributeBlockExpense({
         block: dto.block,
+        district: dto.district,
         monthKey: dto.monthKey,
         materialAmount: dto.materialAmount,
+        trekAmount: dto.trekAmount,
         miscellaneousAmount: dto.miscellaneousAmount,
         materialRemark: dto.materialRemark,
+        trekRemark: dto.trekRemark,
         miscellaneousRemark: dto.miscellaneousRemark,
+        materialDate: dto.materialDate,
+        trekDate: dto.trekDate,
+        miscellaneousDate: dto.miscellaneousDate,
       });
 
       await this.auditLogsService.append({
         username,
         action: 'DISTRIBUTE_BLOCK_SCHOOL_EXPENSE',
-        target: `Block expense for "${dto.block}" (${dto.monthKey}): Material ₹${dto.materialAmount}, Miscellaneous ₹${dto.miscellaneousAmount} split across ${result.updatedCount} school(s).`,
+        target: `Block expense for "${dto.block}" (${dto.monthKey}): Material ₹${dto.materialAmount || 0}, Trek ₹${dto.trekAmount || 0}, Miscellaneous ₹${dto.miscellaneousAmount || 0} split across ${result.updatedCount} school(s).`,
         details: {
           block: dto.block,
+          district: dto.district || '',
           monthKey: dto.monthKey,
-          materialAmount: dto.materialAmount,
-          miscellaneousAmount: dto.miscellaneousAmount,
+          materialAmount: dto.materialAmount || 0,
+          trekAmount: dto.trekAmount || 0,
+          miscellaneousAmount: dto.miscellaneousAmount || 0,
           materialRemark: dto.materialRemark || '',
+          trekRemark: dto.trekRemark || '',
           miscellaneousRemark: dto.miscellaneousRemark || '',
           perSchoolMaterial: result.perSchoolMaterial,
+          perSchoolTrek: result.perSchoolTrek,
           perSchoolMiscellaneous: result.perSchoolMiscellaneous,
           updatedCount: result.updatedCount,
         },
@@ -154,6 +170,104 @@ export class SchoolWorksController {
       const message = err instanceof Error ? err.message : 'Distribution failed.';
       throw new BadRequestException(message);
     }
+  }
+
+  @Post('delete-block-expense')
+  @RequirePermissions('schoolWork', 'edit')
+  async deleteBlockExpense(
+    @CurrentUsername() username: string,
+    @Body() dto: DeleteBlockExpenseDto,
+  ) {
+    try {
+      const result = await this.schoolWorksService.deleteBlockExpense({
+        block: dto.block,
+        district: dto.district,
+        monthKey: dto.monthKey,
+        expenseType: dto.expenseType,
+      });
+
+      const typeLabel =
+        dto.expenseType === 'material'
+          ? 'Material'
+          : dto.expenseType === 'trek'
+            ? 'Trek'
+            : 'Miscellaneous';
+
+      await this.auditLogsService.append({
+        username,
+        action: 'DELETE_BLOCK_SCHOOL_EXPENSE',
+        target: `Deleted ${typeLabel} expense for block "${dto.block}" (${dto.monthKey}) across ${result.updatedCount} school(s).`,
+        details: {
+          block: dto.block,
+          district: dto.district || '',
+          monthKey: dto.monthKey,
+          expenseType: dto.expenseType,
+          updatedCount: result.updatedCount,
+        },
+      });
+
+      return { success: true, ...result };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Delete failed.';
+      throw new BadRequestException(message);
+    }
+  }
+
+  @Post('bulk-update-workdays')
+  @RequirePermissions('schoolWork', 'edit')
+  async bulkUpdateWorkdays(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkUpdateWorkdaysDto,
+  ) {
+    try {
+      const result = await this.schoolWorksService.bulkUpdateWorkdays({
+        block: dto.block,
+        district: dto.district,
+        monthKey: dto.monthKey,
+        defaultDays: dto.defaultDays,
+        updates: dto.updates,
+      });
+
+      await this.auditLogsService.append({
+        username,
+        action: 'BULK_UPDATE_SCHOOL_WORKDAYS',
+        target: `Workdays for "${dto.block}" (${dto.monthKey}): updated ${result.updatedCount} school(s).`,
+        details: {
+          block: dto.block,
+          district: dto.district || '',
+          monthKey: dto.monthKey,
+          defaultDays: dto.defaultDays ?? 24,
+          updatedCount: result.updatedCount,
+        },
+      });
+
+      return { success: true, ...result };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Workdays update failed.';
+      throw new BadRequestException(message);
+    }
+  }
+
+  @Post('bulk-update')
+  @RequirePermissions('schoolWork', 'edit')
+  async bulkUpdate(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkUpdateSchoolWorksDto,
+  ) {
+    if (!Array.isArray(dto.updates) || dto.updates.length === 0) {
+      throw new BadRequestException('Expected a non-empty updates array.');
+    }
+    const { updated, records } = await this.schoolWorksService.bulkUpdate(dto.updates);
+    if (updated > 0) {
+      await this.schoolPartnersService.syncFromSchools();
+      await this.auditLogsService.append({
+        username,
+        action: 'BULK_UPDATE_SCHOOL_WORKS',
+        target: `Bulk updated ${updated} school record(s).`,
+        details: { count: updated, ids: records.map((r) => r.id) },
+      });
+    }
+    return { success: true, updated, records };
   }
 
   @Post('delete')
@@ -168,6 +282,7 @@ export class SchoolWorksController {
     const { count, deleted } = await this.schoolWorksService.deleteByIds(
       dto.ids.map(String),
     );
+    await this.schoolPartnersService.deleteBySchoolWorkIds(dto.ids.map(String));
     await this.auditLogsService.append({
       username,
       action: 'DELETE_SCHOOL_WORKS',
