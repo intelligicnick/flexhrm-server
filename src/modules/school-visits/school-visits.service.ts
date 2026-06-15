@@ -16,6 +16,7 @@ import {
 } from '../../database/schemas/commitment-diary.schema';
 import { SchoolWorksService } from '../school-works/school-works.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DataArchiveService } from '../data-archive/data-archive.service';
 import { CreateSchoolVisitDto } from './dto/school-visit.dto';
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -35,6 +36,7 @@ export class SchoolVisitsService {
     private readonly commitmentModel: Model<CommitmentDiaryDocument>,
     private readonly schoolWorksService: SchoolWorksService,
     private readonly notificationsService: NotificationsService,
+    private readonly dataArchiveService: DataArchiveService,
   ) {}
 
   toPlain(doc: SchoolVisitDocument | Record<string, unknown>): Record<string, unknown> {
@@ -58,6 +60,7 @@ export class SchoolVisitsService {
     status?: string;
     fromDate?: string;
     toDate?: string;
+    includeArchived?: boolean;
   }): Promise<Record<string, unknown>[]> {
     const query: Record<string, unknown> = {};
     if (filters?.supervisorId) query.supervisorId = filters.supervisorId;
@@ -73,7 +76,38 @@ export class SchoolVisitsService {
       query.visitDate = dateFilter;
     }
     const docs = await this.visitModel.find(query).sort({ visitDate: -1 }).exec();
-    return docs.map((d) => this.toPlain(d));
+    const hot = docs.map((d) => this.toPlain(d));
+
+    const shouldIncludeArchived =
+      filters?.includeArchived ||
+      this.dataArchiveService.filtersNeedArchivedData({
+        fromDate: filters?.fromDate,
+        toDate: filters?.toDate,
+        monthKey: filters?.monthKey,
+      });
+
+    if (!shouldIncludeArchived) return hot;
+
+    const archived = await this.dataArchiveService.queryArchivedPayloads(
+      'school_visits',
+      {
+        supervisorId: filters?.supervisorId,
+        fromDate: filters?.fromDate,
+        toDate: filters?.toDate,
+        monthKey: filters?.monthKey,
+      },
+      true,
+    );
+
+    const merged = new Map<string, Record<string, unknown>>();
+    for (const row of [...hot, ...archived]) {
+      const id = String(row.id || '');
+      if (id) merged.set(id, row);
+    }
+
+    return [...merged.values()].sort((a, b) =>
+      String(b.visitDate || '').localeCompare(String(a.visitDate || '')),
+    );
   }
 
   async findById(id: string): Promise<Record<string, unknown> | null> {

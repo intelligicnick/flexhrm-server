@@ -28,6 +28,7 @@ import { SupervisorRequestsModule } from './modules/supervisor-requests/supervis
 import { CommitmentDiaryModule } from './modules/commitment-diary/commitment-diary.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SeedModule } from './seed/seed.module';
+import { DataArchiveModule } from './modules/data-archive/data-archive.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { SeedModule } from './seed/seed.module';
     BulkPayExportsModule,
     HealthModule,
     SeedModule,
+    DataArchiveModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

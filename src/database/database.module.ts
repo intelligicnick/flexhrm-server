@@ -62,6 +62,8 @@ import {
   SupervisorActivitySession,
   SupervisorActivitySessionSchema,
 } from './schemas/supervisor-activity-session.schema';
+import { ArchivedRecord, ArchivedRecordSchema } from './schemas/archived-record.schema';
+import { ArchiveRun, ArchiveRunSchema } from './schemas/archive-run.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -91,6 +93,8 @@ const MODELS = [
   { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: SupervisorActivitySession.name, schema: SupervisorActivitySessionSchema },
+  { name: ArchivedRecord.name, schema: ArchivedRecordSchema },
+  { name: ArchiveRun.name, schema: ArchiveRunSchema },
 ];
 
 @Module({

@@ -277,10 +277,12 @@ export class SchoolSupervisorsService {
     return normalized;
   }
 
-  async getActivityHistory(supervisorId: string) {
+  async getActivityHistory(supervisorId: string, includeArchived = false) {
     const supervisor = await this.supervisorModel.findOne({ id: supervisorId }).exec();
     if (!supervisor) throw new NotFoundException('School supervisor not found.');
-    return this.supervisorActivityService.getHistory(supervisorId);
+    return this.supervisorActivityService.getHistory(supervisorId, 40, {
+      includeArchived,
+    });
   }
 
   async isDeviceRegistered(supervisorId: string, deviceId: string): Promise<boolean> {

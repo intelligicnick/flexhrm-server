@@ -11,6 +11,7 @@ import {
 import { SchoolWorksModule } from '../school-works/school-works.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DataArchiveModule } from '../data-archive/data-archive.module';
 import { SchoolVisitsController } from './school-visits.controller';
 import { SchoolVisitsService } from './school-visits.service';
 import { SupervisorAccessModule } from '../../common/guards/supervisor-access.module';
@@ -25,6 +26,7 @@ import { SupervisorAccessModule } from '../../common/guards/supervisor-access.mo
     AuditLogsModule,
     NotificationsModule,
     SupervisorAccessModule,
+    DataArchiveModule,
   ],
   controllers: [SchoolVisitsController],
   providers: [SchoolVisitsService],

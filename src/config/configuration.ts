@@ -31,6 +31,10 @@ export default () => ({
   smtpUser: process.env.SMTP_USER ?? '',
   smtpPass: process.env.SMTP_PASS ?? '',
   smtpFrom: process.env.SMTP_FROM ?? '',
-  idCardVerifyBaseUrl:
-    process.env.ID_CARD_VERIFY_BASE_URL ?? PRODUCTION_ID_CARD_VERIFY_BASE,
+  archiveDataDir: process.env.ARCHIVE_DATA_DIR ?? '',
+  archiveRetentionMonths: parseInt(
+    process.env.ARCHIVE_RETENTION_MONTHS ?? String(6),
+    10,
+  ),
+  archiveAutoRun: process.env.ARCHIVE_AUTO_RUN !== 'false',
 });

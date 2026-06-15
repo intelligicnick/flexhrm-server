@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Post,
+  Query,
 } from '@nestjs/common';
 import { AuditLogsService } from './audit-logs.service';
 import { CreateAuditLogDto } from './dto/create-audit-log.dto';
@@ -19,8 +20,10 @@ export class AuditLogsController {
 
   @Get()
   @RequirePermissions('admin', 'view')
-  findAll() {
-    return this.auditLogsService.findAll();
+  findAll(@Query('includeArchived') includeArchived?: string) {
+    return this.auditLogsService.findAll({
+      includeArchived: includeArchived === 'true',
+    });
   }
 
   @Post()

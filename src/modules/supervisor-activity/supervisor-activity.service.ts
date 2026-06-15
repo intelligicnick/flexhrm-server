@@ -7,6 +7,7 @@ import {
   SupervisorActivitySession,
   SupervisorActivitySessionDocument,
 } from '../../database/schemas/supervisor-activity-session.schema';
+import { DataArchiveService } from '../data-archive/data-archive.service';
 
 export interface SupervisorActivityHistoryEntry {
   id: string;
@@ -16,6 +17,7 @@ export interface SupervisorActivityHistoryEntry {
   lastActiveAt: string;
   durationMinutes: number;
   isOngoing: boolean;
+  archived?: boolean;
 }
 
 export interface SupervisorActivitySummary {
@@ -29,6 +31,7 @@ export class SupervisorActivityService {
   constructor(
     @InjectModel(SupervisorActivitySession.name)
     private readonly activityModel: Model<SupervisorActivitySessionDocument>,
+    private readonly dataArchiveService: DataArchiveService,
   ) {}
 
   private newId(): string {
@@ -150,9 +153,35 @@ export class SupervisorActivityService {
     };
   }
 
+  private toEntryFromPayload(
+    payload: Record<string, unknown>,
+    onlineCutoff: Date,
+  ): SupervisorActivityHistoryEntry {
+    const startedAt = new Date(String(payload.startedAt));
+    const endedAtRaw = payload.endedAt ? new Date(String(payload.endedAt)) : null;
+    const lastActiveAt = new Date(String(payload.lastActiveAt || payload.startedAt));
+    const isOngoing = !endedAtRaw && lastActiveAt >= onlineCutoff;
+    return {
+      id: String(payload.id),
+      supervisorId: String(payload.supervisorId),
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAtRaw ? endedAtRaw.toISOString() : null,
+      lastActiveAt: lastActiveAt.toISOString(),
+      durationMinutes: this.computeDurationMinutes(
+        startedAt,
+        endedAtRaw,
+        lastActiveAt,
+        isOngoing,
+      ),
+      isOngoing,
+      archived: true,
+    };
+  }
+
   async getHistory(
     supervisorId: string,
     limit = 40,
+    options?: { includeArchived?: boolean },
   ): Promise<{ sessions: SupervisorActivityHistoryEntry[]; summary: SupervisorActivitySummary }> {
     await this.closeStaleOpenSessions(supervisorId);
 
@@ -165,6 +194,24 @@ export class SupervisorActivityService {
 
     const sessions = docs.map((doc) => this.toEntry(doc, onlineCutoff));
 
+    let allSessions = sessions;
+    if (options?.includeArchived) {
+      const archivedPayloads = await this.dataArchiveService.queryArchivedPayloads(
+        'supervisor_activity_sessions',
+        { supervisorId, limit: Math.max(limit, 100) },
+      );
+      const archivedSessions = archivedPayloads.map((payload) =>
+        this.toEntryFromPayload(payload, onlineCutoff),
+      );
+      const merged = new Map<string, SupervisorActivityHistoryEntry>();
+      for (const entry of [...sessions, ...archivedSessions]) {
+        merged.set(entry.id, entry);
+      }
+      allSessions = [...merged.values()]
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        .slice(0, limit);
+    }
+
     const now = new Date();
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
@@ -173,21 +220,20 @@ export class SupervisorActivityService {
     let todayMinutes = 0;
     let last7DaysMinutes = 0;
 
-    for (const doc of docs) {
-      const entry = this.toEntry(doc, onlineCutoff);
+    for (const entry of allSessions) {
       const minutes = entry.durationMinutes;
-      const sessionStart = doc.startedAt;
+      const sessionStart = new Date(entry.startedAt);
 
       if (sessionStart >= startOfToday) todayMinutes += minutes;
       if (sessionStart >= sevenDaysAgo) last7DaysMinutes += minutes;
     }
 
     return {
-      sessions,
+      sessions: allSessions,
       summary: {
         todayMinutes,
         last7DaysMinutes,
-        sessionCount: docs.length,
+        sessionCount: allSessions.length,
       },
     };
   }

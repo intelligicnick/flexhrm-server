@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { SchoolSupervisorsService } from './school-supervisors.service';
 import {
   BulkDeleteSchoolSupervisorsDto,
@@ -62,8 +62,11 @@ export class SchoolSupervisorsController {
 
   @Get(':id/activity-history')
   @RequirePermissions('schoolWork', 'view')
-  getActivityHistory(@Param('id') id: string) {
-    return this.supervisorsService.getActivityHistory(id);
+  getActivityHistory(
+    @Param('id') id: string,
+    @Query('includeArchived') includeArchived?: string,
+  ) {
+    return this.supervisorsService.getActivityHistory(id, includeArchived === 'true');
   }
 
   @Put(':id')

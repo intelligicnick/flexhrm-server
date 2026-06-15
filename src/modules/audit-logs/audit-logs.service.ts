@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MAX_AUDIT_LOGS_HOT } from '../../common/constants/permissions.constants';
 import { generateAuditLogId } from '../../common/utils/password.util';
 import { AuditLog, AuditLogDocument } from '../../database/schemas/audit-log.schema';
+import { DataArchiveService } from '../data-archive/data-archive.service';
 
 export interface AuditLogInput {
   username: string;
@@ -17,15 +18,29 @@ export class AuditLogsService {
   constructor(
     @InjectModel(AuditLog.name)
     private readonly auditLogModel: Model<AuditLogDocument>,
+    @Inject(forwardRef(() => DataArchiveService))
+    private readonly dataArchiveService: DataArchiveService,
   ) {}
 
-  async findAll(): Promise<AuditLog[]> {
-    return this.auditLogModel
+  async findAll(options?: { includeArchived?: boolean }): Promise<AuditLog[]> {
+    const hot = await this.auditLogModel
       .find()
       .sort({ timestamp: -1 })
       .limit(MAX_AUDIT_LOGS_HOT)
       .lean()
       .exec();
+
+    if (!options?.includeArchived) return hot;
+
+    const archived = await this.dataArchiveService.queryArchivedPayloads(
+      'audit_logs',
+      { limit: MAX_AUDIT_LOGS_HOT },
+    );
+
+    const archivedLogs = archived.map((payload) => payload as unknown as AuditLog);
+    return [...hot, ...archivedLogs]
+      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+      .slice(0, MAX_AUDIT_LOGS_HOT);
   }
 
   async append(input: AuditLogInput): Promise<void> {
@@ -41,16 +56,7 @@ export class AuditLogsService {
     const count = await this.auditLogModel.countDocuments();
     if (count > MAX_AUDIT_LOGS_HOT) {
       const excess = count - MAX_AUDIT_LOGS_HOT;
-      const oldest = await this.auditLogModel
-        .find()
-        .sort({ timestamp: 1 })
-        .limit(excess)
-        .select('id')
-        .lean();
-      const ids = oldest.map((l) => l.id);
-      if (ids.length) {
-        await this.auditLogModel.deleteMany({ id: { $in: ids } });
-      }
+      await this.dataArchiveService.archiveOldestAuditLogs(excess);
     }
   }
 

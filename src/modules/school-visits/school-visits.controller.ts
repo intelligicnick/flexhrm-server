@@ -41,6 +41,7 @@ export class SchoolVisitsController {
     @Query('block') block?: string,
     @Query('monthKey') monthKey?: string,
     @Query('status') status?: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.visitsService.findAll({
       supervisorId,
@@ -48,6 +49,7 @@ export class SchoolVisitsController {
       block,
       monthKey,
       status,
+      includeArchived: includeArchived === 'true',
     });
   }
 
