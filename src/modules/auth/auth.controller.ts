@@ -313,7 +313,6 @@ export class AuthController {
 
     const supervisorId = String(supervisor.id);
     const registeredDeviceId = String(supervisor.registeredDeviceId || '');
-    let needsDeviceRegistration = !registeredDeviceId;
 
     if (registeredDeviceId && registeredDeviceId !== deviceId) {
       const otp = String(dto.deviceOtp || '').trim();
@@ -333,8 +332,9 @@ export class AuthController {
       if (!verified) {
         throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
       }
-      needsDeviceRegistration = false;
-    } else if (registeredDeviceId && deviceName) {
+    } else if (!registeredDeviceId) {
+      await this.schoolSupervisorsService.registerDevice(supervisorId, deviceId, deviceName);
+    } else if (deviceName) {
       await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
     }
 
@@ -357,8 +357,7 @@ export class AuthController {
       name: supervisor.name,
       phone,
       assignedBlocks,
-      needsDeviceRegistration,
-      deviceRegistered: !needsDeviceRegistration,
+      deviceRegistered: true,
     };
   }
 
