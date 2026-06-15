@@ -5,7 +5,7 @@ export type AdminDocument = HydratedDocument<Admin>;
 
 @Schema({ timestamps: true, collection: 'admins' })
 export class Admin {
-  @Prop({ required: true, unique: true, index: true, lowercase: true, trim: true })
+  @Prop({ required: true, lowercase: true, trim: true })
   username!: string;
 
   @Prop({ required: true, select: false })
@@ -38,4 +38,7 @@ export class Admin {
 
 export const AdminSchema = SchemaFactory.createForClass(Admin);
 
-AdminSchema.index({ username: 1 }, { collation: { locale: 'en', strength: 2 } });
+AdminSchema.index(
+  { username: 1 },
+  { unique: true, collation: { locale: 'en', strength: 2 } },
+);

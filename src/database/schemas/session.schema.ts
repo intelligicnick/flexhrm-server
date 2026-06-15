@@ -32,7 +32,7 @@ export class Session {
   @Prop({ required: true, type: Date })
   createdAt!: Date;
 
-  @Prop({ required: true, type: Date, index: true })
+  @Prop({ required: true, type: Date })
   expiresAt!: Date;
 
   @Prop({ type: Date, index: true })
