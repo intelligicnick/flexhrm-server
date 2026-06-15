@@ -19,10 +19,14 @@ async function bootstrap(): Promise<void> {
 
   function isAllowedCorsOrigin(origin: string | undefined): boolean {
     if (!origin) return true;
+    // Android WebView bundled assets and some mobile browsers send this literal value.
+    if (origin === 'null') return true;
     if (corsOrigins.includes(origin)) return true;
     try {
       const { hostname } = new URL(origin);
       if (hostname.endsWith('.hostingersite.com')) return true;
+      // Capacitor/WebViewAssetLoader domain for the supervisor APK.
+      if (hostname === 'appassets.androidplatform.net') return true;
     } catch {
       return false;
     }
@@ -52,7 +56,13 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api');
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ extended: true, limit: '50mb' }));
-  app.use(helmet());
+  // Default helmet CORP is `same-origin`, which blocks cross-origin browser fetch()
+  // even when CORS headers are present (frontend and API are on separate Hostinger hosts).
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(compression());
   app.enableCors({
     origin: (
