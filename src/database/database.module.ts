@@ -64,6 +64,23 @@ import {
 } from './schemas/supervisor-activity-session.schema';
 import { ArchivedRecord, ArchivedRecordSchema } from './schemas/archived-record.schema';
 import { ArchiveRun, ArchiveRunSchema } from './schemas/archive-run.schema';
+import { Tender, TenderSchema } from './schemas/tender.schema';
+import { Contract, ContractSchema } from './schemas/contract.schema';
+import { Renewal, RenewalSchema } from './schemas/renewal.schema';
+import {
+  RenewalDocument,
+  RenewalDocumentSchema,
+} from './schemas/renewal-document.schema';
+import { CaptureCandidate, CaptureCandidateSchema } from './schemas/capture-candidate.schema';
+import { CaptureLead, CaptureLeadSchema } from './schemas/capture-lead.schema';
+import { CaptureContact, CaptureContactSchema } from './schemas/capture-contact.schema';
+import { CapturedContent, CapturedContentSchema } from './schemas/captured-content.schema';
+import { CaptureActivityLog, CaptureActivityLogSchema } from './schemas/capture-activity-log.schema';
+import { ExtensionApiSettings, ExtensionApiSettingsSchema } from './schemas/extension-api-settings.schema';
+import {
+  ExtensionConnectionCode,
+  ExtensionConnectionCodeSchema,
+} from './schemas/extension-connection-code.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -95,6 +112,17 @@ const MODELS = [
   { name: SupervisorActivitySession.name, schema: SupervisorActivitySessionSchema },
   { name: ArchivedRecord.name, schema: ArchivedRecordSchema },
   { name: ArchiveRun.name, schema: ArchiveRunSchema },
+  { name: Tender.name, schema: TenderSchema },
+  { name: Contract.name, schema: ContractSchema },
+  { name: Renewal.name, schema: RenewalSchema },
+  { name: RenewalDocument.name, schema: RenewalDocumentSchema },
+  { name: CaptureCandidate.name, schema: CaptureCandidateSchema },
+  { name: CaptureLead.name, schema: CaptureLeadSchema },
+  { name: CaptureContact.name, schema: CaptureContactSchema },
+  { name: CapturedContent.name, schema: CapturedContentSchema },
+  { name: CaptureActivityLog.name, schema: CaptureActivityLogSchema },
+  { name: ExtensionApiSettings.name, schema: ExtensionApiSettingsSchema },
+  { name: ExtensionConnectionCode.name, schema: ExtensionConnectionCodeSchema },
 ];
 
 @Module({

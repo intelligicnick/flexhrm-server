@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -24,6 +25,10 @@ import {
 } from './dto/school-visit.dto';
 import { SupervisorGuard } from '../../common/guards/supervisor.guard';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
+import {
+  filterSchoolsForSupervisor,
+  supervisorCanAccessSchool,
+} from './supervisor-school-access.util';
 
 @Controller('school-visits')
 export class SchoolVisitsController {
@@ -72,14 +77,27 @@ export class SchoolVisitsController {
   @Get('supervisor/schools')
   @UseGuards(SupervisorGuard)
   async supervisorSchools(@Req() req: Request & { user: AdminSessionPayload }) {
-    const assignedBlocks = (req.user as AdminSessionPayload & { assignedBlocks?: string[] })
-      .assignedBlocks || [];
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
     const allSchools = await this.schoolWorksService.findAll();
-    if (assignedBlocks.length === 0) return [];
-    const normalized = assignedBlocks.map((b) => b.toLowerCase());
-    return allSchools.filter((s) =>
-      normalized.includes(String(s.block || '').toLowerCase()),
-    );
+    return filterSchoolsForSupervisor(allSchools, supervisorId, assignedBlocks);
+  }
+
+  @Get('supervisor/schools/:schoolWorkId')
+  @UseGuards(SupervisorGuard)
+  async supervisorSchoolById(
+    @Req() req: Request & { user: AdminSessionPayload },
+    @Param('schoolWorkId') schoolWorkId: string,
+  ) {
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
+    const school = await this.schoolWorksService.findById(schoolWorkId);
+    if (!school || !supervisorCanAccessSchool(school, supervisorId, assignedBlocks)) {
+      throw new NotFoundException('School not found.');
+    }
+    return school;
   }
 
   @Get('supervisor/reverse-geocode')

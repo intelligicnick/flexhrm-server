@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-hostinger-entry.cjs",
     "start": "node dist/main",
+    "dev": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",

@@ -4,6 +4,10 @@ import {
   CommitmentDiary,
   CommitmentDiarySchema,
 } from '../../database/schemas/commitment-diary.schema';
+import {
+  SchoolVisit,
+  SchoolVisitSchema,
+} from '../../database/schemas/school-visit.schema';
 import { CommitmentDiaryController } from './commitment-diary.controller';
 import { CommitmentDiaryService } from './commitment-diary.service';
 import { SchoolWorksModule } from '../school-works/school-works.module';
@@ -16,6 +20,7 @@ import { SupervisorAccessModule } from '../../common/guards/supervisor-access.mo
   imports: [
     MongooseModule.forFeature([
       { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
+      { name: SchoolVisit.name, schema: SchoolVisitSchema },
     ]),
     SchoolWorksModule,
     PlannedVisitsModule,

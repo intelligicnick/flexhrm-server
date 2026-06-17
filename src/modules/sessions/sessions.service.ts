@@ -5,6 +5,7 @@ import {
   SESSION_DURATION_MS,
   SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS,
 } from '../../common/constants/permissions.constants';
+import { SUPERVISOR_SESSION_DURATION_MS } from '../../common/constants/supervisor-portal.constants';
 import { generateToken } from '../../common/utils/password.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { Session, SessionDocument } from '../../database/schemas/session.schema';
@@ -30,6 +31,10 @@ export class SessionsService {
   ): Promise<string> {
     const token = generateToken();
     const now = new Date();
+    const sessionDurationMs =
+      options?.userType === 'supervisor'
+        ? SUPERVISOR_SESSION_DURATION_MS
+        : SESSION_DURATION_MS;
     await this.sessionModel.create({
       token,
       username,
@@ -40,7 +45,7 @@ export class SessionsService {
       assignedBlocks: options?.assignedBlocks || [],
       impersonated: !!options?.impersonated,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + SESSION_DURATION_MS),
+      expiresAt: new Date(now.getTime() + sessionDurationMs),
       lastActiveAt: now,
     });
 
@@ -134,7 +139,12 @@ export class SessionsService {
           { lastActiveAt: { $exists: false } },
         ],
       },
-      { $set: { lastActiveAt: now } },
+      {
+        $set: {
+          lastActiveAt: now,
+          expiresAt: new Date(now.getTime() + SUPERVISOR_SESSION_DURATION_MS),
+        },
+      },
     );
     if (result.modifiedCount > 0) {
       void this.supervisorActivityService.recordActivity(supervisorId, now);

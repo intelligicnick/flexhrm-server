@@ -126,9 +126,15 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 900000 } })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     const identifier = dto.username.trim();
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H1',location:'auth.controller.ts:129',message:'forgot-password requested',data:{identifierLength:identifier.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const admin = await this.adminsService.findByUsernameOrEmail(identifier);
 
     if (!admin || admin.disabled) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H3',location:'auth.controller.ts:133',message:'forgot-password unknown-or-disabled account',data:{found:!!admin,disabled:!!admin?.disabled},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return {
         success: true,
         message:
@@ -162,6 +168,9 @@ export class AuthController {
         admin.username,
         resetCode,
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H2',location:'auth.controller.ts:165',message:'forgot-password email attempt result',data:{emailConfigured:true,emailSent:sent},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (sent) {
         response.message =
           'A reset code has been sent to your registered email address. It expires in 15 minutes.';
@@ -180,7 +189,9 @@ export class AuthController {
         'Use the reset code below to set a new password. The code expires in 15 minutes.';
     }
 
-    response.resetToken = resetCode;
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'post-fix',hypothesisId:'H1',location:'auth.controller.ts:186',message:'forgot-password fallback response without resetToken',data:{hasEmail:!!admin.email,emailConfigured:this.emailService.isConfigured(),includesResetToken:false},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return response;
   }
 
@@ -236,6 +247,9 @@ export class AuthController {
   @Post('quick-login')
   @HttpCode(200)
   async quickLogin() {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H4',location:'auth.controller.ts:242',message:'quick-login requested',data:{nodeEnv:this.configService.get<string>('nodeEnv')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (this.configService.get<string>('nodeEnv') === 'production') {
       throw new ForbiddenException('Quick login is disabled in production.');
     }

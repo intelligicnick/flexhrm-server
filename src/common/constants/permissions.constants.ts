@@ -1,6 +1,8 @@
 export const PERMISSION_MODULES = [
   'employees',
   'schoolWork',
+  'bids',
+  'renewals',
   'salary',
   'ledger',
   'attendance',
@@ -36,6 +38,8 @@ export const DEFAULT_ROLES = [
     permissions: {
       employees: { view: true, edit: true },
       schoolWork: { view: true, edit: true },
+      bids: { view: true, edit: true },
+      renewals: { view: true, edit: true },
       salary: { view: true, edit: false },
       ledger: { view: true, edit: false },
       attendance: { view: true, edit: true },
@@ -51,6 +55,8 @@ export const DEFAULT_ROLES = [
     permissions: {
       employees: { view: true, edit: false },
       schoolWork: { view: true, edit: false },
+      bids: { view: true, edit: false },
+      renewals: { view: true, edit: false },
       salary: { view: true, edit: false },
       ledger: { view: true, edit: false },
       attendance: { view: true, edit: false },

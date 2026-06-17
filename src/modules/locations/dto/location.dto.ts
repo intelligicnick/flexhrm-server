@@ -10,6 +10,10 @@ export class UpsertLocationDto {
   complianceEnabled?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  ptEnabled?: boolean;
+
+  @IsOptional()
   @IsNumber()
   ptAmount?: number;
 }

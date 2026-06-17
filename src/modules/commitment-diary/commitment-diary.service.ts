@@ -11,6 +11,10 @@ import {
   CommitmentDiary,
   CommitmentDiaryDocument,
 } from '../../database/schemas/commitment-diary.schema';
+import {
+  SchoolVisit,
+  SchoolVisitDocument,
+} from '../../database/schemas/school-visit.schema';
 import { SchoolWorksService } from '../school-works/school-works.service';
 import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import { PlannedVisitsService } from '../planned-visits/planned-visits.service';
@@ -59,6 +63,8 @@ export class CommitmentDiaryService {
   constructor(
     @InjectModel(CommitmentDiary.name)
     private readonly commitmentModel: Model<CommitmentDiaryDocument>,
+    @InjectModel(SchoolVisit.name)
+    private readonly visitModel: Model<SchoolVisitDocument>,
     private readonly schoolWorksService: SchoolWorksService,
     private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly plannedVisitsService: PlannedVisitsService,
@@ -208,6 +214,37 @@ export class CommitmentDiaryService {
     const sortedFrom = fromDate <= toDate ? fromDate : toDate;
     const sortedTo = fromDate <= toDate ? toDate : fromDate;
     assertNotPastDate(sortedFrom, sortedTo);
+
+    const today = todayIsoDate();
+    const lastVisit = await this.visitModel
+      .findOne({ supervisorId, schoolWorkId: dto.schoolWorkId })
+      .sort({ visitDate: -1 })
+      .exec();
+    if (lastVisit?.visitDate) {
+      const last = new Date(`${lastVisit.visitDate}T12:00:00`);
+      const next = new Date(`${today}T12:00:00`);
+      const daysSince = Math.floor((next.getTime() - last.getTime()) / 86_400_000);
+      const minGap = 5;
+      if (daysSince < minGap) {
+        throw new BadRequestException(
+          `Please wait ${minGap - daysSince} more day(s) before scheduling this school again.`,
+        );
+      }
+    }
+
+    const activeCommitment = await this.commitmentModel
+      .findOne({
+        supervisorId,
+        schoolWorkId: dto.schoolWorkId,
+        status: { $in: ['committed', 'in_progress'] },
+        toDate: { $gte: sortedFrom },
+      })
+      .exec();
+    if (activeCommitment) {
+      throw new BadRequestException(
+        'This school already has an active commitment. Complete the visit or wait before scheduling again.',
+      );
+    }
 
     const id = `cdiary_${crypto.randomBytes(8).toString('hex')}`;
     const doc = await this.commitmentModel.create({

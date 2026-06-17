@@ -36,5 +36,6 @@ export default () => ({
     process.env.ARCHIVE_RETENTION_MONTHS ?? String(6),
     10,
   ),
-  archiveAutoRun: process.env.ARCHIVE_AUTO_RUN !== 'false',
+  openAiApiKey: process.env.OPENAI_API_KEY ?? '',
+  openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
 });

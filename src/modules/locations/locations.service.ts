@@ -17,6 +17,7 @@ export class LocationsService {
   async upsert(data: {
     name: string;
     complianceEnabled?: boolean;
+    ptEnabled?: boolean;
     ptAmount?: number;
   }): Promise<Location> {
     const name = data.name.trim();
@@ -26,6 +27,7 @@ export class LocationsService {
         {
           name,
           complianceEnabled: data.complianceEnabled ?? false,
+          ptEnabled: data.ptEnabled ?? false,
           ptAmount: data.ptAmount ?? 0,
           deleted: false,
         },

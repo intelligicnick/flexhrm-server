@@ -138,6 +138,22 @@ export class SchoolVisitsService {
       );
     }
 
+    const lastVisit = await this.visitModel
+      .findOne({ supervisorId, schoolWorkId: dto.schoolWorkId })
+      .sort({ visitDate: -1 })
+      .exec();
+    if (lastVisit?.visitDate) {
+      const last = new Date(`${lastVisit.visitDate}T12:00:00`);
+      const next = new Date(`${visitDate}T12:00:00`);
+      const daysSince = Math.floor((next.getTime() - last.getTime()) / 86_400_000);
+      const minGap = 5;
+      if (daysSince < minGap) {
+        throw new BadRequestException(
+          `Please wait ${minGap - daysSince} more day(s) before visiting this school again.`,
+        );
+      }
+    }
+
     const photos = (dto.photos || []).map((photo) => {
       const buffer = Buffer.from(
         photo.photoDataBase64.includes(',')

@@ -29,6 +29,10 @@ import { CommitmentDiaryModule } from './modules/commitment-diary/commitment-dia
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SeedModule } from './seed/seed.module';
 import { DataArchiveModule } from './modules/data-archive/data-archive.module';
+import { TendersModule } from './modules/tenders/tenders.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
+import { RenewalsModule } from './modules/renewals/renewals.module';
+import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module';
 
 @Module({
   imports: [
@@ -59,6 +63,10 @@ import { DataArchiveModule } from './modules/data-archive/data-archive.module';
     HealthModule,
     SeedModule,
     DataArchiveModule,
+    TendersModule,
+    ContractsModule,
+    RenewalsModule,
+    SmartCaptureModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

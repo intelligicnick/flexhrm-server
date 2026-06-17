@@ -250,6 +250,11 @@ export class SchoolSupervisorsService {
   }
 
   async getBlockedAppsToUninstall(): Promise<string[]> {
+    const fromDb = await this.getBlockedAppsFromMeta();
+    return fromDb.slice(0, 50);
+  }
+
+  private async getBlockedAppsFromMeta(): Promise<string[]> {
     const doc = await this.appMetaModel.findOne({ metaKey: BLOCKED_APPS_META_KEY }).exec();
     if (!doc?.metaValue) return [];
     try {
@@ -257,8 +262,7 @@ export class SchoolSupervisorsService {
       if (!Array.isArray(parsed)) return [];
       return parsed
         .map((item) => String(item || '').trim())
-        .filter(Boolean)
-        .slice(0, 50);
+        .filter(Boolean);
     } catch {
       return [];
     }

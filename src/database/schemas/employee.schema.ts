@@ -98,6 +98,10 @@ export class Employee {
   @Prop({ default: false })
   complianceEnabled!: boolean;
 
+  /** Professional Tax deduction enabled for this employee (only applies where the office location levies PT). */
+  @Prop({ default: false })
+  ptEnabled!: boolean;
+
   @Prop({ enum: ['gross', 'ceiling_15000'], default: 'gross' })
   pfCalculationMode!: string;
 
