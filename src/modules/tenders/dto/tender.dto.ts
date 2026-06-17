@@ -25,6 +25,18 @@ export class CreateTenderDto {
 
   @IsOptional()
   @IsString()
+  ministry?: string;
+
+  @IsOptional()
+  @IsString()
+  organisation?: string;
+
+  @IsOptional()
+  @IsString()
+  consigneeOfficer?: string;
+
+  @IsOptional()
+  @IsString()
   department?: string;
 
   @IsOptional()
@@ -50,7 +62,15 @@ export class CreateTenderDto {
 
   @IsOptional()
   @IsString()
+  additionalRequirements?: string;
+
+  @IsOptional()
+  @IsString()
   endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
 
   @IsOptional()
   @IsString()
@@ -109,6 +129,18 @@ export class UpdateTenderDto {
 
   @IsOptional()
   @IsString()
+  ministry?: string;
+
+  @IsOptional()
+  @IsString()
+  organisation?: string;
+
+  @IsOptional()
+  @IsString()
+  consigneeOfficer?: string;
+
+  @IsOptional()
+  @IsString()
   department?: string;
 
   @IsOptional()
@@ -134,7 +166,15 @@ export class UpdateTenderDto {
 
   @IsOptional()
   @IsString()
+  additionalRequirements?: string;
+
+  @IsOptional()
+  @IsString()
   endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
 
   @IsOptional()
   @IsString()
@@ -220,6 +260,10 @@ export class SyncTenderDto {
 
   @IsOptional()
   @IsString()
+  additionalRequirements?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()
@@ -228,11 +272,27 @@ export class SyncTenderDto {
 
   @IsOptional()
   @IsString()
+  ministry?: string;
+
+  @IsOptional()
+  @IsString()
+  organisation?: string;
+
+  @IsOptional()
+  @IsString()
+  consigneeOfficer?: string;
+
+  @IsOptional()
+  @IsString()
   department?: string;
 
   @IsOptional()
   @IsString()
   endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
 
   @IsOptional()
   @IsString()

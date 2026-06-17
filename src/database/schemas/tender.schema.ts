@@ -33,9 +33,23 @@ export class Tender {
   @Prop({ default: '' })
   category!: string;
 
+  /** GeM Ministry/State Name */
+  @Prop({ default: '' })
+  ministry!: string;
+
+  /** GeM Organisation Name */
+  @Prop({ default: '' })
+  organisation!: string;
+
+  /** GeM Consignee Reporting/Officer */
+  @Prop({ default: '' })
+  consigneeOfficer!: string;
+
+  /** @deprecated Legacy org field — use `organisation` */
   @Prop({ default: '' })
   department!: string;
 
+  /** @deprecated Legacy officer field — use `consigneeOfficer` */
   @Prop({ default: '' })
   officerName!: string;
 
@@ -51,11 +65,19 @@ export class Tender {
   @Prop({ default: '' })
   rate!: string;
 
-  /** Submission deadline (date + optional time), stored as entered */
+  /** GeM additional requirement block (tenure, basic pay, PF, ESI, working days, etc.) */
+  @Prop({ default: '' })
+  additionalRequirements!: string;
+
+  /** Bid end date/time as shown on GeM */
   @Prop({ default: '', index: true })
   endDate!: string;
 
-  /** When the bid was filed, e.g. "FILED - 23-07-2025" */
+  /** Bid start date/time from GeM listing */
+  @Prop({ default: '' })
+  startDate!: string;
+
+  /** When participation was filed, e.g. "FILED - 23-07-2025" */
   @Prop({ default: '' })
   filedDate!: string;
 

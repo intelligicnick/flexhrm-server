@@ -65,8 +65,19 @@ export class TendersService {
       String(row.outcome || row.tenderStatus || '').trim();
 
     const { preBidStatus, preBidMeetingAt, tenderStatus, ...rest } = row;
+    const organisation =
+      String(rest.organisation || rest.department || '').trim();
+    const consigneeOfficer =
+      String(rest.consigneeOfficer || rest.officerName || '').trim();
     return {
       ...rest,
+      ministry: String(rest.ministry || '').trim(),
+      organisation,
+      consigneeOfficer,
+      department: organisation,
+      officerName: consigneeOfficer,
+      additionalRequirements: String(rest.additionalRequirements || '').trim(),
+      startDate: String(rest.startDate || '').trim(),
       status: normalizedStatus,
       preBidAt,
       preBidVenue,
@@ -116,7 +127,11 @@ export class TendersService {
           { bidNo: regex },
           { category: regex },
           { department: regex },
+          { organisation: regex },
           { officerName: regex },
+          { consigneeOfficer: regex },
+          { ministry: regex },
+          { additionalRequirements: regex },
           { address: regex },
           { outcome: regex },
           { description: regex },
@@ -178,13 +193,18 @@ export class TendersService {
       id,
       bidNo,
       category: dto.category?.trim() || '',
-      department: dto.department?.trim() || '',
-      officerName: dto.officerName?.trim() || '',
+      ministry: dto.ministry?.trim() || '',
+      organisation: dto.organisation?.trim() || dto.department?.trim() || '',
+      consigneeOfficer: dto.consigneeOfficer?.trim() || dto.officerName?.trim() || '',
+      department: dto.organisation?.trim() || dto.department?.trim() || '',
+      officerName: dto.consigneeOfficer?.trim() || dto.officerName?.trim() || '',
       address: dto.address?.trim() || '',
       tenderType: dto.tenderType || 'manpower',
       quantity: dto.quantity ?? 0,
       rate: dto.rate?.trim() || '',
+      additionalRequirements: dto.additionalRequirements?.trim() || '',
       endDate: dto.endDate?.trim() || '',
+      startDate: dto.startDate?.trim() || '',
       filedDate: dto.filedDate?.trim() || '',
       preBidAt,
       preBidVenue,
@@ -229,13 +249,32 @@ export class TendersService {
       doc.bidNo = bidNo;
     }
     if (dto.category !== undefined) doc.category = dto.category.trim();
-    if (dto.department !== undefined) doc.department = dto.department.trim();
-    if (dto.officerName !== undefined) doc.officerName = dto.officerName.trim();
+    if (dto.ministry !== undefined) doc.ministry = dto.ministry.trim();
+    if (dto.organisation !== undefined) {
+      doc.organisation = dto.organisation.trim();
+      doc.department = dto.organisation.trim();
+    }
+    if (dto.department !== undefined && dto.organisation === undefined) {
+      doc.department = dto.department.trim();
+      if (!doc.organisation) doc.organisation = dto.department.trim();
+    }
+    if (dto.consigneeOfficer !== undefined) {
+      doc.consigneeOfficer = dto.consigneeOfficer.trim();
+      doc.officerName = dto.consigneeOfficer.trim();
+    }
+    if (dto.officerName !== undefined && dto.consigneeOfficer === undefined) {
+      doc.officerName = dto.officerName.trim();
+      if (!doc.consigneeOfficer) doc.consigneeOfficer = dto.officerName.trim();
+    }
     if (dto.address !== undefined) doc.address = dto.address.trim();
     if (dto.tenderType !== undefined) doc.tenderType = dto.tenderType;
     if (dto.quantity !== undefined) doc.quantity = dto.quantity;
     if (dto.rate !== undefined) doc.rate = dto.rate.trim();
+    if (dto.additionalRequirements !== undefined) {
+      doc.additionalRequirements = dto.additionalRequirements.trim();
+    }
     if (dto.endDate !== undefined) doc.endDate = dto.endDate.trim();
+    if (dto.startDate !== undefined) doc.startDate = dto.startDate.trim();
     if (dto.filedDate !== undefined) doc.filedDate = dto.filedDate.trim();
     if (dto.preBidAt !== undefined) doc.preBidAt = dto.preBidAt.trim();
     if (dto.preBidVenue !== undefined) doc.preBidVenue = dto.preBidVenue.trim();
@@ -321,13 +360,30 @@ export class TendersService {
     item: CreateTenderDto,
   ): Promise<void> {
     if (item.category?.trim()) doc.category = item.category.trim();
-    if (item.department?.trim()) doc.department = item.department.trim();
-    if (item.officerName?.trim()) doc.officerName = item.officerName.trim();
+    if (item.ministry?.trim()) doc.ministry = item.ministry.trim();
+    if (item.organisation?.trim()) {
+      doc.organisation = item.organisation.trim();
+      doc.department = item.organisation.trim();
+    } else if (item.department?.trim()) {
+      doc.department = item.department.trim();
+      if (!doc.organisation) doc.organisation = item.department.trim();
+    }
+    if (item.consigneeOfficer?.trim()) {
+      doc.consigneeOfficer = item.consigneeOfficer.trim();
+      doc.officerName = item.consigneeOfficer.trim();
+    } else if (item.officerName?.trim()) {
+      doc.officerName = item.officerName.trim();
+      if (!doc.consigneeOfficer) doc.consigneeOfficer = item.officerName.trim();
+    }
     if (item.address?.trim()) doc.address = item.address.trim();
     if (item.tenderType) doc.tenderType = item.tenderType;
     if (item.quantity !== undefined) doc.quantity = item.quantity;
     if (item.rate?.trim()) doc.rate = item.rate.trim();
+    if (item.additionalRequirements?.trim()) {
+      doc.additionalRequirements = item.additionalRequirements.trim();
+    }
     if (item.endDate?.trim()) doc.endDate = item.endDate.trim();
+    if (item.startDate?.trim()) doc.startDate = item.startDate.trim();
     if (item.filedDate?.trim()) doc.filedDate = item.filedDate.trim();
     if (item.preBidAt?.trim()) doc.preBidAt = item.preBidAt.trim();
     if (item.preBidVenue?.trim()) doc.preBidVenue = item.preBidVenue.trim();
@@ -393,10 +449,25 @@ export class TendersService {
         if (item.noPreBid !== undefined) doc.noPreBid = item.noPreBid;
         if (item.address !== undefined) doc.address = item.address.trim();
         if (item.rate !== undefined) doc.rate = item.rate.trim();
+        if (item.additionalRequirements !== undefined) {
+          doc.additionalRequirements = item.additionalRequirements.trim();
+        }
         if (item.description !== undefined) doc.description = item.description.trim();
         if (item.category !== undefined) doc.category = item.category.trim();
-        if (item.department !== undefined) doc.department = item.department.trim();
+        if (item.ministry !== undefined) doc.ministry = item.ministry.trim();
+        if (item.organisation !== undefined) {
+          doc.organisation = item.organisation.trim();
+          doc.department = item.organisation.trim();
+        } else if (item.department !== undefined) {
+          doc.department = item.department.trim();
+          if (!doc.organisation) doc.organisation = item.department.trim();
+        }
+        if (item.consigneeOfficer !== undefined) {
+          doc.consigneeOfficer = item.consigneeOfficer.trim();
+          doc.officerName = item.consigneeOfficer.trim();
+        }
         if (item.endDate !== undefined) doc.endDate = item.endDate.trim();
+        if (item.startDate !== undefined) doc.startDate = item.startDate.trim();
         if (item.filedDate !== undefined) doc.filedDate = item.filedDate.trim();
         if (item.gemDocUrl !== undefined) doc.gemDocUrl = item.gemDocUrl.trim();
         if (item.preBidAt !== undefined || item.preBidVenue !== undefined || item.noPreBid !== undefined) {
