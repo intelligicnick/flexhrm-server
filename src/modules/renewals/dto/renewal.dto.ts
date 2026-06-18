@@ -201,6 +201,12 @@ export class BulkCreateRenewalDocumentsDto {
   documents!: CreateRenewalDocumentDto[];
 }
 
+export class BulkImportRenewalDto {
+  @ValidateNested({ each: true })
+  @Type(() => CreateRenewalDto)
+  items!: CreateRenewalDto[];
+}
+
 export const VALID_SUBTYPES_BY_CATEGORY: Record<string, readonly string[]> = {
   car_papers: CAR_PAPER_SUBTYPES,
   it_renewals: IT_RENEWAL_SUBTYPES,

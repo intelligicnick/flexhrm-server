@@ -20,6 +20,7 @@ import {
   CreateRenewalDto,
   ReplaceRenewalDocumentDto,
   BulkCreateRenewalDocumentsDto,
+  BulkImportRenewalDto,
   UpdateRenewalDto,
 } from './dto/renewal.dto';
 import { RenewalCategory } from '../../database/schemas/renewal.schema';
@@ -63,6 +64,12 @@ export class RenewalsController {
   @RequirePermissions('renewals', 'edit')
   create(@Body() dto: CreateRenewalDto) {
     return this.renewalsService.create(dto);
+  }
+
+  @Post('import')
+  @RequirePermissions('renewals', 'edit')
+  bulkImport(@Body() dto: BulkImportRenewalDto) {
+    return this.renewalsService.bulkImport(dto.items || []);
   }
 
   @Patch(':id')

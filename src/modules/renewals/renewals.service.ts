@@ -251,4 +251,112 @@ export class RenewalsService {
     await this.renewalDocumentsService.deleteAllForRenewal(id);
     await this.renewalModel.deleteOne({ id }).exec();
   }
+
+  private renewalMatchQuery(dto: CreateRenewalDto): Record<string, unknown> {
+    const title =
+      dto.category === 'car_papers'
+        ? (dto.title?.trim() || '').toUpperCase()
+        : dto.title?.trim() || '';
+    const query: Record<string, unknown> = {
+      category: dto.category,
+      subType: dto.subType.trim(),
+      title,
+    };
+    if (dto.category === 'it_renewals') {
+      query.ownerType = dto.ownerType || 'mine';
+      if (query.ownerType === 'client') {
+        query.clientName = dto.clientName?.trim() || '';
+      }
+    }
+    return query;
+  }
+
+  private applyImportedRenewal(
+    doc: RenewalDocument,
+    dto: CreateRenewalDto,
+  ): void {
+    const dates = this.resolveDates(dto);
+    if (dto.clientName !== undefined) doc.clientName = dto.clientName.trim();
+    if (dto.ownerType !== undefined) doc.ownerType = dto.ownerType;
+    if (dto.amount !== undefined) doc.amount = dto.amount.trim();
+    doc.hasExpiry = dates.hasExpiry;
+    doc.issuedOn = dates.issuedOn;
+    doc.expiresOn = dates.expiresOn;
+    doc.expiryDate = dates.expiresOn;
+    doc.renewalDate = dates.issuedOn;
+    if (dto.notes !== undefined) doc.notes = dto.notes.trim();
+    if (dto.entryDate !== undefined) doc.entryDate = dto.entryDate.trim();
+    if (dto.renewalPeriod !== undefined) {
+      doc.renewalPeriod =
+        dto.renewalPeriod === 'monthly' ? 'monthly' : 'yearly';
+    }
+  }
+
+  async bulkImport(
+    items: CreateRenewalDto[],
+  ): Promise<{
+    created: number;
+    updated: number;
+    skipped: number;
+    errors: string[];
+  }> {
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const item of items) {
+      if (!item.category || !item.subType?.trim()) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        this.validateSubType(item.category, item.subType);
+        const matchQuery = this.renewalMatchQuery(item);
+        const label =
+          item.category === 'car_papers'
+            ? String(matchQuery.title || 'record')
+            : item.title?.trim() || item.subType;
+
+        if (item.category === 'car_papers' && !item.title?.trim()) {
+          skipped += 1;
+          errors.push(`${label}: Vehicle registration is required.`);
+          continue;
+        }
+        if (item.category === 'it_renewals' && !item.title?.trim()) {
+          skipped += 1;
+          errors.push(`${label}: Name is required.`);
+          continue;
+        }
+        if (
+          item.category === 'it_renewals' &&
+          item.ownerType === 'client' &&
+          !item.clientName?.trim()
+        ) {
+          skipped += 1;
+          errors.push(`${label}: Client name is required for client renewals.`);
+          continue;
+        }
+
+        const existing = await this.renewalModel.findOne(matchQuery).exec();
+        if (existing) {
+          this.applyImportedRenewal(existing, item);
+          await existing.save();
+          updated += 1;
+          continue;
+        }
+
+        await this.create(item);
+        created += 1;
+      } catch (err) {
+        skipped += 1;
+        const label = item.title?.trim() || item.subType?.trim() || 'row';
+        errors.push(
+          `${label}: ${err instanceof Error ? err.message : 'Import failed'}`,
+        );
+      }
+    }
+
+    return { created, updated, skipped, errors: errors.slice(0, 20) };
+  }
 }

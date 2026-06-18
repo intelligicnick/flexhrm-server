@@ -123,6 +123,10 @@ export class Tender {
   @Prop({ default: '', index: true })
   deletedAt!: string;
 
+  /** ISO timestamp when GeM status/details were last synced via Smart Capture */
+  @Prop({ default: '', index: true })
+  statusSyncedAt!: string;
+
   /** @deprecated Legacy field — migrated to `status` on read */
   @Prop({ enum: TENDER_STATUSES })
   preBidStatus?: TenderStatus;

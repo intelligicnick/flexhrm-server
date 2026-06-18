@@ -353,21 +353,41 @@ export class SmartCaptureService {
 
   async redeemConnectionCode(code: string, flexhrmUrl?: string) {
     const normalized = code.trim().toUpperCase();
+    if (!normalized) {
+      throw new BadRequestException('Connection code is required.');
+    }
+    if (!/^FH-[A-F0-9]{6}$/.test(normalized)) {
+      throw new BadRequestException(
+        'Connection code format is wrong. Copy the full code from FlexHRM profile → Browser Extension (e.g. FH-ABC123).',
+      );
+    }
+
     const record = await this.connectionCodeModel
-      .findOne({ code: normalized, used: false })
+      .findOne({ code: normalized })
       .select('+sessionToken')
       .exec();
 
     if (!record) {
-      throw new BadRequestException('Invalid or expired connection code.');
+      throw new BadRequestException(
+        'Connection code not found. Generate a fresh code in FlexHRM (Profile → Browser Extension) and use the same API URL in extension Settings.',
+      );
+    }
+    if (record.used) {
+      throw new BadRequestException(
+        'This connection code was already used. Each code works only once — click refresh in FlexHRM Profile → Browser Extension to get a new one.',
+      );
     }
     if (record.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException('Connection code has expired. Generate a new one from FlexHRM.');
+      throw new BadRequestException(
+        'This connection code expired (valid for 10 minutes). Generate a new one from FlexHRM Profile → Browser Extension.',
+      );
     }
 
     const session = await this.sessionsService.validateToken(record.sessionToken);
     if (!session) {
-      throw new BadRequestException('Session expired. Sign in to FlexHRM and generate a new code.');
+      throw new BadRequestException(
+        'Your FlexHRM login session expired. Sign in again, then generate a new connection code.',
+      );
     }
 
     record.used = true;

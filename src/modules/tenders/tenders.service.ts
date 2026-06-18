@@ -478,6 +478,7 @@ export class TendersService {
             doc.noPreBid = false;
           }
         }
+        doc.statusSyncedAt = new Date().toISOString();
         await doc.save();
         updated += 1;
       } catch (err) {
