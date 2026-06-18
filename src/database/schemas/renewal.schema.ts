@@ -35,6 +35,9 @@ export type LicenseSubtype = (typeof LICENSE_SUBTYPES)[number];
 export const RENEWAL_OWNER_TYPES = ['mine', 'client'] as const;
 export type RenewalOwnerType = (typeof RENEWAL_OWNER_TYPES)[number];
 
+export const RENEWAL_PERIODS = ['monthly', 'yearly'] as const;
+export type RenewalPeriod = (typeof RENEWAL_PERIODS)[number];
+
 @Schema({ timestamps: true, collection: 'renewals' })
 export class Renewal {
   @Prop({ required: true, unique: true, index: true })
@@ -81,6 +84,9 @@ export class Renewal {
 
   @Prop({ default: '', index: true })
   entryDate!: string;
+
+  @Prop({ enum: RENEWAL_PERIODS, default: 'yearly' })
+  renewalPeriod!: RenewalPeriod;
 }
 
 export const RenewalSchema = SchemaFactory.createForClass(Renewal);

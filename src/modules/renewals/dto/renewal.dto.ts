@@ -16,6 +16,7 @@ import {
   LICENSE_SUBTYPES,
   RENEWAL_CATEGORIES,
   RENEWAL_OWNER_TYPES,
+  RENEWAL_PERIODS,
 } from '../../../database/schemas/renewal.schema';
 
 export class CreateRenewalDto {
@@ -79,6 +80,10 @@ export class CreateRenewalDto {
   @IsString()
   @MaxLength(40)
   entryDate?: string;
+
+  @IsOptional()
+  @IsIn(RENEWAL_PERIODS)
+  renewalPeriod?: (typeof RENEWAL_PERIODS)[number];
 }
 
 export class UpdateRenewalDto {
@@ -139,6 +144,10 @@ export class UpdateRenewalDto {
   @IsString()
   @MaxLength(40)
   entryDate?: string;
+
+  @IsOptional()
+  @IsIn(RENEWAL_PERIODS)
+  renewalPeriod?: (typeof RENEWAL_PERIODS)[number];
 }
 
 export class CreateRenewalDocumentDto {

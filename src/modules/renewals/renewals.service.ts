@@ -55,6 +55,7 @@ export class RenewalsService {
       renewalDate: issuedOn,
       expiryDate: expiresOn,
       hasExpiry,
+      renewalPeriod: rest.renewalPeriod === 'monthly' ? 'monthly' : 'yearly',
     };
   }
 
@@ -164,11 +165,16 @@ export class RenewalsService {
 
     const dates = this.resolveDates(dto);
 
+    const title =
+      dto.category === 'car_papers'
+        ? (dto.title?.trim() || '').toUpperCase()
+        : dto.title?.trim() || '';
+
     const doc = await this.renewalModel.create({
       id: this.generateId(),
       category: dto.category,
       subType: dto.subType.trim(),
-      title: dto.title?.trim() || '',
+      title,
       clientName: dto.clientName?.trim() || '',
       ownerType: dto.ownerType || 'mine',
       amount: dto.amount?.trim() || '',
@@ -179,6 +185,7 @@ export class RenewalsService {
       renewalDate: dates.issuedOn,
       notes: dto.notes?.trim() || '',
       entryDate: dto.entryDate?.trim() || new Date().toISOString().slice(0, 10),
+      renewalPeriod: dto.renewalPeriod === 'monthly' ? 'monthly' : 'yearly',
     });
 
     return this.toPlain(doc);
@@ -197,7 +204,12 @@ export class RenewalsService {
       this.validateSubType(doc.category, dto.subType);
       doc.subType = dto.subType.trim();
     }
-    if (dto.title !== undefined) doc.title = dto.title.trim();
+    if (dto.title !== undefined) {
+      doc.title =
+        doc.category === 'car_papers'
+          ? dto.title.trim().toUpperCase()
+          : dto.title.trim();
+    }
     if (dto.clientName !== undefined) doc.clientName = dto.clientName.trim();
     if (dto.ownerType !== undefined) doc.ownerType = dto.ownerType;
     if (dto.amount !== undefined) doc.amount = dto.amount.trim();
@@ -223,6 +235,9 @@ export class RenewalsService {
     }
     if (dto.notes !== undefined) doc.notes = dto.notes.trim();
     if (dto.entryDate !== undefined) doc.entryDate = dto.entryDate.trim();
+    if (dto.renewalPeriod !== undefined) {
+      doc.renewalPeriod = dto.renewalPeriod === 'monthly' ? 'monthly' : 'yearly';
+    }
 
     await doc.save();
     return this.toPlain(doc);
