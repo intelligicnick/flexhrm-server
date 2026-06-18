@@ -41,6 +41,52 @@ export class TendersService {
     return ts !== null && ts < Date.now();
   }
 
+  private gemIndicatesParticipation(input: {
+    status?: string;
+    gemCurrentStage?: string;
+    outcome?: string;
+  }): boolean {
+    const status = String(input.status || '').trim();
+    if (status && status !== 'not_filed') return true;
+
+    const stage = String(input.gemCurrentStage || '').toLowerCase();
+    if (
+      stage.includes('bid award') ||
+      stage.includes('technical evaluation') ||
+      stage.includes('financial evaluation')
+    ) {
+      return true;
+    }
+
+    const outcome = String(input.outcome || '').toLowerCase();
+    return (
+      outcome.includes('participated') ||
+      outcome.includes('qualified') ||
+      outcome.includes('disqualified') ||
+      outcome.includes('won')
+    );
+  }
+
+  private applyGemStatusUpdate(
+    doc: TenderDocument,
+    item: { status?: TenderStatus; gemCurrentStage?: string; outcome?: string },
+  ): void {
+    if (item.status === undefined) return;
+
+    const nextStatus = item.status === 'not_evaluated' ? 'filed' : item.status;
+    if (nextStatus === 'not_filed' && doc.status !== 'not_filed') return;
+
+    const missed = this.isMissedParticipation(doc);
+    if (missed && !this.gemIndicatesParticipation(item)) return;
+    if (nextStatus === doc.status) return;
+
+    const prev = doc.status;
+    doc.status = nextStatus;
+    if (prev === 'not_filed' && doc.status !== 'not_filed') {
+      doc.filedDate = this.formatParticipationStamp();
+    }
+  }
+
   private activeBidFilter(bidNo: string): Record<string, unknown> {
     return {
       bidNo: bidNo.trim(),
@@ -389,18 +435,7 @@ export class TendersService {
     if (item.preBidVenue?.trim()) doc.preBidVenue = item.preBidVenue.trim();
     if (item.noPreBid !== undefined) doc.noPreBid = item.noPreBid;
     if (item.status) {
-      const nextStatus = item.status === 'not_evaluated' ? 'filed' : item.status;
-      if (nextStatus === 'not_filed' && doc.status !== 'not_filed') {
-        // keep current status — cannot revert to Not Participated
-      } else if (nextStatus !== doc.status && this.isMissedParticipation(doc)) {
-        // locked — skip status change on import
-      } else {
-        const prev = doc.status;
-        doc.status = nextStatus;
-        if (prev === 'not_filed' && doc.status === 'filed') {
-          doc.filedDate = this.formatParticipationStamp();
-        }
-      }
+      this.applyGemStatusUpdate(doc, item);
     }
     if (item.outcome?.trim()) doc.outcome = item.outcome.trim();
     if (item.notes?.trim()) doc.notes = item.notes.trim();
@@ -428,17 +463,7 @@ export class TendersService {
           continue;
         }
         if (item.status !== undefined) {
-          if (this.isMissedParticipation(doc)) {
-            // skip status sync when participation deadline missed
-          } else if (item.status === 'not_filed' && doc.status !== 'not_filed') {
-            // cannot revert
-          } else {
-            const prev = doc.status;
-            doc.status = item.status === 'not_evaluated' ? 'filed' : item.status;
-            if (prev === 'not_filed' && doc.status === 'filed') {
-              doc.filedDate = this.formatParticipationStamp();
-            }
-          }
+          this.applyGemStatusUpdate(doc, item);
         }
         if (item.outcome !== undefined) doc.outcome = item.outcome.trim();
         if (item.gemCurrentStage !== undefined) {
