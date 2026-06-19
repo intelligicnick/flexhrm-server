@@ -462,6 +462,7 @@ export class TendersService {
           notFound += 1;
           continue;
         }
+        const prevStatus = doc.status;
         if (item.status !== undefined) {
           this.applyGemStatusUpdate(doc, item);
         }
@@ -503,6 +504,8 @@ export class TendersService {
             doc.noPreBid = false;
           }
         }
+        doc.statusSyncNote =
+          prevStatus !== doc.status ? 'status change found' : 'unchanged';
         doc.statusSyncedAt = new Date().toISOString();
         await doc.save();
         updated += 1;
