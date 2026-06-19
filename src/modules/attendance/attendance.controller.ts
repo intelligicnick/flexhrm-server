@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
-import { CurrentUsername } from '../../common/decorators/current-user.decorator';
+import { CurrentUsername, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { BulkAttendanceDto, UpsertAttendanceDto } from './dto/attendance.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { summarizeAttendanceBulk } from '../../common/utils/audit-log-format.util';
@@ -20,6 +21,21 @@ export class AttendanceController {
       return this.attendanceService.getMonthGrid(monthKey);
     }
     return this.attendanceService.getAllGrouped();
+  }
+
+  @Get('exit-eligibility')
+  @RequirePermissions('attendance', 'view')
+  async exitEligibility(
+    @CurrentUser() user: AdminSessionPayload,
+    @Query('referenceMonth') referenceMonth: string,
+    @Query('months') months?: string,
+  ) {
+    const monthCount = Math.max(1, Math.min(12, parseInt(months || '3', 10) || 3));
+    return this.attendanceService.getExitEligibility(
+      referenceMonth || '',
+      monthCount,
+      user,
+    );
   }
 
   @Put()
