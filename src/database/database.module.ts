@@ -66,6 +66,14 @@ import { ArchivedRecord, ArchivedRecordSchema } from './schemas/archived-record.
 import { ArchiveRun, ArchiveRunSchema } from './schemas/archive-run.schema';
 import { Tender, TenderSchema } from './schemas/tender.schema';
 import { Contract, ContractSchema } from './schemas/contract.schema';
+import {
+  BankInstrument,
+  BankInstrumentSchema,
+} from './schemas/bank-instrument.schema';
+import {
+  BankInstrumentDocument,
+  BankInstrumentDocumentSchema,
+} from './schemas/bank-instrument-document.schema';
 import { Renewal, RenewalSchema } from './schemas/renewal.schema';
 import {
   RenewalDocument,
@@ -114,6 +122,8 @@ const MODELS = [
   { name: ArchiveRun.name, schema: ArchiveRunSchema },
   { name: Tender.name, schema: TenderSchema },
   { name: Contract.name, schema: ContractSchema },
+  { name: BankInstrument.name, schema: BankInstrumentSchema },
+  { name: BankInstrumentDocument.name, schema: BankInstrumentDocumentSchema },
   { name: Renewal.name, schema: RenewalSchema },
   { name: RenewalDocument.name, schema: RenewalDocumentSchema },
   { name: CaptureCandidate.name, schema: CaptureCandidateSchema },

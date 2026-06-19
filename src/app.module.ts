@@ -31,6 +31,7 @@ import { SeedModule } from './seed/seed.module';
 import { DataArchiveModule } from './modules/data-archive/data-archive.module';
 import { TendersModule } from './modules/tenders/tenders.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
+import { BankInstrumentsModule } from './modules/bank-instruments/bank-instruments.module';
 import { RenewalsModule } from './modules/renewals/renewals.module';
 import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module';
 
@@ -65,6 +66,7 @@ import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module
     DataArchiveModule,
     TendersModule,
     ContractsModule,
+    BankInstrumentsModule,
     RenewalsModule,
     SmartCaptureModule,
   ],
