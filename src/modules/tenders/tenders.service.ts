@@ -67,13 +67,54 @@ export class TendersService {
     );
   }
 
+  private inferStatusFromGemFields(item: {
+    status?: TenderStatus;
+    gemCurrentStage?: string;
+    outcome?: string;
+  }): TenderStatus | undefined {
+    const stage = String(item.gemCurrentStage || '').toLowerCase();
+    const outcome = String(item.outcome || '').toLowerCase();
+    const combined = `${stage} ${outcome}`;
+
+    if (outcome.includes('won') && outcome.includes('bid')) return 'won_bid';
+    if (/bid award|bid \/ ra award|bid\/ra award/.test(combined)) {
+      return outcome.includes('won') ? 'won_bid' : 'qualified';
+    }
+    if (combined.includes('disqualified')) return 'disqualified';
+    if (combined.includes('financial evaluation') || outcome.includes('financial evaluation')) {
+      return 'financial';
+    }
+    if (outcome.includes('qualified') || stage.includes('technical evaluation (completed)')) {
+      return 'technical_qualified';
+    }
+    return undefined;
+  }
+
   private applyGemStatusUpdate(
     doc: TenderDocument,
     item: { status?: TenderStatus; gemCurrentStage?: string; outcome?: string },
   ): void {
-    if (item.status === undefined) return;
+    if (item.status === undefined && !item.gemCurrentStage && !item.outcome) return;
 
-    const nextStatus = item.status === 'not_evaluated' ? 'filed' : item.status;
+    let nextStatus =
+      item.status === undefined
+        ? undefined
+        : item.status === 'not_evaluated'
+          ? 'filed'
+          : item.status;
+
+    const inferred = this.inferStatusFromGemFields(item);
+    if (
+      inferred &&
+      (nextStatus === undefined ||
+        nextStatus === 'filed' ||
+        nextStatus === 'not_evaluated' ||
+        nextStatus === 'not_filed')
+    ) {
+      nextStatus = inferred;
+    } else if (nextStatus === undefined) {
+      return;
+    }
     if (nextStatus === 'not_filed' && doc.status !== 'not_filed') return;
 
     const missed = this.isMissedParticipation(doc);

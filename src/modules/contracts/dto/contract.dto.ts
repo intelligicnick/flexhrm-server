@@ -108,6 +108,14 @@ export class CreateContractDto {
   @IsOptional()
   @IsString()
   entryDate?: string;
+
+  @IsOptional()
+  @IsString()
+  gemContractPdfUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  gemContractId?: string;
 }
 
 export class UpdateContractDto {
@@ -207,6 +215,14 @@ export class UpdateContractDto {
   @IsOptional()
   @IsString()
   entryDate?: string;
+
+  @IsOptional()
+  @IsString()
+  gemContractPdfUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  gemContractId?: string;
 }
 
 export class BulkImportContractDto {

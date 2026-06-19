@@ -226,7 +226,12 @@ export class ContractsService {
         continue;
       }
       try {
-        const existing = await this.contractModel.findOne({ contractNo }).exec();
+        let existing = await this.contractModel.findOne({ contractNo }).exec();
+        if (!existing && item.gemContractPdfUrl?.trim()) {
+          existing = await this.contractModel
+            .findOne({ gemContractPdfUrl: item.gemContractPdfUrl.trim() })
+            .exec();
+        }
         if (existing) {
           this.applyPatch(existing, item);
           existing.status = this.deriveStatus(existing);
@@ -274,6 +279,8 @@ export class ContractsService {
       contractValue: dto.contractValue?.trim() || '',
       notes: dto.notes?.trim() || '',
       status: dto.status || 'active',
+      gemContractPdfUrl: dto.gemContractPdfUrl?.trim() || '',
+      gemContractId: dto.gemContractId?.trim() || '',
     };
     payload.status = this.deriveStatus(payload);
     return payload;
@@ -318,6 +325,10 @@ export class ContractsService {
     if (dto.status !== undefined) doc.status = dto.status;
     if (dto.notes !== undefined) doc.notes = dto.notes.trim();
     if (dto.entryDate !== undefined) doc.entryDate = dto.entryDate.trim();
+    if (dto.gemContractPdfUrl !== undefined) {
+      doc.gemContractPdfUrl = dto.gemContractPdfUrl.trim();
+    }
+    if (dto.gemContractId !== undefined) doc.gemContractId = dto.gemContractId.trim();
 
     if (dto.hasExtension === false) doc.extensionEndDate = '';
     if (dto.bgApplicable === false) {

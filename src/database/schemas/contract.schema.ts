@@ -98,6 +98,14 @@ export class Contract {
 
   @Prop({ default: '', index: true })
   entryDate!: string;
+
+  /** GeM fulfilment contract PDF URL (fulfilment.gem.gov.in/contract/fds?contractId=…) */
+  @Prop({ default: '' })
+  gemContractPdfUrl!: string;
+
+  /** Base64 contract identifier from GeM fulfilment portal */
+  @Prop({ default: '' })
+  gemContractId!: string;
 }
 
 export const ContractSchema = SchemaFactory.createForClass(Contract);
