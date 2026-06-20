@@ -131,6 +131,14 @@ export class Tender {
   @Prop({ default: '' })
   statusSyncNote!: string;
 
+  /** Assisted GeM filing payload (rate, documents, last attempt) */
+  @Prop({ type: Object, default: null })
+  filingProfile?: Record<string, unknown> | null;
+
+  /** Previous status before the most recent GeM sync update */
+  @Prop({ enum: TENDER_STATUSES })
+  statusBeforeSync?: TenderStatus;
+
   /** @deprecated Legacy field — migrated to `status` on read */
   @Prop({ enum: TENDER_STATUSES })
   preBidStatus?: TenderStatus;

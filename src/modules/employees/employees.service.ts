@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import { Employee, EmployeeDocument, LedgerEntry } from '../../database/schemas/employee.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
+import { sanitizeEmployeeNumericFields } from '../../common/utils/non-negative-number.util';
 import {
   getBirthdayAge,
   isValidDateParts,
@@ -184,15 +185,13 @@ export class EmployeesService {
     const count = await this.count();
     const employeeCode = String(raw.employeeCode || raw.id || '').trim();
     const id = String(raw.id || employeeCode);
-    let processed: Record<string, unknown> = {
+    let processed: Record<string, unknown> = sanitizeEmployeeNumericFields({
       ...raw,
       id,
       employeeCode,
       srNo: Number(raw.srNo) || count + 1,
-      grossSalary: Number(raw.grossSalary) || 0,
-      basicSalary: Number(raw.basicSalary) || 0,
       monthlyLedger: raw.monthlyLedger || {},
-    };
+    });
     processed = await this.processEmployeeAssets(id, processed);
     const doc = await this.employeeModel.create(processed);
     return this.toPlain(doc);
@@ -205,13 +204,11 @@ export class EmployeesService {
     const existing = await this.employeeModel.findOne({ id }).exec();
     if (!existing) return null;
 
-    let merged: Record<string, unknown> = {
+    let merged: Record<string, unknown> = sanitizeEmployeeNumericFields({
       ...(existing.toObject() as unknown as Record<string, unknown>),
       ...updates,
       id: String(updates.id || updates.employeeCode || id),
-      grossSalary: Number(updates.grossSalary ?? existing.grossSalary) || 0,
-      basicSalary: Number(updates.basicSalary ?? existing.basicSalary) || 0,
-    };
+    });
 
     merged = await this.processEmployeeAssets(
       id,
@@ -302,15 +299,13 @@ export class EmployeesService {
       }
       srNo++;
       const employeeId = code;
-      let processed: Record<string, unknown> = {
+      let processed: Record<string, unknown> = sanitizeEmployeeNumericFields({
         ...raw,
         id: employeeId,
         employeeCode: code,
         srNo,
-        grossSalary: Number(raw.grossSalary) || 0,
-        basicSalary: Number(raw.basicSalary) || 0,
         monthlyLedger: raw.monthlyLedger || {},
-      };
+      });
       processed = await this.processEmployeeAssets(employeeId, processed);
       await this.employeeModel.create(processed);
       added++;

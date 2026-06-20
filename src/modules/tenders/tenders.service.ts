@@ -96,7 +96,7 @@ export class TendersService {
   ): void {
     if (item.status === undefined && !item.gemCurrentStage && !item.outcome) return;
 
-    let nextStatus =
+    let nextStatus: TenderStatus | undefined =
       item.status === undefined
         ? undefined
         : item.status === 'not_evaluated'
@@ -106,12 +106,9 @@ export class TendersService {
     const inferred = this.inferStatusFromGemFields(item);
     if (
       inferred &&
-      (nextStatus === undefined ||
-        nextStatus === 'filed' ||
-        nextStatus === 'not_evaluated' ||
-        nextStatus === 'not_filed')
+      (nextStatus === undefined || nextStatus === 'filed' || nextStatus === 'not_filed')
     ) {
-      nextStatus = inferred;
+      nextStatus = inferred === 'not_evaluated' ? 'filed' : inferred;
     } else if (nextStatus === undefined) {
       return;
     }
@@ -120,6 +117,7 @@ export class TendersService {
     const missed = this.isMissedParticipation(doc);
     if (missed && !this.gemIndicatesParticipation(item)) return;
     if (nextStatus === doc.status) return;
+    if (nextStatus === undefined) return;
 
     const prev = doc.status;
     doc.status = nextStatus;
@@ -547,6 +545,7 @@ export class TendersService {
         }
         doc.statusSyncNote =
           prevStatus !== doc.status ? 'status change found' : 'unchanged';
+        doc.statusBeforeSync = prevStatus;
         doc.statusSyncedAt = new Date().toISOString();
         await doc.save();
         updated += 1;

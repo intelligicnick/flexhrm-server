@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
+import { IsNonNegativeAmountString } from '../../../common/validators/is-non-negative-amount-string.decorator';
 import {
   CONTRACT_STATUSES,
   CONTRACT_TYPES,
@@ -67,6 +68,7 @@ export class CreateContractDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   bgAmount?: string;
 
   @IsOptional()
@@ -95,6 +97,7 @@ export class CreateContractDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   contractValue?: string;
 
   @IsOptional()
@@ -174,6 +177,7 @@ export class UpdateContractDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   bgAmount?: string;
 
   @IsOptional()
@@ -202,6 +206,7 @@ export class UpdateContractDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   contractValue?: string;
 
   @IsOptional()

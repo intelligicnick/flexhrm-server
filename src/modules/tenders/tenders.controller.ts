@@ -14,6 +14,7 @@ import {
   BulkImportTenderDto,
   BulkSyncTenderDto,
   CreateTenderDto,
+  SyncTenderDto,
   UpdateTenderDto,
 } from './dto/tender.dto';
 

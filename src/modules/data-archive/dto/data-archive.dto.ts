@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsArray, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ARCHIVABLE_SOURCES } from '../../../common/constants/archive.constants';
 
@@ -19,6 +20,7 @@ export class ListArchivedRecordsDto {
   recordId?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(200)

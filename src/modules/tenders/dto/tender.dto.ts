@@ -6,7 +6,9 @@ import {
   IsOptional,
   IsString,
   Min,
+  IsArray,
 } from 'class-validator';
+import { IsNonNegativeAmountString } from '../../../common/validators/is-non-negative-amount-string.decorator';
 import {
   TENDER_STATUSES,
   TENDER_TYPES,
@@ -58,6 +60,7 @@ export class CreateTenderDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   rate?: string;
 
   @IsOptional()
@@ -162,6 +165,7 @@ export class UpdateTenderDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   rate?: string;
 
   @IsOptional()
@@ -256,6 +260,7 @@ export class SyncTenderDto {
 
   @IsOptional()
   @IsString()
+  @IsNonNegativeAmountString()
   rate?: string;
 
   @IsOptional()

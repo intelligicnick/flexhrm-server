@@ -66,19 +66,16 @@ import { ArchivedRecord, ArchivedRecordSchema } from './schemas/archived-record.
 import { ArchiveRun, ArchiveRunSchema } from './schemas/archive-run.schema';
 import { Tender, TenderSchema } from './schemas/tender.schema';
 import { Contract, ContractSchema } from './schemas/contract.schema';
-import {
-  BankInstrument,
-  BankInstrumentSchema,
-} from './schemas/bank-instrument.schema';
-import {
-  BankInstrumentDocument,
-  BankInstrumentDocumentSchema,
-} from './schemas/bank-instrument-document.schema';
 import { Renewal, RenewalSchema } from './schemas/renewal.schema';
 import {
   RenewalDocument,
   RenewalDocumentSchema,
 } from './schemas/renewal-document.schema';
+import { BgDdRecord, BgDdRecordSchema } from './schemas/bg-dd.schema';
+import {
+  BgDdDocument,
+  BgDdDocumentSchema,
+} from './schemas/bg-dd-document.schema';
 import { CaptureCandidate, CaptureCandidateSchema } from './schemas/capture-candidate.schema';
 import { CaptureLead, CaptureLeadSchema } from './schemas/capture-lead.schema';
 import { CaptureContact, CaptureContactSchema } from './schemas/capture-contact.schema';
@@ -122,10 +119,10 @@ const MODELS = [
   { name: ArchiveRun.name, schema: ArchiveRunSchema },
   { name: Tender.name, schema: TenderSchema },
   { name: Contract.name, schema: ContractSchema },
-  { name: BankInstrument.name, schema: BankInstrumentSchema },
-  { name: BankInstrumentDocument.name, schema: BankInstrumentDocumentSchema },
   { name: Renewal.name, schema: RenewalSchema },
   { name: RenewalDocument.name, schema: RenewalDocumentSchema },
+  { name: BgDdRecord.name, schema: BgDdRecordSchema },
+  { name: BgDdDocument.name, schema: BgDdDocumentSchema },
   { name: CaptureCandidate.name, schema: CaptureCandidateSchema },
   { name: CaptureLead.name, schema: CaptureLeadSchema },
   { name: CaptureContact.name, schema: CaptureContactSchema },

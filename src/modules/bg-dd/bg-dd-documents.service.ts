@@ -10,18 +10,15 @@ import { Model } from 'mongoose';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { BgDdDocument } from '../../database/schemas/bg-dd-document.schema';
 import {
-  BankInstrumentDocument,
-  BankInstrumentDocumentRecord,
-} from '../../database/schemas/bank-instrument-document.schema';
-import {
-  CreateBankInstrumentDocumentDto,
-  ReplaceBankInstrumentDocumentDto,
-} from './dto/bank-instrument.dto';
+  CreateBgDdDocumentDto,
+  ReplaceBgDdDocumentDto,
+} from './dto/bg-dd.dto';
 
-export interface PublicBankInstrumentDocument {
+export interface PublicBgDdDocument {
   id: string;
-  instrumentId: string;
+  bgDdId: string;
   label: string;
   mimeType: string;
   filename: string;
@@ -42,7 +39,7 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
 function generateDocumentId(): string {
-  return `bdoc_${crypto.randomBytes(8).toString('hex')}`;
+  return `bgdddoc_${crypto.randomBytes(8).toString('hex')}`;
 }
 
 function decodeBase64Payload(fileBase64: string): Buffer {
@@ -120,12 +117,10 @@ function sanitizeLabel(label: string): string {
   return label.trim().replace(/[/\\?%*:|"<>]/g, '_').slice(0, 120);
 }
 
-function toPublicDocument(
-  record: BankInstrumentDocument,
-): PublicBankInstrumentDocument {
+function toPublicDocument(record: BgDdDocument): PublicBgDdDocument {
   return {
     id: record.id,
-    instrumentId: record.instrumentId,
+    bgDdId: record.bgDdId,
     label: record.label,
     mimeType: record.mimeType,
     filename: record.filename,
@@ -147,42 +142,40 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 @Injectable()
-export class BankInstrumentDocumentsService implements OnModuleInit {
+export class BgDdDocumentsService implements OnModuleInit {
   private storageDir!: string;
 
   constructor(
-    @InjectModel(BankInstrumentDocument.name)
-    private readonly documentModel: Model<BankInstrumentDocumentRecord>,
+    @InjectModel(BgDdDocument.name)
+    private readonly documentModel: Model<BgDdDocument>,
     private readonly config: ConfigService,
   ) {}
 
   onModuleInit(): void {
-    const baseDir = this.config.get<string>('bankInstrumentAssetsDir');
+    const baseDir = this.config.get<string>('renewalAssetsDir');
     const resolvedBase = baseDir
       ? path.resolve(baseDir)
-      : path.resolve(process.cwd(), 'data', 'bank-instrument-assets');
-    this.storageDir = path.join(resolvedBase, 'documents');
+      : path.resolve(process.cwd(), 'data', 'renewal-assets');
+    this.storageDir = path.join(resolvedBase, 'bg-dd-documents');
     fs.mkdirSync(this.storageDir, { recursive: true });
   }
 
-  async findByInstrument(instrumentId: string): Promise<PublicBankInstrumentDocument[]> {
+  async findByBgDd(bgDdId: string): Promise<PublicBgDdDocument[]> {
     const records = await this.documentModel
-      .find({ instrumentId })
+      .find({ bgDdId })
       .select('-fileDataBase64')
       .sort({ createdAt: -1 })
       .lean()
       .exec();
 
-    return records.map((record) =>
-      toPublicDocument(record as BankInstrumentDocument),
-    );
+    return records.map((record) => toPublicDocument(record as BgDdDocument));
   }
 
   async create(
-    instrumentId: string,
+    bgDdId: string,
     username: string,
-    dto: CreateBankInstrumentDocumentDto,
-  ): Promise<PublicBankInstrumentDocument> {
+    dto: CreateBgDdDocumentDto,
+  ): Promise<PublicBgDdDocument> {
     const mimeType = dto.mimeType.trim().toLowerCase();
     if (!ALLOWED_MIME_TYPES.has(mimeType)) {
       throw new BadRequestException(
@@ -202,7 +195,7 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
     const id = generateDocumentId();
     const ext = extensionForMime(mimeType);
     const filename = `${label.replace(/\s+/g, '_')}.${ext}`;
-    const storedFilename = `${instrumentId}_${id}.${ext}`;
+    const storedFilename = `${bgDdId}_${id}.${ext}`;
     const absolutePath = path.join(this.storageDir, storedFilename);
     const fileDataBase64 = buffer.toString('base64');
 
@@ -214,7 +207,7 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
 
     const record = await this.documentModel.create({
       id,
-      instrumentId,
+      bgDdId,
       label,
       mimeType,
       filename,
@@ -231,35 +224,35 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
   }
 
   async createMany(
-    instrumentId: string,
+    bgDdId: string,
     username: string,
-    dtos: CreateBankInstrumentDocumentDto[],
-  ): Promise<PublicBankInstrumentDocument[]> {
+    dtos: CreateBgDdDocumentDto[],
+  ): Promise<PublicBgDdDocument[]> {
     if (dtos.length === 0) {
       throw new BadRequestException('At least one document is required.');
     }
-    if (dtos.length > 5) {
-      throw new BadRequestException('Too many documents in one request. Maximum is 5.');
+    if (dtos.length > 25) {
+      throw new BadRequestException('Too many documents in one request. Maximum is 25.');
     }
 
-    const records: PublicBankInstrumentDocument[] = [];
+    const records: PublicBgDdDocument[] = [];
     for (const dto of dtos) {
-      records.push(await this.create(instrumentId, username, dto));
+      records.push(await this.create(bgDdId, username, dto));
     }
     return records;
   }
 
   async replace(
-    instrumentId: string,
+    bgDdId: string,
     docId: string,
     username: string,
-    dto: ReplaceBankInstrumentDocumentDto,
-  ): Promise<PublicBankInstrumentDocument> {
+    dto: ReplaceBgDdDocumentDto,
+  ): Promise<PublicBgDdDocument> {
     const existing = await this.documentModel
-      .findOne({ id: docId, instrumentId })
+      .findOne({ id: docId, bgDdId })
       .exec();
     if (!existing) {
-      throw new NotFoundException('Document not found.');
+      throw new NotFoundException('BG/DD document not found.');
     }
 
     const mimeType = dto.mimeType.trim().toLowerCase();
@@ -278,7 +271,7 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
     validateFileBuffer(buffer, mimeType);
 
     const ext = extensionForMime(mimeType);
-    const storedFilename = `${instrumentId}_${docId}.${ext}`;
+    const storedFilename = `${bgDdId}_${docId}.${ext}`;
     const absolutePath = path.join(this.storageDir, storedFilename);
     const fileDataBase64 = buffer.toString('base64');
     const filename = `${existing.label.replace(/\s+/g, '_')}.${ext}`;
@@ -312,14 +305,14 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
   }
 
   async getFileBuffer(
-    instrumentId: string,
+    bgDdId: string,
     docId: string,
   ): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
     const record = await this.documentModel
-      .findOne({ id: docId, instrumentId })
+      .findOne({ id: docId, bgDdId })
       .exec();
     if (!record) {
-      throw new NotFoundException('Document not found.');
+      throw new NotFoundException('BG/DD document not found.');
     }
 
     const diskPath = await this.resolveStoredFilePath(record);
@@ -340,15 +333,15 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
       };
     }
 
-    throw new NotFoundException('Document file not found.');
+    throw new NotFoundException('BG/DD document file not found.');
   }
 
-  async delete(instrumentId: string, docId: string): Promise<void> {
+  async delete(bgDdId: string, docId: string): Promise<void> {
     const record = await this.documentModel
-      .findOne({ id: docId, instrumentId })
+      .findOne({ id: docId, bgDdId })
       .exec();
     if (!record) {
-      throw new NotFoundException('Document not found.');
+      throw new NotFoundException('BG/DD document not found.');
     }
 
     try {
@@ -360,11 +353,11 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
       // File may already be gone.
     }
 
-    await this.documentModel.deleteOne({ id: docId, instrumentId }).exec();
+    await this.documentModel.deleteOne({ id: docId, bgDdId }).exec();
   }
 
-  async deleteAllForInstrument(instrumentId: string): Promise<void> {
-    const records = await this.documentModel.find({ instrumentId }).exec();
+  async deleteAllForBgDd(bgDdId: string): Promise<void> {
+    const records = await this.documentModel.find({ bgDdId }).exec();
     for (const record of records) {
       try {
         const diskPath = await this.resolveStoredFilePath(record);
@@ -375,11 +368,11 @@ export class BankInstrumentDocumentsService implements OnModuleInit {
         // Ignore missing files.
       }
     }
-    await this.documentModel.deleteMany({ instrumentId }).exec();
+    await this.documentModel.deleteMany({ bgDdId }).exec();
   }
 
   private async resolveStoredFilePath(
-    record: Pick<BankInstrumentDocument, 'id' | 'instrumentId' | 'storedPath'>,
+    record: Pick<BgDdDocument, 'id' | 'bgDdId' | 'storedPath'>,
   ): Promise<string | null> {
     const candidates = new Set<string>();
     const stored = record.storedPath?.trim() ?? '';

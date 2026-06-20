@@ -9,6 +9,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { IsNonNegativeAmountString } from '../../../common/validators/is-non-negative-amount-string.decorator';
 import { Type } from 'class-transformer';
 import {
   CAR_PAPER_SUBTYPES,
@@ -45,6 +46,7 @@ export class CreateRenewalDto {
   @IsOptional()
   @IsString()
   @MaxLength(40)
+  @IsNonNegativeAmountString()
   amount?: string;
 
   @IsOptional()
@@ -109,6 +111,7 @@ export class UpdateRenewalDto {
   @IsOptional()
   @IsString()
   @MaxLength(40)
+  @IsNonNegativeAmountString()
   amount?: string;
 
   @IsOptional()

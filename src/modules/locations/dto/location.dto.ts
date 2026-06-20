@@ -1,4 +1,4 @@
-import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpsertLocationDto {
   @IsString()
@@ -15,5 +15,6 @@ export class UpsertLocationDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   ptAmount?: number;
 }

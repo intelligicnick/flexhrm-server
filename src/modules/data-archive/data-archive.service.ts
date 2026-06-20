@@ -497,12 +497,39 @@ export class DataArchiveService implements OnModuleInit, OnModuleDestroy {
     return archived;
   }
 
+  async countEligibleRecords(): Promise<number> {
+    const cutoff = this.getCutoffDate();
+    let total = 0;
+
+    for (const config of this.getSourceConfigs()) {
+      const query = this.buildOlderThanQuery(
+        config.dateField,
+        config.dateType,
+        cutoff,
+        config.extraFilter,
+        config.isoPrecision,
+      );
+      total += await config.model.countDocuments(query).exec();
+    }
+
+    return total;
+  }
+
   async runArchiveJob(
     trigger: 'scheduled' | 'manual',
     triggeredBy = 'System',
-  ): Promise<ArchiveRun> {
+  ): Promise<ArchiveRun | null> {
     if (this.archiveInProgress) {
       throw new BadRequestException('An archive job is already running.');
+    }
+
+    const eligibleCount = await this.countEligibleRecords();
+    if (eligibleCount === 0) {
+      if (trigger === 'scheduled') {
+        this.logger.debug('Scheduled archive skipped — no data for archive run.');
+        return null;
+      }
+      throw new BadRequestException('No data for archive run.');
     }
 
     this.archiveInProgress = true;

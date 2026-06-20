@@ -29,10 +29,11 @@ import { CommitmentDiaryModule } from './modules/commitment-diary/commitment-dia
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SeedModule } from './seed/seed.module';
 import { DataArchiveModule } from './modules/data-archive/data-archive.module';
+import { BackupRestoreModule } from './modules/backup-restore/backup-restore.module';
 import { TendersModule } from './modules/tenders/tenders.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
-import { BankInstrumentsModule } from './modules/bank-instruments/bank-instruments.module';
 import { RenewalsModule } from './modules/renewals/renewals.module';
+import { BgDdModule } from './modules/bg-dd/bg-dd.module';
 import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module';
 
 @Module({
@@ -64,10 +65,11 @@ import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module
     HealthModule,
     SeedModule,
     DataArchiveModule,
+    BackupRestoreModule,
     TendersModule,
     ContractsModule,
-    BankInstrumentsModule,
     RenewalsModule,
+    BgDdModule,
     SmartCaptureModule,
   ],
   providers: [

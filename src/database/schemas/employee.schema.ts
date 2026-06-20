@@ -174,6 +174,9 @@ export class Employee {
   @Prop({ default: 0 })
   dailyWage!: number;
 
+  @Prop({ enum: ['monthly', 'daily'], default: 'monthly' })
+  salaryWageMode!: string;
+
   @Prop({ default: '' })
   employeeMobile!: string;
 

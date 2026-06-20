@@ -40,6 +40,9 @@ export class DataArchiveController {
   @RequirePermissions('admin', 'edit')
   async runArchive(@CurrentUsername() username: string) {
     const run = await this.dataArchiveService.runArchiveJob('manual', username);
+    if (!run) {
+      return { totalArchived: 0, message: 'No data eligible for archive.' };
+    }
     await this.auditLogsService.append({
       username,
       action: 'RUN_DATA_ARCHIVE',
