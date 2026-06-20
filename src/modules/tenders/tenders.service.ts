@@ -564,20 +564,23 @@ function parseEndDateMs(value: string): number | null {
   const raw = value.trim();
   if (!raw) return null;
 
+  // DD-MM-YYYY (GeM bid dates) before Date.parse — JS treats 01-07-2026 as Jan 7 (MM-DD).
+  const match = raw.match(
+    /(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const year = Number(match[3]);
+    const hour = match[4] ? Number(match[4]) : 23;
+    const minute = match[5] ? Number(match[5]) : 59;
+    const second = match[6] ? Number(match[6]) : 0;
+    const ts = new Date(year, month, day, hour, minute, second).getTime();
+    if (!Number.isNaN(ts)) return ts;
+  }
+
   const iso = Date.parse(raw);
   if (!Number.isNaN(iso)) return iso;
 
-  const match = raw.match(
-    /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
-  );
-  if (!match) return null;
-
-  const day = Number(match[1]);
-  const month = Number(match[2]) - 1;
-  const year = Number(match[3]);
-  const hour = match[4] ? Number(match[4]) : 23;
-  const minute = match[5] ? Number(match[5]) : 59;
-  const second = match[6] ? Number(match[6]) : 0;
-  const ts = new Date(year, month, day, hour, minute, second).getTime();
-  return Number.isNaN(ts) ? null : ts;
+  return null;
 }
