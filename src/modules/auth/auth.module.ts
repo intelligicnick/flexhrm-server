@@ -6,9 +6,11 @@ import { RolesModule } from '../roles/roles.module';
 import { SessionsModule } from '../sessions/sessions.module';
 import { SchoolSupervisorsModule } from '../school-supervisors/school-supervisors.module';
 import { AuthController } from './auth.controller';
+import { CaptchaService } from './captcha.service';
 
 @Module({
   imports: [AdminsModule, SessionsModule, AuditLogsModule, RolesModule, EmailModule, SchoolSupervisorsModule],
   controllers: [AuthController],
+  providers: [CaptchaService],
 })
 export class AuthModule {}

@@ -41,6 +41,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateDto, SupervisorRegisterDeviceDto } from '../school-visits/dto/school-visit.dto';
+import { CaptchaService } from './captcha.service';
 
 @Controller('auth')
 export class AuthController {
@@ -52,13 +53,26 @@ export class AuthController {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly schoolSupervisorsService: SchoolSupervisorsService,
+    private readonly captchaService: CaptchaService,
   ) {}
+
+  @Public()
+  @Get('captcha')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 30, ttl: 900000 } })
+  getCaptcha() {
+    return this.captchaService.createChallenge();
+  }
 
   @Public()
   @Post('login')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 900000 } })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    if (!this.captchaService.verify(dto.captchaId, dto.captchaAnswer)) {
+      throw new BadRequestException('Incorrect or expired captcha. Please try again.');
+    }
+
     const admin = await this.adminsService.findByUsername(dto.username.trim());
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     const passwordValid =

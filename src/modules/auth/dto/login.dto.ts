@@ -8,4 +8,12 @@ export class LoginDto {
   @IsString()
   @IsNotEmpty()
   password!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  captchaId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  captchaAnswer!: string;
 }
