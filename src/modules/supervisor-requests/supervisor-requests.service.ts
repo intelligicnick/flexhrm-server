@@ -12,6 +12,8 @@ import {
 } from '../../database/schemas/supervisor-request.schema';
 import { SchoolWorksService } from '../school-works/school-works.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
+import { uploadEmbeddedPhoto } from '../../common/storage/photo-upload.util';
 import {
   CreateSupervisorRequestDto,
   ReplySupervisorRequestDto,
@@ -19,7 +21,6 @@ import {
   ResolveEscalationDto,
 } from './dto/supervisor-request.dto';
 
-const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const SUPERVISOR_ACK_DAYS = 2;
 
 @Injectable()
@@ -29,6 +30,7 @@ export class SupervisorRequestsService {
     private readonly requestModel: Model<SupervisorRequestDocument>,
     private readonly schoolWorksService: SchoolWorksService,
     private readonly notificationsService: NotificationsService,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   toPlain(
@@ -42,7 +44,7 @@ export class SupervisorRequestsService {
     return rest;
   }
 
-  private parsePhotos(
+  private async parsePhotos(
     photos: Array<{
       caption?: string;
       mimeType?: string;
@@ -50,28 +52,19 @@ export class SupervisorRequestsService {
       photoDataBase64: string;
       takenAt?: string;
     }> = [],
+    folder: string,
   ) {
-    return photos.map((photo) => {
-      const buffer = Buffer.from(
-        photo.photoDataBase64.includes(',')
-          ? photo.photoDataBase64.split(',').pop()!
-          : photo.photoDataBase64,
-        'base64',
+    const parsed = [];
+    for (const photo of photos) {
+      parsed.push(
+        await uploadEmbeddedPhoto(this.mediaStorage, photo, {
+          idPrefix: 'rphoto',
+          folder,
+          tags: ['supervisor-request', folder],
+        }),
       );
-      if (buffer.length > MAX_PHOTO_BYTES) {
-        throw new BadRequestException(
-          `Photo "${photo.filename || 'photo.jpg'}" exceeds maximum size of 8MB.`,
-        );
-      }
-      return {
-        id: `rphoto_${crypto.randomBytes(6).toString('hex')}`,
-        caption: photo.caption || '',
-        mimeType: photo.mimeType || 'image/jpeg',
-        filename: photo.filename || 'photo.jpg',
-        photoDataBase64: photo.photoDataBase64,
-        takenAt: photo.takenAt || new Date().toISOString(),
-      };
-    });
+    }
+    return parsed;
   }
 
   private staleRespondedCutoff(): Date {
@@ -194,9 +187,12 @@ export class SupervisorRequestsService {
       });
     }
 
-    const photos = this.parsePhotos(dto.photos || []);
-
     const id = `sreq_${crypto.randomBytes(8).toString('hex')}`;
+    const photos = await this.parsePhotos(
+      dto.photos || [],
+      `/flexhrm/supervisor-requests/${id}`,
+    );
+
     const doc = await this.requestModel.create({
       id,
       supervisorId,
@@ -276,7 +272,10 @@ export class SupervisorRequestsService {
       );
     }
 
-    const photos = this.parsePhotos(dto.photos || []);
+    const photos = await this.parsePhotos(
+      dto.photos || [],
+      `/flexhrm/supervisor-requests/${id}/follow-ups`,
+    );
     doc.followUps.push({
       id: `sfup_${crypto.randomBytes(6).toString('hex')}`,
       message,

@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { json, urlencoded } from 'express';
+import cookieParser = require('cookie-parser');
 import helmet from 'helmet';
 import compression = require('compression');
 import { AppModule } from './app.module';
@@ -54,6 +55,7 @@ async function bootstrap(): Promise<void> {
   }
 
   app.setGlobalPrefix('api');
+  app.use(cookieParser());
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ extended: true, limit: '50mb' }));
   // Default helmet CORP is `same-origin`, which blocks cross-origin browser fetch()

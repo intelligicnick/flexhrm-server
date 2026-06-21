@@ -13,6 +13,7 @@ import {
 } from '../../database/schemas/extension-connection-code.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { SessionsService } from '../sessions/sessions.service';
+import { AdminsService } from '../admins/admins.service';
 import {
   BulkSaveDto,
   CreateCandidateDto,
@@ -22,6 +23,7 @@ import {
   UploadDocumentDto,
 } from './dto/smart-capture.dto';
 import { hashPassword } from '../../common/utils/password.util';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
 
 @Injectable()
 export class SmartCaptureService {
@@ -41,6 +43,8 @@ export class SmartCaptureService {
     @InjectModel(ExtensionConnectionCode.name)
     private readonly connectionCodeModel: Model<ExtensionConnectionCode>,
     private readonly sessionsService: SessionsService,
+    private readonly adminsService: AdminsService,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   async listCandidates(organizationId?: string) {
@@ -184,6 +188,20 @@ export class SmartCaptureService {
 
   async uploadDocument(dto: UploadDocumentDto, username: string) {
     const id = randomUUID();
+    const buffer = Buffer.from(
+      dto.contentBase64.includes(',')
+        ? dto.contentBase64.split(',').pop()!
+        : dto.contentBase64,
+      'base64',
+    );
+
+    const uploaded = await this.mediaStorage.upload({
+      buffer,
+      fileName: dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_'),
+      folder: `/flexhrm/smart-capture/${dto.recordType}/${dto.recordId}`,
+      tags: ['smart-capture', dto.recordType, dto.category ?? 'document'],
+    });
+
     const record = await this.contentModel.create({
       id,
       organizationId: 'default',
@@ -194,7 +212,9 @@ export class SmartCaptureService {
       capturedBy: username,
       content: dto.notes ?? '',
       contentMimeType: dto.mimeType,
-      contentBase64: dto.contentBase64,
+      contentBase64: uploaded.fileDataBase64 ?? '',
+      contentUrl: uploaded.imagekitUrl ?? '',
+      contentFileId: uploaded.imagekitFileId ?? '',
       linkedRecordType: dto.recordType,
       linkedRecordId: dto.recordId,
       metadata: { fileName: dto.fileName, category: dto.category ?? 'document' },
@@ -330,13 +350,14 @@ export class SmartCaptureService {
       { $set: { used: true } },
     );
 
-    const code = `FH-${randomBytes(3).toString('hex').toUpperCase()}`;
+    const code = `FH-${randomBytes(12).toString('hex').toUpperCase()}`;
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await this.connectionCodeModel.create({
       code,
-      sessionToken: user.token,
       username: user.username,
+      role: user.role || 'admin',
+      locations: Array.isArray(user.locations) ? user.locations : [],
       organizationId,
       flexhrmUrl: baseUrl,
       expiresAt,
@@ -356,16 +377,13 @@ export class SmartCaptureService {
     if (!normalized) {
       throw new BadRequestException('Connection code is required.');
     }
-    if (!/^FH-[A-F0-9]{6}$/.test(normalized)) {
+    if (!/^FH-[A-F0-9]{24}$/.test(normalized)) {
       throw new BadRequestException(
-        'Connection code format is wrong. Copy the full code from FlexHRM profile → Browser Extension (e.g. FH-ABC123).',
+        'Connection code format is wrong. Copy the full code from FlexHRM profile → Browser Extension (e.g. FH-ABC123DEF456789012345678).',
       );
     }
 
-    const record = await this.connectionCodeModel
-      .findOne({ code: normalized })
-      .select('+sessionToken')
-      .exec();
+    const record = await this.connectionCodeModel.findOne({ code: normalized }).exec();
 
     if (!record) {
       throw new BadRequestException(
@@ -383,12 +401,18 @@ export class SmartCaptureService {
       );
     }
 
-    const session = await this.sessionsService.validateToken(record.sessionToken);
-    if (!session) {
+    const admin = await this.adminsService.findByUsername(record.username);
+    if (!admin || admin.disabled) {
       throw new BadRequestException(
-        'Your FlexHRM login session expired. Sign in again, then generate a new connection code.',
+        'The FlexHRM account that created this code is no longer active. Sign in again and generate a new connection code.',
       );
     }
+
+    const accessToken = await this.sessionsService.createExtensionSession(
+      record.username,
+      record.role || admin.role || 'admin',
+      record.locations?.length ? record.locations : admin.locations || [],
+    );
 
     record.used = true;
     await record.save();
@@ -396,7 +420,7 @@ export class SmartCaptureService {
     return {
       success: true,
       flexhrmUrl: record.flexhrmUrl || flexhrmUrl?.replace(/\/$/, '') || '',
-      accessToken: record.sessionToken,
+      accessToken,
       organizationId: record.organizationId,
       username: record.username,
     };

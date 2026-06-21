@@ -16,6 +16,8 @@ export class VisitPhoto {
   @Prop({ default: '' }) mimeType!: string;
   @Prop({ default: '' }) filename!: string;
   @Prop({ default: '' }) photoDataBase64!: string;
+  @Prop({ default: '' }) imagekitUrl!: string;
+  @Prop({ default: '' }) imagekitFileId!: string;
   @Prop({ default: '' }) takenAt!: string;
   @Prop({ default: 0 }) lat!: number;
   @Prop({ default: 0 }) lng!: number;

@@ -29,6 +29,9 @@ export class Session {
   @Prop({ default: false })
   impersonated!: boolean;
 
+  @Prop({ enum: ['standard', 'extension'], default: 'standard', index: true })
+  sessionKind!: string;
+
   @Prop({ required: true, type: Date })
   createdAt!: Date;
 

@@ -5,6 +5,8 @@ import {
   SchoolSupervisor,
   SchoolSupervisorDocument,
 } from '../../database/schemas/school-supervisor.schema';
+import { decodeImageBase64 } from '../../common/storage/file-buffer.util';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { AppMeta, AppMetaDocument } from '../../database/schemas/app-meta.schema';
 import { UpsertSchoolSupervisorDto } from './dto/school-supervisor.dto';
 import {
@@ -28,6 +30,7 @@ export class SchoolSupervisorsService {
     private readonly appMetaModel: Model<AppMetaDocument>,
     private readonly sessionsService: SessionsService,
     private readonly supervisorActivityService: SupervisorActivityService,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   private normalizePhoneDigits(phone: string): string {
@@ -235,9 +238,29 @@ export class SchoolSupervisorsService {
   }
 
   async updateProfilePhoto(supervisorId: string, photoDataBase64: string): Promise<void> {
+    const existing = await this.supervisorModel.findOne({ id: supervisorId }).exec();
+    const { buffer, ext } = decodeImageBase64(photoDataBase64);
+
+    const uploaded = await this.mediaStorage.upload({
+      buffer,
+      fileName: `${supervisorId}.${ext}`,
+      folder: `/flexhrm/supervisor-profiles/${supervisorId}`,
+      tags: ['supervisor-profile', supervisorId],
+    });
+
+    if (uploaded.imagekitFileId) {
+      await this.mediaStorage.deleteCloudFile(existing?.profilePhotoFileId);
+    }
+
     await this.supervisorModel.updateOne(
       { id: supervisorId },
-      { $set: { profilePhotoBase64: photoDataBase64 } },
+      {
+        $set: {
+          profilePhotoBase64: uploaded.fileDataBase64 ?? '',
+          profilePhotoUrl: uploaded.imagekitUrl ?? '',
+          profilePhotoFileId: uploaded.imagekitFileId ?? '',
+        },
+      },
     );
   }
 

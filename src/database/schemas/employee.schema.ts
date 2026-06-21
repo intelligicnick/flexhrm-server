@@ -4,7 +4,17 @@ import { HydratedDocument } from 'mongoose';
 export type EmployeeDocument = HydratedDocument<Employee>;
 
 @Schema({ _id: false })
+export class LedgerLineItem {
+  @Prop({ required: true }) id!: string;
+  @Prop({ required: true }) type!: string;
+  @Prop({ default: 0 }) amount!: number;
+  @Prop({ default: '' }) entryDate!: string;
+  @Prop({ default: '' }) note!: string;
+}
+
+@Schema({ _id: false })
 export class LedgerEntry {
+  @Prop({ type: [LedgerLineItem], default: [] }) ledgerItems!: LedgerLineItem[];
   @Prop({ default: 0 }) advance!: number;
   @Prop({ default: 0 }) penalty!: number;
   @Prop({ default: 0 }) uniform!: number;
@@ -229,6 +239,12 @@ export class Employee {
   photoDataBase64!: string;
 
   @Prop({ default: '' })
+  photoUrl!: string;
+
+  @Prop({ default: '' })
+  photoFileId!: string;
+
+  @Prop({ default: '' })
   idCard!: string;
 
   @Prop({ default: '' })
@@ -236,6 +252,10 @@ export class Employee {
 
   @Prop({ default: '' })
   idCardGeneratedAt!: string;
+
+  /** Secret token required for public ID card verification links. */
+  @Prop({ default: '', select: false })
+  idCardVerifyToken!: string;
 
   @Prop({ type: SupervisorLogin, default: {} })
   supervisorLogin!: SupervisorLogin;

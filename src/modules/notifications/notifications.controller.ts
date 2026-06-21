@@ -17,6 +17,12 @@ import { AdminSessionPayload } from '../../common/utils/permissions.util';
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
+  @Get('summary')
+  @RequireAnyPermissions(['schoolWork'], 'view')
+  summaryAdmin(@CurrentUsername() username: string) {
+    return this.notificationsService.findSummaryForRecipient('admin', '*', 50, username);
+  }
+
   @Get()
   @RequireAnyPermissions(['schoolWork'], 'view')
   findAllAdmin(@CurrentUsername() username: string) {
@@ -44,6 +50,13 @@ export class NotificationsController {
     @Param('id') id: string,
   ) {
     return this.notificationsService.markRead(id, 'admin', '*', username);
+  }
+
+  @Get('supervisor/summary')
+  @UseGuards(SupervisorGuard)
+  summarySupervisor(@Req() req: Request & { user: AdminSessionPayload }) {
+    const supervisorId = req.user.employeeId || req.user.username;
+    return this.notificationsService.findSummaryForRecipient('supervisor', supervisorId);
   }
 
   @Get('supervisor/mine')

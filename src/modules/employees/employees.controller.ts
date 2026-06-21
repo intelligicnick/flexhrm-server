@@ -11,6 +11,7 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { EmployeesService } from './employees.service';
 import { EmployeeChangeRequestsService } from './employee-change-requests.service';
@@ -32,6 +33,8 @@ import {
   DeleteLocationsDto,
   DeleteRolesDto,
   PayrollLedgerBulkDto,
+  AddLedgerItemsDto,
+  DeleteLedgerItemDto,
   RenameLocationDto,
   RenameRoleDto,
   ReviewEmployeeChangesDto,
@@ -62,8 +65,15 @@ export class EmployeesController {
     ['employees', 'salary', 'ledger', 'attendance', 'leave', 'birthdays', 'directory'],
     'view',
   )
-  findAll(@CurrentUser() user: AdminSessionPayload) {
-    return this.employeesService.findAll(user);
+  findAll(
+    @CurrentUser() user: AdminSessionPayload,
+    @Query('lite') lite?: string,
+    @Query('ledgerMonth') ledgerMonth?: string,
+  ) {
+    return this.employeesService.findAll(user, {
+      lite: lite === '1' || lite === 'true',
+      ledgerMonth: ledgerMonth?.trim() || undefined,
+    });
   }
 
   @Get('birthdays')
@@ -183,17 +193,34 @@ export class EmployeesController {
 
   @Get('id-card/:idCard/verify')
   @Public()
-  verifyIdCard(@Param('idCard') idCard: string) {
-    return this.employeesService.verifyByIdCard(idCard);
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  verifyIdCard(
+    @Param('idCard') idCard: string,
+    @Query('token') token?: string,
+  ) {
+    const verifyToken = token?.trim();
+    if (!verifyToken) {
+      throw new BadRequestException('Verification token is required.');
+    }
+    return this.employeesService.verifyByIdCard(idCard, verifyToken);
   }
 
   @Get('id-card/:idCard/photo')
   @Public()
-  async getPhotoByIdCard(@Param('idCard') idCard: string, @Res() res: Response) {
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async getPhotoByIdCard(
+    @Param('idCard') idCard: string,
+    @Query('token') token: string | undefined,
+    @Res() res: Response,
+  ) {
+    const verifyToken = token?.trim();
+    if (!verifyToken) {
+      throw new BadRequestException('Verification token is required.');
+    }
     const { buffer, contentType } =
-      await this.employeesService.getPhotoContentByIdCard(idCard);
+      await this.employeesService.getPhotoContentByIdCard(idCard, verifyToken);
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(buffer);
   }
 
@@ -212,6 +239,15 @@ export class EmployeesController {
     'view',
   )
   async getPhoto(@Param('id') id: string, @Res() res: Response) {
+    const employee = await this.employeesService.findById(id);
+    if (!employee) throw new NotFoundException('Employee not found.');
+
+    const redirectUrl = this.employeesService.getPhotoRedirectUrl(employee);
+    if (redirectUrl) {
+      res.redirect(302, redirectUrl);
+      return;
+    }
+
     const { buffer, contentType } =
       await this.employeesService.getPhotoContent(id);
     res.setHeader('Content-Type', contentType);
@@ -354,6 +390,15 @@ export class EmployeesController {
     @Param('docId') docId: string,
     @Res() res: Response,
   ) {
+    const redirectUrl = await this.employeeDocumentsService.getFileRedirectUrl(
+      id,
+      docId,
+    );
+    if (redirectUrl) {
+      res.redirect(302, redirectUrl);
+      return;
+    }
+
     const { buffer, mimeType, filename } =
       await this.employeeDocumentsService.getFileContent(id, docId);
     res.setHeader('Content-Type', mimeType);
@@ -709,7 +754,7 @@ export class EmployeesController {
   }
 
   @Post('payroll-ledger')
-  @RequirePermissions('ledger', 'edit')
+  @RequireAnyPermissions(['salary', 'ledger'], 'edit')
   async payrollLedger(@CurrentUsername() username: string, @Body() dto: PayrollLedgerBulkDto) {
     const count = await this.employeesService.updatePayrollLedger(
       dto.monthKey,
@@ -732,5 +777,32 @@ export class EmployeesController {
       count,
       message: `Successfully updated payroll ledger for ${count} employee(s).`,
     };
+  }
+
+  @Post('payroll-ledger/add-items')
+  @RequirePermissions('ledger', 'edit')
+  async addLedgerItems(@CurrentUsername() username: string, @Body() dto: AddLedgerItemsDto) {
+    const count = await this.employeesService.addLedgerItems(dto.monthKey, dto.entries);
+    await this.auditLogsService.append({
+      username,
+      action: 'UPDATE_PAYROLL_LEDGER',
+      target: `Added ${count} dated ledger entry(ies) for ${dto.monthKey}.`,
+      details: { count, monthKey: dto.monthKey, entries: dto.entries },
+    });
+    return { success: true, count, message: `Added ${count} ledger entry(ies).` };
+  }
+
+  @Post('payroll-ledger/delete-item')
+  @RequirePermissions('ledger', 'edit')
+  async deleteLedgerItem(@CurrentUsername() username: string, @Body() dto: DeleteLedgerItemDto) {
+    const deleted = await this.employeesService.deleteLedgerItem(dto.monthKey, dto.employeeId, dto.itemId);
+    if (!deleted) throw new NotFoundException('Ledger entry not found.');
+    await this.auditLogsService.append({
+      username,
+      action: 'UPDATE_PAYROLL_LEDGER',
+      target: `Removed ledger item for employee ${dto.employeeId} in ${dto.monthKey}.`,
+      details: { monthKey: dto.monthKey, employeeId: dto.employeeId, itemId: dto.itemId },
+    });
+    return { success: true, message: 'Ledger entry removed.' };
   }
 }

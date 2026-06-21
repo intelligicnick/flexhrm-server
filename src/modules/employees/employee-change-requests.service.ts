@@ -24,6 +24,7 @@ const IMMUTABLE_FIELDS = new Set([
   'photoDataBase64',
   'idCard',
   'idCardDataBase64',
+  'idCardVerifyToken',
   'monthlyLedger',
 ]);
 

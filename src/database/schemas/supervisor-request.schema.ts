@@ -10,6 +10,8 @@ export class RequestPhoto {
   @Prop({ default: '' }) mimeType!: string;
   @Prop({ default: '' }) filename!: string;
   @Prop({ default: '' }) photoDataBase64!: string;
+  @Prop({ default: '' }) imagekitUrl!: string;
+  @Prop({ default: '' }) imagekitFileId!: string;
   @Prop({ default: '' }) takenAt!: string;
 }
 

@@ -84,6 +84,7 @@ export class AttendanceService {
 
     const records = await this.attendanceModel
       .find({ employeeId: { $in: employeeIds }, status: 'P' })
+      .select({ employeeId: 1, monthKey: 1, day: 1, _id: 0 })
       .lean()
       .exec();
 
@@ -121,28 +122,32 @@ export class AttendanceService {
       session,
     );
 
-    const activeEmployees = await this.employeeModel.find(activeFilter).lean().exec();
+    const exitedFilter = this.applyLocationScope(
+      {
+        $or: [
+          { status: 'exited' },
+          { exitDate: { $nin: ['', null], $exists: true } },
+        ],
+      },
+      session,
+    );
 
-    const exitedCount = await this.employeeModel
-      .countDocuments(
-        this.applyLocationScope(
-          {
-            $or: [
-              { status: 'exited' },
-              { exitDate: { $nin: ['', null], $exists: true } },
-            ],
-          },
-          session,
-        ),
-      )
-      .exec();
-
-    const presentInWindow = await this.attendanceModel
-      .distinct('employeeId', {
-        monthKey: { $in: checkedMonths },
-        status: 'P',
-      })
-      .exec();
+    const [activeEmployees, exitedCount, presentInWindow] = await Promise.all([
+      this.employeeModel.find(activeFilter).select({
+        id: 1,
+        employeeCode: 1,
+        nameAsPerAadhar: 1,
+        location: 1,
+        role: 1,
+      }).lean().exec(),
+      this.employeeModel.countDocuments(exitedFilter).exec(),
+      this.attendanceModel
+        .distinct('employeeId', {
+          monthKey: { $in: checkedMonths },
+          status: 'P',
+        })
+        .exec(),
+    ]);
 
     const presentSet = new Set(presentInWindow);
     const eligibleEmployees = activeEmployees.filter((emp) => !presentSet.has(emp.id));

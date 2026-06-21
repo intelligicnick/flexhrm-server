@@ -27,6 +27,13 @@ export class EmployeeDocument {
   @Prop()
   fileDataBase64?: string;
 
+  /** ImageKit CDN URL when cloud storage is enabled. */
+  @Prop()
+  imagekitUrl?: string;
+
+  @Prop()
+  imagekitFileId?: string;
+
   @Prop({ required: true })
   originalSizeBytes!: number;
 

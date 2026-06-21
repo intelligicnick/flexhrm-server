@@ -72,7 +72,27 @@ export class SchoolWorksService {
   }
 
   async findAll(): Promise<Record<string, unknown>[]> {
-    const docs = await this.schoolWorkModel.find().sort({ srNo: 1 }).exec();
+    const docs = await this.schoolWorkModel.find().sort({ srNo: 1 }).lean().exec();
+    return docs.map((d) => this.toPlain(d));
+  }
+
+  async findAllForSupervisorList(): Promise<Record<string, unknown>[]> {
+    const docs = await this.schoolWorkModel
+      .find()
+      .select({
+        id: 1,
+        srNo: 1,
+        schoolName: 1,
+        block: 1,
+        district: 1,
+        udise: 1,
+        noOfToilets: 1,
+        assignedSupervisorId: 1,
+        schoolCategory: 1,
+      })
+      .sort({ srNo: 1 })
+      .lean()
+      .exec();
     return docs.map((d) => this.toPlain(d));
   }
 

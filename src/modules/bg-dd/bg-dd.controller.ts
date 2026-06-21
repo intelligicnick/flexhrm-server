@@ -143,6 +143,12 @@ export class BgDdController {
     @Param('docId') docId: string,
     @Res() res: Response,
   ) {
+    const redirectUrl = await this.bgDdDocumentsService.getFileRedirectUrl(id, docId);
+    if (redirectUrl) {
+      res.redirect(302, redirectUrl);
+      return;
+    }
+
     const { buffer, mimeType, filename } =
       await this.bgDdDocumentsService.getFileBuffer(id, docId);
     res.setHeader('Content-Type', mimeType);

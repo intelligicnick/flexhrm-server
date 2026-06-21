@@ -20,13 +20,29 @@ import {
   resolveIdCardExpiryDate,
   resolveIdCardIssueDate,
 } from '../../common/utils/id-card-verify.util';
+import { sanitizeEmployeePayrollFields } from '../../common/utils/payroll-calculation.util';
+import {
+  appendLedgerItem,
+  clearLedgerItemsOfType,
+  normalizeLedgerEntry,
+  removeLedgerItem,
+  type LedgerEntryRecord,
+  type LedgerItemType,
+} from '../../common/utils/ledger-entry.util';
+import { verifyIdCardToken } from '../../common/utils/id-card-verify-token.util';
+import { generateToken } from '../../common/utils/password.util';
 import {
   EmployeeAssetRecord,
   EmployeeAssetsService,
 } from './employee-assets.service';
 import { EmployeeDocumentsService } from './employee-documents.service';
 
-const INTERNAL_ASSET_FIELDS = ['photoDataBase64', 'idCardDataBase64'] as const;
+const INTERNAL_ASSET_FIELDS = [
+  'photoDataBase64',
+  'photoFileId',
+  'idCardDataBase64',
+  'idCardVerifyToken',
+] as const;
 
 const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
   'id',
@@ -35,6 +51,7 @@ const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
   'photoDataBase64',
   'idCard',
   'idCardDataBase64',
+  'idCardVerifyToken',
   'monthlyLedger',
 ]);
 
@@ -98,6 +115,28 @@ export class EmployeesService {
     return rest;
   }
 
+  private trimMonthlyLedger(
+    plain: Record<string, unknown>,
+    options?: { lite?: boolean; ledgerMonth?: string },
+  ): Record<string, unknown> {
+    if (!plain.monthlyLedger || typeof plain.monthlyLedger !== 'object') {
+      return plain;
+    }
+    if (options?.lite) {
+      const { monthlyLedger: _ledger, ...rest } = plain;
+      return rest;
+    }
+    if (options?.ledgerMonth) {
+      const ledger = plain.monthlyLedger as Record<string, unknown>;
+      const monthEntry = ledger[options.ledgerMonth];
+      return {
+        ...plain,
+        monthlyLedger: monthEntry ? { [options.ledgerMonth]: monthEntry } : {},
+      };
+    }
+    return plain;
+  }
+
   private toAssetRecord(data: Record<string, unknown>): EmployeeAssetRecord {
     return {
       id: String(data.id || data.employeeCode || ''),
@@ -109,6 +148,8 @@ export class EmployeesService {
       employeeMobile: String(data.employeeMobile || ''),
       pfJoiningDate: String(data.pfJoiningDate || ''),
       photo: String(data.photo || ''),
+      photoUrl: String(data.photoUrl || ''),
+      photoFileId: String(data.photoFileId || ''),
       photoDataBase64: String(data.photoDataBase64 || ''),
       customFields: Array.isArray(data.customFields)
         ? (data.customFields as Array<{ name: string; value: string }>)
@@ -128,20 +169,33 @@ export class EmployeesService {
       const savedPhoto = await this.employeeAssetsService.savePhoto(
         employeeId,
         String(processed.photo),
+        previous ? this.toAssetRecord(previous) : undefined,
       );
       processed.photo = savedPhoto.photo;
+      processed.photoUrl = savedPhoto.photoUrl;
+      processed.photoFileId = savedPhoto.photoFileId;
       processed.photoDataBase64 = savedPhoto.photoDataBase64;
     } else if (previous?.photo && processed.photo === undefined) {
       processed.photo = previous.photo;
+      processed.photoUrl = previous.photoUrl;
+      processed.photoFileId = previous.photoFileId;
       processed.photoDataBase64 = previous.photoDataBase64;
     } else if (typeof processed.photo === 'string' && !processed.photo.trim()) {
       processed.photo = '';
+      processed.photoUrl = '';
+      processed.photoFileId = '';
       processed.photoDataBase64 = '';
     } else if (previous && processed.photo === previous.photo) {
+      processed.photoUrl = previous.photoUrl;
+      processed.photoFileId = previous.photoFileId;
       processed.photoDataBase64 = previous.photoDataBase64;
     }
 
     return processed;
+  }
+
+  getPhotoRedirectUrl(data: Record<string, unknown>): string | null {
+    return this.employeeAssetsService.getPhotoRedirectUrl(this.toAssetRecord(data));
   }
 
   async getPhotoContent(id: string): Promise<{ buffer: Buffer; contentType: string }> {
@@ -160,10 +214,15 @@ export class EmployeesService {
     };
   }
 
-  async findAll(session?: AdminSessionPayload): Promise<Record<string, unknown>[]> {
+  async findAll(
+    session?: AdminSessionPayload,
+    options?: { lite?: boolean; ledgerMonth?: string },
+  ): Promise<Record<string, unknown>[]> {
     const filter = this.applyLocationScope({}, session);
-    const docs = await this.employeeModel.find(filter).sort({ srNo: 1 }).exec();
-    return docs.map((d) => this.toPlain(d));
+    const docs = await this.employeeModel.find(filter).sort({ srNo: 1 }).lean().exec();
+    return docs.map((d) =>
+      this.trimMonthlyLedger(this.toPlain(d), options),
+    );
   }
 
   async count(): Promise<number> {
@@ -192,6 +251,7 @@ export class EmployeesService {
       srNo: Number(raw.srNo) || count + 1,
       monthlyLedger: raw.monthlyLedger || {},
     });
+    processed = sanitizeEmployeePayrollFields(processed);
     processed = await this.processEmployeeAssets(id, processed);
     const doc = await this.employeeModel.create(processed);
     return this.toPlain(doc);
@@ -209,6 +269,7 @@ export class EmployeesService {
       ...updates,
       id: String(updates.id || updates.employeeCode || id),
     });
+    merged = sanitizeEmployeePayrollFields(merged);
 
     merged = await this.processEmployeeAssets(
       id,
@@ -440,6 +501,7 @@ export class EmployeesService {
       'foodPerk',
       'accommodationPerk',
       'conveyancePerk',
+      'penaltyReason',
       'paymentStatus',
     ] as const;
 
@@ -456,20 +518,15 @@ export class EmployeesService {
       };
       const existingEntry = monthlyLedger[monthKey];
       const monthEntry: LedgerEntry = {
-        advance: existingEntry?.advance ?? 0,
-        penalty: existingEntry?.penalty ?? 0,
-        uniform: existingEntry?.uniform ?? 0,
-        foodPerk: existingEntry?.foodPerk ?? 0,
-        accommodationPerk: existingEntry?.accommodationPerk ?? 0,
-        conveyancePerk: existingEntry?.conveyancePerk ?? 0,
-        penaltyReason: existingEntry?.penaltyReason ?? '',
-        paymentStatus: existingEntry?.paymentStatus ?? 'Unpaid',
+        ...(normalizeLedgerEntry(existingEntry) as LedgerEntry),
       };
 
       for (const key of ledgerFields) {
         if (upd[key] === undefined) continue;
         if (key === 'paymentStatus') {
           monthEntry.paymentStatus = String(upd[key]);
+        } else if (key === 'penaltyReason') {
+          monthEntry.penaltyReason = String(upd[key] ?? '');
         } else {
           monthEntry[key] = Number(upd[key]);
         }
@@ -480,6 +537,65 @@ export class EmployeesService {
       count++;
     }
     return count;
+  }
+
+  async addLedgerItems(
+    monthKey: string,
+    entries: Array<{
+      employeeId: string;
+      type: LedgerItemType;
+      amount: number;
+      entryDate: string;
+      note?: string;
+    }>,
+  ): Promise<number> {
+    let count = 0;
+    for (const entry of entries) {
+      const id = String(entry.employeeId || '');
+      if (!id) continue;
+      const amount = Number(entry.amount);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+
+      const existing = await this.employeeModel.findOne({ id }).exec();
+      if (!existing) continue;
+
+      const monthlyLedger: Record<string, LedgerEntry> = { ...(existing.monthlyLedger ?? {}) };
+      const normalized = normalizeLedgerEntry(monthlyLedger[monthKey]) as LedgerEntryRecord;
+      const refreshed = appendLedgerItem(normalized, {
+        type: entry.type,
+        amount,
+        entryDate: entry.entryDate,
+        note: entry.note,
+      });
+      monthlyLedger[monthKey] = refreshed as unknown as LedgerEntry;
+      await this.employeeModel.updateOne({ id }, { $set: { monthlyLedger } });
+      count++;
+    }
+    return count;
+  }
+
+  async deleteLedgerItem(monthKey: string, employeeId: string, itemId: string): Promise<boolean> {
+    const existing = await this.employeeModel.findOne({ id: employeeId }).exec();
+    if (!existing) return false;
+
+    const monthlyLedger: Record<string, LedgerEntry> = { ...(existing.monthlyLedger ?? {}) };
+    const normalized = normalizeLedgerEntry(monthlyLedger[monthKey]) as LedgerEntryRecord;
+    const refreshed = removeLedgerItem(normalized, itemId);
+    monthlyLedger[monthKey] = refreshed as unknown as LedgerEntry;
+    await this.employeeModel.updateOne({ id: employeeId }, { $set: { monthlyLedger } });
+    return true;
+  }
+
+  async clearLedgerType(monthKey: string, employeeId: string, type: LedgerItemType): Promise<boolean> {
+    const existing = await this.employeeModel.findOne({ id: employeeId }).exec();
+    if (!existing) return false;
+
+    const monthlyLedger: Record<string, LedgerEntry> = { ...(existing.monthlyLedger ?? {}) };
+    const normalized = normalizeLedgerEntry(monthlyLedger[monthKey]) as LedgerEntryRecord;
+    const refreshed = clearLedgerItemsOfType(normalized, type);
+    monthlyLedger[monthKey] = refreshed as unknown as LedgerEntry;
+    await this.employeeModel.updateOne({ id: employeeId }, { $set: { monthlyLedger } });
+    return true;
   }
 
   async replaceAll(employees: Record<string, unknown>[]): Promise<void> {
@@ -508,18 +624,35 @@ export class EmployeesService {
   /** Assigns IS{empCode}{srNo}{cardSeq} (e.g. IS0111) and persists on the employee. */
   async ensureIdCard(
     id: string,
-  ): Promise<{ idCard: string; idCardGeneratedAt: string }> {
-    const emp = await this.ensureExists(id);
-    const existing = String(emp.idCard || '').trim();
+  ): Promise<{ idCard: string; idCardGeneratedAt: string; idCardVerifyToken: string }> {
+    const doc = await this.employeeModel.findOne({ id }).select('+idCardVerifyToken').exec();
+    if (!doc) {
+      throw new NotFoundException('Employee not found.');
+    }
+
+    const existing = String(doc.idCard || '').trim();
+    const existingToken = String(doc.idCardVerifyToken || '').trim();
+
     if (existing && isValidStoredIdCardNumber(existing)) {
+      if (existingToken) {
+        return {
+          idCard: existing,
+          idCardGeneratedAt: String(doc.idCardGeneratedAt || ''),
+          idCardVerifyToken: existingToken,
+        };
+      }
+
+      const idCardVerifyToken = generateToken();
+      await this.employeeModel.updateOne({ id }, { idCardVerifyToken });
       return {
         idCard: existing,
-        idCardGeneratedAt: String(emp.idCardGeneratedAt || ''),
+        idCardGeneratedAt: String(doc.idCardGeneratedAt || ''),
+        idCardVerifyToken,
       };
     }
 
-    const employeeCode = String(emp.employeeCode || emp.id || '');
-    const srNo = Number(emp.srNo) || 0;
+    const employeeCode = String(doc.employeeCode || doc.id || '');
+    const srNo = Number(doc.srNo) || 0;
     let idCard = '';
 
     for (let cardSeq = 1; cardSeq <= 9999; cardSeq += 1) {
@@ -539,9 +672,34 @@ export class EmployeesService {
     }
 
     const idCardGeneratedAt = new Date().toISOString();
-    await this.employeeModel.updateOne({ id }, { idCard, idCardGeneratedAt });
+    const idCardVerifyToken = generateToken();
+    await this.employeeModel.updateOne({ id }, { idCard, idCardGeneratedAt, idCardVerifyToken });
 
-    return { idCard, idCardGeneratedAt };
+    return { idCard, idCardGeneratedAt, idCardVerifyToken };
+  }
+
+  private async findByIdCardWithVerifyToken(
+    idCard: string,
+  ): Promise<Record<string, unknown> | null> {
+    const normalized = idCard.trim();
+    if (!normalized || !isValidStoredIdCardNumber(normalized)) {
+      return null;
+    }
+    const doc = await this.employeeModel
+      .findOne({ idCard: normalized })
+      .select('+idCardVerifyToken')
+      .exec();
+    return doc ? this.toPlain(doc) : null;
+  }
+
+  private assertIdCardVerifyToken(
+    emp: Record<string, unknown>,
+    verifyToken: string,
+  ): void {
+    const stored = String(emp.idCardVerifyToken || '').trim();
+    if (!stored || !verifyIdCardToken(stored, verifyToken)) {
+      throw new NotFoundException('ID card not found or invalid.');
+    }
   }
 
   async findByIdCard(idCard: string): Promise<Record<string, unknown> | null> {
@@ -553,11 +711,15 @@ export class EmployeesService {
     return doc ? this.toPlain(doc) : null;
   }
 
-  async verifyByIdCard(idCard: string): Promise<Record<string, unknown>> {
-    const emp = await this.findByIdCard(idCard);
+  async verifyByIdCard(
+    idCard: string,
+    verifyToken: string,
+  ): Promise<Record<string, unknown>> {
+    const emp = await this.findByIdCardWithVerifyToken(idCard);
     if (!emp) {
       throw new NotFoundException('ID card not found or invalid.');
     }
+    this.assertIdCardVerifyToken(emp, verifyToken);
 
     const issueDate = resolveIdCardIssueDate(emp);
     const exitDate = String(emp.exitDate || '').trim();
@@ -583,11 +745,13 @@ export class EmployeesService {
 
   async getPhotoContentByIdCard(
     idCard: string,
+    verifyToken: string,
   ): Promise<{ buffer: Buffer; contentType: string }> {
-    const emp = await this.findByIdCard(idCard);
+    const emp = await this.findByIdCardWithVerifyToken(idCard);
     if (!emp) {
       throw new NotFoundException('ID card not found or invalid.');
     }
+    this.assertIdCardVerifyToken(emp, verifyToken);
     return this.getPhotoContent(String(emp.id || emp.employeeCode || ''));
   }
 

@@ -26,6 +26,12 @@ export class BgDdDocument {
   @Prop()
   fileDataBase64?: string;
 
+  @Prop()
+  imagekitUrl?: string;
+
+  @Prop()
+  imagekitFileId?: string;
+
   @Prop({ required: true })
   originalSizeBytes!: number;
 

@@ -17,9 +17,9 @@ import {
 import { SchoolWorksService } from '../school-works/school-works.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DataArchiveService } from '../data-archive/data-archive.service';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
+import { uploadEmbeddedPhoto } from '../../common/storage/photo-upload.util';
 import { CreateSchoolVisitDto } from './dto/school-visit.dto';
-
-const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 
 function todayIsoInKolkata(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -37,6 +37,7 @@ export class SchoolVisitsService {
     private readonly schoolWorksService: SchoolWorksService,
     private readonly notificationsService: NotificationsService,
     private readonly dataArchiveService: DataArchiveService,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   toPlain(doc: SchoolVisitDocument | Record<string, unknown>): Record<string, unknown> {
@@ -46,6 +47,27 @@ export class SchoolVisitsService {
         : { ...doc };
     const { _id, __v, createdAt, updatedAt, ...rest } = obj as Record<string, unknown>;
     return rest;
+  }
+
+  private toPlainLite(doc: SchoolVisitDocument | Record<string, unknown>): Record<string, unknown> {
+    const plain = this.toPlain(doc);
+    const photos = Array.isArray(plain.photos) ? plain.photos : [];
+    plain.photoCount = photos.length;
+    delete plain.photos;
+    return plain;
+  }
+
+  async getLastVisitDate(
+    supervisorId: string,
+    schoolWorkId: string,
+  ): Promise<string | null> {
+    const doc = await this.visitModel
+      .findOne({ supervisorId, schoolWorkId })
+      .sort({ visitDate: -1 })
+      .select({ visitDate: 1, _id: 0 })
+      .lean()
+      .exec();
+    return doc?.visitDate ? String(doc.visitDate) : null;
   }
 
   private normalizePhone(phone: string): string {
@@ -61,6 +83,7 @@ export class SchoolVisitsService {
     fromDate?: string;
     toDate?: string;
     includeArchived?: boolean;
+    lite?: boolean;
   }): Promise<Record<string, unknown>[]> {
     const query: Record<string, unknown> = {};
     if (filters?.supervisorId) query.supervisorId = filters.supervisorId;
@@ -75,8 +98,11 @@ export class SchoolVisitsService {
       if (filters.toDate) dateFilter.$lte = filters.toDate;
       query.visitDate = dateFilter;
     }
-    const docs = await this.visitModel.find(query).sort({ visitDate: -1 }).exec();
-    const hot = docs.map((d) => this.toPlain(d));
+    const docs = await this.visitModel.find(query).sort({ visitDate: -1 }).lean().exec();
+    const mapVisit = filters?.lite
+      ? (d: Record<string, unknown>) => this.toPlainLite(d)
+      : (d: Record<string, unknown>) => this.toPlain(d);
+    const hot = docs.map((d) => mapVisit(d as Record<string, unknown>));
 
     const shouldIncludeArchived =
       filters?.includeArchived ||
@@ -154,32 +180,22 @@ export class SchoolVisitsService {
       }
     }
 
-    const photos = (dto.photos || []).map((photo) => {
-      const buffer = Buffer.from(
-        photo.photoDataBase64.includes(',')
-          ? photo.photoDataBase64.split(',').pop()!
-          : photo.photoDataBase64,
-        'base64',
-      );
-      if (buffer.length > MAX_PHOTO_BYTES) {
-        throw new BadRequestException(
-          `Photo "${photo.filename}" exceeds maximum size of 8MB.`,
-        );
-      }
-      return {
-        id: `vphoto_${crypto.randomBytes(6).toString('hex')}`,
-        caption: photo.caption || '',
-        mimeType: photo.mimeType || 'image/jpeg',
-        filename: photo.filename || 'photo.jpg',
-        photoDataBase64: photo.photoDataBase64,
-        takenAt: photo.takenAt || new Date().toISOString(),
+    const id = `visit_${crypto.randomBytes(8).toString('hex')}`;
+
+    const photos = [];
+    for (const photo of dto.photos || []) {
+      const uploaded = await uploadEmbeddedPhoto(this.mediaStorage, photo, {
+        idPrefix: 'vphoto',
+        folder: `/flexhrm/school-visits/${id}`,
+        tags: ['school-visit', id],
+      });
+      photos.push({
+        ...uploaded,
         lat: Number(photo.lat) || 0,
         lng: Number(photo.lng) || 0,
         locationLabel: photo.locationLabel || '',
-      };
-    });
-
-    const id = `visit_${crypto.randomBytes(8).toString('hex')}`;
+      });
+    }
 
     const hasGeoTaggedPhoto = photos.some(
       (photo) => photo.lat !== 0 || photo.lng !== 0,

@@ -10,20 +10,27 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  if (stored.startsWith(PASSWORD_PREFIX)) {
-    const parts = stored.slice(PASSWORD_PREFIX.length).split(':');
-    if (parts.length !== 2) return false;
-    const [salt, expectedHash] = parts;
-    const actualHash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
-    try {
-      return crypto.timingSafeEqual(
-        Buffer.from(expectedHash, 'hex'),
-        Buffer.from(actualHash, 'hex'),
-      );
-    } catch {
-      return false;
-    }
+  if (!stored.startsWith(PASSWORD_PREFIX)) {
+    return false;
   }
+
+  const parts = stored.slice(PASSWORD_PREFIX.length).split(':');
+  if (parts.length !== 2) return false;
+  const [salt, expectedHash] = parts;
+  const actualHash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expectedHash, 'hex'),
+      Buffer.from(actualHash, 'hex'),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** One-time migration path for legacy plaintext admin passwords (login only). */
+export function verifyLegacyPlaintextPassword(password: string, stored: string): boolean {
+  if (isPasswordHashed(stored)) return false;
   if (password.length !== stored.length) return false;
   try {
     return crypto.timingSafeEqual(Buffer.from(password), Buffer.from(stored));

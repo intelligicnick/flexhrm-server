@@ -65,13 +65,26 @@ export class SchoolVisitsController {
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
     @Query('monthKey') monthKey?: string,
+    @Query('lite') lite?: string,
   ) {
     return this.visitsService.findAll({
       supervisorId: req.user.employeeId || req.user.username,
       fromDate,
       toDate,
       monthKey,
+      lite: lite === '1' || lite === 'true',
     });
+  }
+
+  @Get('supervisor/schools/:schoolWorkId/last-visit')
+  @UseGuards(SupervisorGuard)
+  async supervisorLastVisit(
+    @Req() req: Request & { user: AdminSessionPayload },
+    @Param('schoolWorkId') schoolWorkId: string,
+  ) {
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const lastVisitDate = await this.visitsService.getLastVisitDate(supervisorId, schoolWorkId);
+    return { lastVisitDate };
   }
 
   @Get('supervisor/schools')
@@ -80,7 +93,7 @@ export class SchoolVisitsController {
     const supervisorId = String(req.user.employeeId || req.user.username || '');
     const assignedBlocks =
       (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
-    const allSchools = await this.schoolWorksService.findAll();
+    const allSchools = await this.schoolWorksService.findAllForSupervisorList();
     return filterSchoolsForSupervisor(allSchools, supervisorId, assignedBlocks);
   }
 

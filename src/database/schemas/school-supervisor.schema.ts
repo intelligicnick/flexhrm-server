@@ -59,6 +59,12 @@ export class SchoolSupervisor {
   @Prop({ default: '' })
   profilePhotoBase64!: string;
 
+  @Prop({ default: '' })
+  profilePhotoUrl!: string;
+
+  @Prop({ default: '' })
+  profilePhotoFileId!: string;
+
   @Prop({ default: 'en', enum: ['en', 'hi'] })
   defaultLanguage!: string;
 

@@ -1,7 +1,17 @@
-import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  decodeImageBase64,
+  isHttpUrl,
+} from '../../common/storage/file-buffer.util';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
 
 export interface EmployeeAssetRecord {
   id: string;
@@ -13,36 +23,10 @@ export interface EmployeeAssetRecord {
   employeeMobile: string;
   pfJoiningDate: string;
   photo?: string;
+  photoUrl?: string;
+  photoFileId?: string;
   photoDataBase64?: string;
   customFields?: Array<{ name: string; value: string }>;
-}
-
-function decodeImageBase64(payload: string): { buffer: Buffer; ext: string } {
-  const trimmed = payload.trim();
-  if (!trimmed) {
-    throw new BadRequestException('Photo payload is empty.');
-  }
-
-  const dataUrlMatch = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (dataUrlMatch) {
-    const mime = dataUrlMatch[1].toLowerCase();
-    const ext =
-      mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
-    const buffer = Buffer.from(dataUrlMatch[2], 'base64');
-    if (buffer.length === 0) {
-      throw new BadRequestException('Photo payload decoded to an empty image.');
-    }
-    return { buffer, ext };
-  }
-
-  const normalized = trimmed.includes(',')
-    ? trimmed.split(',').pop()!.trim()
-    : trimmed;
-  const buffer = Buffer.from(normalized.replace(/\s/g, ''), 'base64');
-  if (buffer.length === 0) {
-    throw new BadRequestException('Photo payload decoded to an empty image.');
-  }
-  return { buffer, ext: 'jpg' };
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -58,7 +42,10 @@ async function fileExists(filePath: string): Promise<boolean> {
 export class EmployeeAssetsService implements OnModuleInit {
   private photoDir!: string;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly mediaStorage: MediaStorageService,
+  ) {}
 
   onModuleInit(): void {
     const baseDir = this.config.get<string>('employeeAssetsDir');
@@ -80,26 +67,58 @@ export class EmployeeAssetsService implements OnModuleInit {
   async savePhoto(
     employeeId: string,
     photoPayload: string,
-  ): Promise<{ photo: string; photoDataBase64: string }> {
+    previous?: Pick<EmployeeAssetRecord, 'photoFileId'>,
+  ): Promise<{
+    photo: string;
+    photoUrl: string;
+    photoFileId: string;
+    photoDataBase64: string;
+  }> {
     const { buffer, ext } = decodeImageBase64(photoPayload);
     const filename = `${employeeId}.${ext}`;
     const absolutePath = path.join(this.photoDir, filename);
 
-    try {
-      await fs.promises.writeFile(absolutePath, buffer);
-    } catch {
-      // Disk may be read-only — MongoDB fallback still works.
+    const uploaded = await this.mediaStorage.upload({
+      buffer,
+      fileName: filename,
+      folder: `/flexhrm/employee-photos/${employeeId}`,
+      tags: ['employee-photo', employeeId],
+    });
+
+    if (uploaded.imagekitFileId) {
+      await this.mediaStorage.deleteCloudFile(previous?.photoFileId);
+    }
+
+    if (!uploaded.imagekitUrl) {
+      try {
+        await fs.promises.writeFile(absolutePath, buffer);
+      } catch {
+        // Disk may be read-only — MongoDB fallback still works.
+      }
     }
 
     return {
-      photo: filename,
-      photoDataBase64: buffer.toString('base64'),
+      photo: uploaded.imagekitUrl ?? filename,
+      photoUrl: uploaded.imagekitUrl ?? '',
+      photoFileId: uploaded.imagekitFileId ?? '',
+      photoDataBase64: uploaded.fileDataBase64 ?? '',
     };
   }
 
+  getPhotoRedirectUrl(record: EmployeeAssetRecord): string | null {
+    const url = record.photoUrl?.trim() || (isHttpUrl(record.photo) ? record.photo : '');
+    return url || this.mediaStorage.getRedirectUrl({ imagekitUrl: url });
+  }
+
   async readPhotoBuffer(record: EmployeeAssetRecord): Promise<Buffer | null> {
+    const redirectUrl = this.getPhotoRedirectUrl(record);
+    if (redirectUrl) {
+      const buffer = await this.mediaStorage.readBuffer({ imagekitUrl: redirectUrl });
+      if (buffer) return buffer;
+    }
+
     const stored = record.photo?.trim();
-    if (stored) {
+    if (stored && !isHttpUrl(stored)) {
       for (const candidate of [
         path.join(this.photoDir, stored),
         path.isAbsolute(stored) ? stored : '',
@@ -123,7 +142,8 @@ export class EmployeeAssetsService implements OnModuleInit {
   }
 
   async deletePhoto(record: EmployeeAssetRecord): Promise<void> {
-    if (!record.photo?.trim()) return;
+    await this.mediaStorage.deleteCloudFile(record.photoFileId);
+    if (!record.photo?.trim() || isHttpUrl(record.photo)) return;
     try {
       await fs.promises.unlink(path.join(this.photoDir, record.photo));
     } catch {

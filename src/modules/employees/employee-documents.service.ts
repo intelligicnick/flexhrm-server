@@ -14,6 +14,14 @@ import {
   EmployeeDocument,
   EmployeeDocumentRecord,
 } from '../../database/schemas/employee-document.schema';
+import {
+  ALLOWED_IMAGE_AND_PDF_MIME_TYPES,
+  decodeBase64Payload,
+  extensionForMime,
+  sanitizeStorageLabel,
+  validateImageOrPdfBuffer,
+} from '../../common/storage/file-buffer.util';
+import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { CreateEmployeeDocumentDto, ReplaceEmployeeDocumentDto } from './dto/employee-document.dto';
 
 export interface PublicEmployeeDocument {
@@ -27,14 +35,8 @@ export interface PublicEmployeeDocument {
   quality?: number;
   uploadedBy: string;
   createdAt: string;
+  imagekitUrl?: string;
 }
-
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-]);
 
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MAX_BULK_UPLOAD_COUNT = 25;
@@ -43,94 +45,9 @@ function generateDocumentId(): string {
   return `edoc_${crypto.randomBytes(8).toString('hex')}`;
 }
 
-function decodeBase64Payload(fileBase64: string): Buffer {
-  const trimmed = fileBase64.trim();
-  if (!trimmed) {
-    throw new BadRequestException('Document file payload is empty.');
-  }
-
-  const normalized = trimmed.includes(',')
-    ? trimmed.split(',').pop()!.trim()
-    : trimmed;
-
-  if (!/^[A-Za-z0-9+/=\s]+$/.test(normalized)) {
-    throw new BadRequestException('Document file payload is not valid base64.');
-  }
-
-  const buffer = Buffer.from(normalized.replace(/\s/g, ''), 'base64');
-  if (buffer.length === 0) {
-    throw new BadRequestException('Document file payload decoded to an empty file.');
-  }
-
-  return buffer;
-}
-
-function validateFileBuffer(buffer: Buffer, mimeType: string): void {
-  const mime = mimeType.toLowerCase();
-  const detected = detectMimeFromBuffer(buffer);
-
-  if (!detected) {
-    throw new BadRequestException(
-      'Unable to detect a supported document type from file content.',
-    );
-  }
-
-  if (detected !== mime) {
-    throw new BadRequestException(
-      `Declared MIME type "${mimeType}" does not match file content (${detected}).`,
-    );
-  }
-
-  if (mime === 'application/pdf') {
-    return;
-  }
-
-  if (mime.startsWith('image/')) {
-    return;
-  }
-
-  throw new BadRequestException(`Unsupported document type: ${mimeType}`);
-}
-
-function detectMimeFromBuffer(buffer: Buffer): string | null {
-  if (buffer.length >= 5 && buffer.subarray(0, 4).toString() === '%PDF') {
-    return 'application/pdf';
-  }
-
-  const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
-  if (isJpeg) return 'image/jpeg';
-
-  const isPng =
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47;
-  if (isPng) return 'image/png';
-
-  const isWebp =
-    buffer.length >= 12 &&
-    buffer.subarray(0, 4).toString() === 'RIFF' &&
-    buffer.subarray(8, 12).toString() === 'WEBP';
-  if (isWebp) return 'image/webp';
-
-  return null;
-}
-
 function normalizeQuality(quality: number | undefined): number | undefined {
   if (quality == null || Number.isNaN(quality)) return undefined;
   return Math.min(1, Math.max(0.1, Math.round(quality * 1000) / 1000));
-}
-
-function extensionForMime(mimeType: string): string {
-  const mime = mimeType.toLowerCase();
-  if (mime === 'application/pdf') return 'pdf';
-  if (mime.includes('png')) return 'png';
-  if (mime.includes('webp')) return 'webp';
-  return 'jpg';
-}
-
-function sanitizeLabel(label: string): string {
-  return label.trim().replace(/[/\\?%*:|"<>]/g, '_').slice(0, 120);
 }
 
 function toPublicDocument(record: EmployeeDocument): PublicEmployeeDocument {
@@ -145,6 +62,7 @@ function toPublicDocument(record: EmployeeDocument): PublicEmployeeDocument {
     quality: record.quality,
     uploadedBy: record.uploadedBy,
     createdAt: record.createdAt,
+    imagekitUrl: record.imagekitUrl,
   };
 }
 
@@ -165,6 +83,7 @@ export class EmployeeDocumentsService implements OnModuleInit {
     @InjectModel(EmployeeDocument.name)
     private readonly documentModel: Model<EmployeeDocumentRecord>,
     private readonly config: ConfigService,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   onModuleInit(): void {
@@ -194,13 +113,13 @@ export class EmployeeDocumentsService implements OnModuleInit {
     dto: CreateEmployeeDocumentDto,
   ): Promise<PublicEmployeeDocument> {
     const mimeType = dto.mimeType.trim().toLowerCase();
-    if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+    if (!ALLOWED_IMAGE_AND_PDF_MIME_TYPES.has(mimeType)) {
       throw new BadRequestException(
         'Only JPEG, PNG, WebP images and PDF documents are allowed.',
       );
     }
 
-    const label = sanitizeLabel(dto.label);
+    const label = sanitizeStorageLabel(dto.label);
     if (!label) {
       throw new BadRequestException('Document label is required.');
     }
@@ -211,21 +130,29 @@ export class EmployeeDocumentsService implements OnModuleInit {
         `File is too large. Maximum size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.`,
       );
     }
-    validateFileBuffer(buffer, mimeType);
+    validateImageOrPdfBuffer(buffer, mimeType);
 
     const id = generateDocumentId();
     const ext = extensionForMime(mimeType);
     const filename = `${label.replace(/\s+/g, '_')}.${ext}`;
     const storedFilename = `${employeeId}_${id}.${ext}`;
     const absolutePath = path.join(this.storageDir, storedFilename);
-    const fileDataBase64 = buffer.toString('base64');
     const storedSizeBytes = buffer.length;
     const quality = normalizeQuality(dto.quality);
 
-    try {
-      await fs.promises.writeFile(absolutePath, buffer);
-    } catch {
-      // Disk may be read-only — MongoDB fallback still works.
+    const uploaded = await this.mediaStorage.upload({
+      buffer,
+      fileName: storedFilename,
+      folder: `/flexhrm/employee-documents/${employeeId}`,
+      tags: ['employee-document', employeeId, label],
+    });
+
+    if (!uploaded.imagekitUrl) {
+      try {
+        await fs.promises.writeFile(absolutePath, buffer);
+      } catch {
+        // Disk may be read-only — MongoDB fallback still works.
+      }
     }
 
     const record = await this.documentModel.create({
@@ -235,7 +162,9 @@ export class EmployeeDocumentsService implements OnModuleInit {
       mimeType,
       filename,
       storedPath: storedFilename,
-      fileDataBase64,
+      fileDataBase64: uploaded.fileDataBase64,
+      imagekitUrl: uploaded.imagekitUrl,
+      imagekitFileId: uploaded.imagekitFileId,
       originalSizeBytes: dto.originalSizeBytes,
       storedSizeBytes,
       quality,
@@ -281,7 +210,7 @@ export class EmployeeDocumentsService implements OnModuleInit {
     }
 
     const mimeType = dto.mimeType.trim().toLowerCase();
-    if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+    if (!ALLOWED_IMAGE_AND_PDF_MIME_TYPES.has(mimeType)) {
       throw new BadRequestException(
         'Only JPEG, PNG, WebP images and PDF documents are allowed.',
       );
@@ -293,40 +222,69 @@ export class EmployeeDocumentsService implements OnModuleInit {
         `File is too large. Maximum size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.`,
       );
     }
-    validateFileBuffer(buffer, mimeType);
+    validateImageOrPdfBuffer(buffer, mimeType);
 
     const ext = extensionForMime(mimeType);
     const storedFilename = `${employeeId}_${docId}.${ext}`;
     const absolutePath = path.join(this.storageDir, storedFilename);
-    const fileDataBase64 = buffer.toString('base64');
     const storedSizeBytes = buffer.length;
     const quality = normalizeQuality(dto.quality);
     const filename = `${existing.label.replace(/\s+/g, '_')}.${ext}`;
 
-    try {
-      if (existing.storedPath && existing.storedPath !== storedFilename) {
-        try {
-          const oldPath = await this.resolveStoredFilePath(existing);
-          await fs.promises.unlink(oldPath);
-        } catch {
-          // Old file may already be gone.
+    const uploaded = await this.mediaStorage.upload({
+      buffer,
+      fileName: storedFilename,
+      folder: `/flexhrm/employee-documents/${employeeId}`,
+      tags: ['employee-document', employeeId, existing.label],
+    });
+
+    if (uploaded.imagekitFileId) {
+      await this.mediaStorage.deleteCloudFile(existing.imagekitFileId);
+    }
+
+    if (!uploaded.imagekitUrl) {
+      try {
+        if (existing.storedPath && existing.storedPath !== storedFilename) {
+          try {
+            const oldPath = await this.resolveStoredFilePath(existing);
+            await fs.promises.unlink(oldPath);
+          } catch {
+            // Old file may already be gone.
+          }
         }
+        await fs.promises.writeFile(absolutePath, buffer);
+      } catch {
+        // Disk may be read-only — MongoDB fallback still works.
       }
-      await fs.promises.writeFile(absolutePath, buffer);
-    } catch {
-      // Disk may be read-only — MongoDB fallback still works.
     }
 
     existing.mimeType = mimeType;
     existing.filename = filename;
     existing.storedPath = storedFilename;
-    existing.fileDataBase64 = fileDataBase64;
+    existing.fileDataBase64 = uploaded.fileDataBase64;
+    existing.imagekitUrl = uploaded.imagekitUrl;
+    existing.imagekitFileId = uploaded.imagekitFileId;
     existing.storedSizeBytes = storedSizeBytes;
     existing.quality = quality;
     existing.uploadedBy = username || existing.uploadedBy;
     await existing.save();
 
     return toPublicDocument(existing.toObject());
+  }
+
+  async getFileRedirectUrl(
+    employeeId: string,
+    docId: string,
+  ): Promise<string | null> {
+    const record = await this.documentModel
+      .findOne({ id: docId, employeeId })
+      .select('imagekitUrl')
+      .lean()
+      .exec();
+    if (!record) {
+      throw new NotFoundException('Employee document not found.');
+    }
+    return this.mediaStorage.getRedirectUrl(record);
   }
 
   private async resolveStoredFilePath(
@@ -355,19 +313,19 @@ export class EmployeeDocumentsService implements OnModuleInit {
   private async readFileBuffer(
     record: Pick<
       EmployeeDocument,
-      'id' | 'employeeId' | 'storedPath' | 'fileDataBase64'
+      'id' | 'employeeId' | 'storedPath' | 'fileDataBase64' | 'imagekitUrl'
     >,
   ): Promise<Buffer> {
-    try {
+    const buffer = await this.mediaStorage.readBuffer(record, async () => {
       const filePath = await this.resolveStoredFilePath(record);
-      return await fs.promises.readFile(filePath);
-    } catch {
-      const stored = record.fileDataBase64?.trim();
-      if (stored) {
-        return Buffer.from(stored, 'base64');
-      }
+      return fs.promises.readFile(filePath);
+    });
+
+    if (!buffer) {
       throw new NotFoundException('Document file missing on disk.');
     }
+
+    return buffer;
   }
 
   async getFileContent(
@@ -400,6 +358,7 @@ export class EmployeeDocumentsService implements OnModuleInit {
     }
 
     await this.documentModel.deleteOne({ id: docId, employeeId });
+    await this.mediaStorage.deleteCloudFile(record.imagekitFileId);
 
     try {
       const filePath = await this.resolveStoredFilePath(record);
@@ -419,6 +378,7 @@ export class EmployeeDocumentsService implements OnModuleInit {
 
     await Promise.all(
       records.map(async (record) => {
+        await this.mediaStorage.deleteCloudFile(record.imagekitFileId);
         try {
           const filePath = await this.resolveStoredFilePath(record);
           await fs.promises.unlink(filePath);

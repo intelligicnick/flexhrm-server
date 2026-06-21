@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Post,
   Query,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public, RequireAnyPermissions } from '../../common/decorators/auth.decorators';
@@ -169,6 +171,8 @@ export class SmartCaptureController {
 
   @Public()
   @Post('connect')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 900000 } })
   connectExtension(@Body() dto: ConnectExtensionDto) {
     return this.smartCaptureService.redeemConnectionCode(dto.code, dto.flexhrmUrl);
   }

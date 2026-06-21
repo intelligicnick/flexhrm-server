@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../constants/metadata.constants';
+import { readSessionTokenFromRequest } from '../utils/session-cookie.util';
 import { SessionsService } from '../../modules/sessions/sessions.service';
 
 @Injectable()
@@ -24,12 +25,8 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization as string | undefined;
+    const token = readSessionTokenFromRequest(request.cookies, authHeader);
 
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Authentication required. Please log in.');
-    }
-
-    const token = authHeader.slice(7).trim();
     if (!token) {
       throw new UnauthorizedException('Authentication required. Please log in.');
     }

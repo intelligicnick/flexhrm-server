@@ -8,11 +8,14 @@ export class ExtensionConnectionCode {
   @Prop({ required: true, unique: true, index: true })
   code!: string;
 
-  @Prop({ required: true, select: false })
-  sessionToken!: string;
-
   @Prop({ required: true })
   username!: string;
+
+  @Prop({ default: 'admin' })
+  role!: string;
+
+  @Prop({ type: [String], default: [] })
+  locations!: string[];
 
   @Prop({ default: 'default' })
   organizationId!: string;

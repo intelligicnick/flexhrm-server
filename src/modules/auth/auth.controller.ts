@@ -7,10 +7,12 @@ import {
   Param,
   Patch,
   Post,
+  Res,
   UnauthorizedException,
   BadRequestException,
   HttpCode,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { Public, RequirePermissions } from '../../common/decorators/auth.decorators';
@@ -21,9 +23,14 @@ import {
   hashPassword,
   isPasswordHashed,
   verifyPassword,
+  verifyLegacyPlaintextPassword,
   generateResetCode,
   validatePasswordStrength,
 } from '../../common/utils/password.util';
+import {
+  clearSessionCookie,
+  setSessionCookie,
+} from '../../common/utils/session-cookie.util';
 import { AdminsService } from '../admins/admins.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EmailService } from '../email/email.service';
@@ -51,10 +58,15 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 900000 } })
-  async login(@Body() dto: LoginDto) {
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const admin = await this.adminsService.findByUsername(dto.username.trim());
+    const isProduction = this.configService.get<string>('nodeEnv') === 'production';
+    const passwordValid =
+      admin &&
+      (verifyPassword(dto.password, admin.password) ||
+        verifyLegacyPlaintextPassword(dto.password, admin.password));
 
-    if (admin && verifyPassword(dto.password, admin.password)) {
+    if (passwordValid && admin) {
       if (admin.disabled) {
         await this.auditLogsService.append({
           username: dto.username,
@@ -83,6 +95,7 @@ export class AuthController {
         admin.role || 'admin',
         admin.locations || [],
       );
+      setSessionCookie(res, token, isProduction);
 
       await this.auditLogsService.append({
         username: admin.username,
@@ -99,7 +112,6 @@ export class AuthController {
 
       return {
         success: true,
-        token,
         username: admin.username,
         role: admin.role || 'admin',
         locations: admin.locations || [],
@@ -126,15 +138,9 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 900000 } })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     const identifier = dto.username.trim();
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H1',location:'auth.controller.ts:129',message:'forgot-password requested',data:{identifierLength:identifier.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const admin = await this.adminsService.findByUsernameOrEmail(identifier);
 
     if (!admin || admin.disabled) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H3',location:'auth.controller.ts:133',message:'forgot-password unknown-or-disabled account',data:{found:!!admin,disabled:!!admin?.disabled},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return {
         success: true,
         message:
@@ -168,9 +174,6 @@ export class AuthController {
         admin.username,
         resetCode,
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H2',location:'auth.controller.ts:165',message:'forgot-password email attempt result',data:{emailConfigured:true,emailSent:sent},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (sent) {
         response.message =
           'A reset code has been sent to your registered email address. It expires in 15 minutes.';
@@ -189,9 +192,6 @@ export class AuthController {
         'Use the reset code below to set a new password. The code expires in 15 minutes.';
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'post-fix',hypothesisId:'H1',location:'auth.controller.ts:186',message:'forgot-password fallback response without resetToken',data:{hasEmail:!!admin.email,emailConfigured:this.emailService.isConfigured(),includesResetToken:false},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return response;
   }
 
@@ -246,14 +246,12 @@ export class AuthController {
   @Public()
   @Post('quick-login')
   @HttpCode(200)
-  async quickLogin() {
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3941a9'},body:JSON.stringify({sessionId:'3941a9',runId:'forgot-password-pre-fix',hypothesisId:'H4',location:'auth.controller.ts:242',message:'quick-login requested',data:{nodeEnv:this.configService.get<string>('nodeEnv')},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+  async quickLogin(@Res({ passthrough: true }) res: Response) {
     if (this.configService.get<string>('nodeEnv') === 'production') {
       throw new ForbiddenException('Quick login is disabled in production.');
     }
 
+    const isProduction = false;
     const admins = await this.adminsService.findAllSafe();
     const defaultAdmin =
       admins.find((a) => a.username.toLowerCase() === 'admin') || admins[0];
@@ -271,6 +269,7 @@ export class AuthController {
       defaultAdmin.role || 'admin',
       defaultAdmin.locations || [],
     );
+    setSessionCookie(res, token, isProduction);
 
     await this.auditLogsService.append({
       username: defaultAdmin.username,
@@ -281,7 +280,6 @@ export class AuthController {
 
     return {
       success: true,
-      token,
       username: defaultAdmin.username,
       role: defaultAdmin.role || 'admin',
       locations: defaultAdmin.locations || [],
@@ -495,6 +493,7 @@ export class AuthController {
       assignedBlocks: user.assignedBlocks || [],
       name: supervisor?.name || user.username,
       profilePhotoBase64: raw?.profilePhotoBase64 || '',
+      profilePhotoUrl: raw?.profilePhotoUrl || '',
       hasRegisteredDevice: !!raw?.registeredDeviceId,
       registeredDeviceId: raw?.registeredDeviceId || '',
       registeredDeviceName: raw?.registeredDeviceName || '',
@@ -561,8 +560,13 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(200)
-  async logout(@CurrentUser() user: AdminSessionPayload) {
+  async logout(
+    @CurrentUser() user: AdminSessionPayload,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     await this.sessionsService.destroySession(user.token);
+    clearSessionCookie(res, isProduction);
     await this.auditLogsService.append({
       username: user.username,
       action: 'LOGOUT',

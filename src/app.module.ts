@@ -35,10 +35,15 @@ import { ContractsModule } from './modules/contracts/contracts.module';
 import { RenewalsModule } from './modules/renewals/renewals.module';
 import { BgDdModule } from './modules/bg-dd/bg-dd.module';
 import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
+import { ImageKitModule } from './modules/imagekit/imagekit.module';
+import { MediaStorageModule } from './common/storage/media-storage.module';
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
+    ImageKitModule,
+    MediaStorageModule,
     DatabaseModule,
     SessionsModule,
     RolesModule,
@@ -71,6 +76,7 @@ import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module
     RenewalsModule,
     BgDdModule,
     SmartCaptureModule,
+    PayrollModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

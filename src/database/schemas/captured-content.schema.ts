@@ -21,6 +21,8 @@ export class CapturedContent {
   @Prop({ default: '' }) content!: string;
   @Prop({ default: '' }) contentMimeType!: string;
   @Prop({ default: '' }) contentBase64!: string;
+  @Prop({ default: '' }) contentUrl!: string;
+  @Prop({ default: '' }) contentFileId!: string;
   @Prop({ type: Object, default: {} }) structuredData!: Record<string, unknown>;
   @Prop({ default: '' }) linkedRecordType!: string;
   @Prop({ default: '' }) linkedRecordId!: string;

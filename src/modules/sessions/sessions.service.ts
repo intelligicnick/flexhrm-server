@@ -60,6 +60,32 @@ export class SessionsService {
     return token;
   }
 
+  /** Dedicated session for the browser extension — never reuses the user's login token. */
+  async createExtensionSession(
+    username: string,
+    role: string,
+    locations: string[],
+  ): Promise<string> {
+    const token = generateToken();
+    const now = new Date();
+    const extensionDurationMs = 90 * 24 * 60 * 60 * 1000;
+    await this.sessionModel.create({
+      token,
+      username,
+      role: role || 'admin',
+      locations: Array.isArray(locations) ? locations : [],
+      userType: 'admin',
+      employeeId: '',
+      assignedBlocks: [],
+      impersonated: false,
+      sessionKind: 'extension',
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + extensionDurationMs),
+      lastActiveAt: now,
+    });
+    return token;
+  }
+
   async createSupervisorSession(params: {
     phone: string;
     employeeId: string;

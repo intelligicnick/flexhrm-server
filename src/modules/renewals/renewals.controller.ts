@@ -147,6 +147,12 @@ export class RenewalsController {
     @Param('docId') docId: string,
     @Res() res: Response,
   ) {
+    const redirectUrl = await this.renewalDocumentsService.getFileRedirectUrl(id, docId);
+    if (redirectUrl) {
+      res.redirect(302, redirectUrl);
+      return;
+    }
+
     const { buffer, mimeType, filename } =
       await this.renewalDocumentsService.getFileBuffer(id, docId);
     res.setHeader('Content-Type', mimeType);

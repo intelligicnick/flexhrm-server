@@ -34,3 +34,5 @@ AttendanceRecordSchema.index(
   { unique: true },
 );
 AttendanceRecordSchema.index({ monthKey: 1, location: 1 });
+AttendanceRecordSchema.index({ status: 1, employeeId: 1 });
+AttendanceRecordSchema.index({ monthKey: 1, status: 1, employeeId: 1 });

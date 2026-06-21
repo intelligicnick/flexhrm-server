@@ -38,4 +38,8 @@ export default () => ({
   ),
   openAiApiKey: process.env.OPENAI_API_KEY ?? '',
   openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+  renewalAssetsDir: process.env.RENEWAL_ASSETS_DIR ?? '',
+  imagekitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY ?? '',
+  imagekitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY ?? '',
+  imagekitUrlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT ?? '',
 });

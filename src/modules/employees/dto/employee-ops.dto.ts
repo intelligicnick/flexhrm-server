@@ -60,6 +60,35 @@ export class PayrollLedgerBulkDto {
   updates!: Record<string, unknown>[];
 }
 
+export class AddLedgerItemsDto {
+  @IsString()
+  @IsNotEmpty()
+  monthKey!: string;
+
+  @IsArray()
+  entries!: Array<{
+    employeeId: string;
+    type: 'advance' | 'penalty' | 'uniform' | 'foodPerk' | 'accommodationPerk' | 'conveyancePerk';
+    amount: number;
+    entryDate: string;
+    note?: string;
+  }>;
+}
+
+export class DeleteLedgerItemDto {
+  @IsString()
+  @IsNotEmpty()
+  monthKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  employeeId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  itemId!: string;
+}
+
 export class EmployeeChangeUpdateDto {
   @IsString()
   @IsNotEmpty()

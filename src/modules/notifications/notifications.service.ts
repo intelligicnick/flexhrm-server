@@ -40,6 +40,10 @@ function formatDateRange(fromDate: string, toDate: string): string {
 
 @Injectable()
 export class NotificationsService {
+  /** Avoid re-running expensive commitment/visit sync on every poll. */
+  private lastDynamicSyncAt = 0;
+  private readonly dynamicSyncTtlMs = 45_000;
+
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
@@ -112,6 +116,12 @@ export class NotificationsService {
     await this.syncActiveCommitmentReminders();
     await this.syncOverdueCommitmentNotifications();
     await this.syncPlannedVisitNotifications();
+    this.lastDynamicSyncAt = Date.now();
+  }
+
+  private async syncDynamicNotificationsIfNeeded(): Promise<void> {
+    if (Date.now() - this.lastDynamicSyncAt < this.dynamicSyncTtlMs) return;
+    await this.syncDynamicNotifications();
   }
 
   private commitmentReminderRefId(commitmentId: string, day: string): string {
@@ -627,8 +637,11 @@ export class NotificationsService {
     recipientId: string,
     limit = 50,
     adminUsername?: string,
+    skipSync = false,
   ): Promise<Record<string, unknown>[]> {
-    await this.syncDynamicNotifications();
+    if (!skipSync) {
+      await this.syncDynamicNotificationsIfNeeded();
+    }
 
     const query =
       recipientType === 'admin'
@@ -652,8 +665,11 @@ export class NotificationsService {
     recipientType: 'admin' | 'supervisor',
     recipientId: string,
     adminUsername?: string,
+    skipSync = false,
   ): Promise<number> {
-    await this.syncDynamicNotifications();
+    if (!skipSync) {
+      await this.syncDynamicNotificationsIfNeeded();
+    }
 
     const query =
       recipientType === 'admin'
@@ -671,6 +687,20 @@ export class NotificationsService {
           };
 
     return this.notificationModel.countDocuments(query).exec();
+  }
+
+  async findSummaryForRecipient(
+    recipientType: 'admin' | 'supervisor',
+    recipientId: string,
+    limit = 50,
+    adminUsername?: string,
+  ): Promise<{ items: Record<string, unknown>[]; count: number }> {
+    await this.syncDynamicNotificationsIfNeeded();
+    const [items, count] = await Promise.all([
+      this.findForRecipient(recipientType, recipientId, limit, adminUsername, true),
+      this.countUnread(recipientType, recipientId, adminUsername, true),
+    ]);
+    return { items, count };
   }
 
   async markRead(
