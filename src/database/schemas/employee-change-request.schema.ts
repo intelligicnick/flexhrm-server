@@ -22,6 +22,30 @@ export class EmployeeChangeEntry {
   previousSnapshot!: Record<string, unknown>;
 }
 
+@Schema({ _id: false })
+export class PendingEmployeeDocument {
+  @Prop({ required: true })
+  employeeId!: string;
+
+  @Prop({ required: true })
+  label!: string;
+
+  @Prop({ required: true })
+  fileBase64!: string;
+
+  @Prop({ required: true })
+  mimeType!: string;
+
+  @Prop({ default: 0 })
+  originalSizeBytes!: number;
+
+  @Prop({ default: 0 })
+  storedSizeBytes!: number;
+
+  @Prop()
+  quality?: number;
+}
+
 @Schema({ timestamps: true, collection: 'employee_change_requests' })
 export class EmployeeChangeRequest {
   @Prop({ required: true, unique: true, index: true })
@@ -53,6 +77,12 @@ export class EmployeeChangeRequest {
 
   @Prop({ default: 0 })
   fieldChangeCount!: number;
+
+  @Prop({ enum: ['admin_bulk', 'employee_self_service'], default: 'admin_bulk', index: true })
+  source!: string;
+
+  @Prop({ type: [PendingEmployeeDocument], default: [] })
+  pendingDocuments!: PendingEmployeeDocument[];
 }
 
 export const EmployeeChangeRequestSchema = SchemaFactory.createForClass(

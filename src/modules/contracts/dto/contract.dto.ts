@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -119,6 +120,11 @@ export class CreateContractDto {
   @IsOptional()
   @IsString()
   gemContractId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  linkedLocations?: string[];
 }
 
 export class UpdateContractDto {
@@ -228,6 +234,11 @@ export class UpdateContractDto {
   @IsOptional()
   @IsString()
   gemContractId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  linkedLocations?: string[];
 }
 
 export class BulkImportContractDto {

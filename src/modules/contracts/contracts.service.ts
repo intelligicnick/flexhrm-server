@@ -15,12 +15,14 @@ import {
   CreateContractDto,
   UpdateContractDto,
 } from './dto/contract.dto';
+import { ContractBgSyncService } from './contract-bg-sync.service';
 
 @Injectable()
 export class ContractsService {
   constructor(
     @InjectModel(Contract.name)
     private readonly contractModel: Model<ContractDocument>,
+    private readonly contractBgSyncService: ContractBgSyncService,
   ) {}
 
   private parseDateMs(value: string): number | null {
@@ -63,6 +65,21 @@ export class ContractsService {
     if (endTs !== null && endTs < now) return 'expired';
     if (endTs !== null && endTs >= now) return 'active';
     return doc.status || 'active';
+  }
+
+  private normalizeLinkedLocations(values?: string[]): string[] {
+    if (!Array.isArray(values)) return [];
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const value of values) {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalized.push(trimmed);
+    }
+    return normalized;
   }
 
   private toPlain(doc: ContractDocument): Record<string, unknown> {
@@ -172,6 +189,7 @@ export class ContractsService {
       ...payload,
       entryDate: dto.entryDate?.trim() || new Date().toISOString().slice(0, 10),
     });
+    await this.contractBgSyncService.syncFromContract(doc);
     return this.toPlain(doc);
   }
 
@@ -203,6 +221,7 @@ export class ContractsService {
       doc.status = this.deriveStatus(doc);
     }
     await doc.save();
+    await this.contractBgSyncService.syncFromContract(doc);
     return this.toPlain(doc);
   }
 
@@ -236,6 +255,7 @@ export class ContractsService {
           this.applyPatch(existing, item);
           existing.status = this.deriveStatus(existing);
           await existing.save();
+          await this.contractBgSyncService.syncFromContract(existing);
           updated += 1;
           continue;
         }
@@ -281,6 +301,7 @@ export class ContractsService {
       status: dto.status || 'active',
       gemContractPdfUrl: dto.gemContractPdfUrl?.trim() || '',
       gemContractId: dto.gemContractId?.trim() || '',
+      linkedLocations: this.normalizeLinkedLocations(dto.linkedLocations),
     };
     payload.status = this.deriveStatus(payload);
     return payload;
@@ -329,6 +350,9 @@ export class ContractsService {
       doc.gemContractPdfUrl = dto.gemContractPdfUrl.trim();
     }
     if (dto.gemContractId !== undefined) doc.gemContractId = dto.gemContractId.trim();
+    if (dto.linkedLocations !== undefined) {
+      doc.linkedLocations = this.normalizeLinkedLocations(dto.linkedLocations);
+    }
 
     if (dto.hasExtension === false) doc.extensionEndDate = '';
     if (dto.bgApplicable === false) {

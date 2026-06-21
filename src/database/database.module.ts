@@ -43,6 +43,10 @@ import {
   EmployeeChangeRequestSchema,
 } from './schemas/employee-change-request.schema';
 import {
+  EmployeeDataGatherLink,
+  EmployeeDataGatherLinkSchema,
+} from './schemas/employee-data-gather-link.schema';
+import {
   EmployeeDocument,
   EmployeeDocumentSchema,
 } from './schemas/employee-document.schema';
@@ -110,6 +114,7 @@ const MODELS = [
   { name: SchoolDistrict.name, schema: SchoolDistrictSchema },
   { name: SchoolBlock.name, schema: SchoolBlockSchema },
   { name: EmployeeChangeRequest.name, schema: EmployeeChangeRequestSchema },
+  { name: EmployeeDataGatherLink.name, schema: EmployeeDataGatherLinkSchema },
   { name: EmployeeDocument.name, schema: EmployeeDocumentSchema },
   { name: SupervisorRequest.name, schema: SupervisorRequestSchema },
   { name: CommitmentDiary.name, schema: CommitmentDiarySchema },

@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import { Employee, EmployeeDocument, LedgerEntry } from '../../database/schemas/employee.schema';
+import { Contract, ContractDocument } from '../../database/schemas/contract.schema';
+import { resolveContractIdForLocation } from '../../common/utils/contract-locations.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { sanitizeEmployeeNumericFields } from '../../common/utils/non-negative-number.util';
 import {
@@ -53,6 +55,7 @@ const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
   'idCardDataBase64',
   'idCardVerifyToken',
   'monthlyLedger',
+  'contractId',
 ]);
 
 function bulkUpdateValuesEqual(before: unknown, after: unknown): boolean {
@@ -79,10 +82,36 @@ export class EmployeesService {
   constructor(
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<EmployeeDocument>,
+    @InjectModel(Contract.name)
+    private readonly contractModel: Model<ContractDocument>,
     private readonly employeeAssetsService: EmployeeAssetsService,
     private readonly employeeDocumentsService: EmployeeDocumentsService,
     private readonly config: ConfigService,
   ) {}
+
+  private async resolveContractIdForEmployeeLocation(
+    location: unknown,
+  ): Promise<string> {
+    const key = String(location || '').trim();
+    if (!key) return '';
+
+    const contracts = await this.contractModel
+      .find({}, { id: 1, linkedLocations: 1 })
+      .lean()
+      .exec();
+
+    return resolveContractIdForLocation(key, contracts);
+  }
+
+  private async applyLocationDerivedContract(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const { contractId: _ignored, ...rest } = data;
+    const contractId = await this.resolveContractIdForEmployeeLocation(
+      rest.location,
+    );
+    return { ...rest, contractId };
+  }
 
   private applyLocationScope(
     query: Record<string, unknown>,
@@ -252,6 +281,7 @@ export class EmployeesService {
       monthlyLedger: raw.monthlyLedger || {},
     });
     processed = sanitizeEmployeePayrollFields(processed);
+    processed = await this.applyLocationDerivedContract(processed);
     processed = await this.processEmployeeAssets(id, processed);
     const doc = await this.employeeModel.create(processed);
     return this.toPlain(doc);
@@ -270,6 +300,7 @@ export class EmployeesService {
       id: String(updates.id || updates.employeeCode || id),
     });
     merged = sanitizeEmployeePayrollFields(merged);
+    merged = await this.applyLocationDerivedContract(merged);
 
     merged = await this.processEmployeeAssets(
       id,
@@ -367,6 +398,7 @@ export class EmployeesService {
         srNo,
         monthlyLedger: raw.monthlyLedger || {},
       });
+      processed = await this.applyLocationDerivedContract(processed);
       processed = await this.processEmployeeAssets(employeeId, processed);
       await this.employeeModel.create(processed);
       added++;

@@ -54,6 +54,10 @@ export class Employee {
   @Prop({ default: '', index: true })
   location!: string;
 
+  /** Contract resolved from office location (not set directly on employee) */
+  @Prop({ default: '', index: true })
+  contractId!: string;
+
   @Prop({ default: '' })
   nameAsPerAadhar!: string;
 

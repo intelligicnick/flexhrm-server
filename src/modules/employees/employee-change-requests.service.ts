@@ -10,8 +10,10 @@ import {
   EmployeeChangeRequest,
   EmployeeChangeRequestDocument,
   EmployeeChangeEntry,
+  PendingEmployeeDocument,
 } from '../../database/schemas/employee-change-request.schema';
 import { EmployeesService } from './employees.service';
+import { EmployeeDocumentsService } from './employee-documents.service';
 import {
   employeeDisplayName,
   summarizeEmployeeChanges,
@@ -34,6 +36,7 @@ export class EmployeeChangeRequestsService {
     @InjectModel(EmployeeChangeRequest.name)
     private readonly changeRequestModel: Model<EmployeeChangeRequestDocument>,
     private readonly employeesService: EmployeesService,
+    private readonly employeeDocumentsService: EmployeeDocumentsService,
   ) {}
 
   private countFieldChanges(updates: EmployeeChangeEntry[]): number {
@@ -121,6 +124,54 @@ export class EmployeeChangeRequestsService {
     return this.toPlain(doc);
   }
 
+  async submitFromSelfService(payload: {
+    employeeId: string;
+    changes: Record<string, unknown>;
+    pendingDocuments: PendingEmployeeDocument[];
+    notes?: string;
+  }): Promise<Record<string, unknown>> {
+    const employeeId = String(payload.employeeId || '').trim();
+    if (!employeeId) {
+      throw new BadRequestException('employeeId is required.');
+    }
+
+    const existing = await this.employeesService.findById(employeeId);
+    if (!existing) {
+      throw new NotFoundException(`Employee not found: ${employeeId}`);
+    }
+
+    const delta = this.buildDelta(existing, payload.changes || {});
+    const pendingDocuments = Array.isArray(payload.pendingDocuments)
+      ? payload.pendingDocuments
+      : [];
+
+    if (Object.keys(delta).length === 0 && pendingDocuments.length === 0) {
+      throw new BadRequestException('No field changes or documents to submit.');
+    }
+
+    const entry: EmployeeChangeEntry = {
+      employeeId,
+      employeeCode: String(existing.employeeCode || employeeId),
+      employeeName: employeeDisplayName(existing),
+      changes: delta,
+      previousSnapshot: existing,
+    };
+
+    const doc = await this.changeRequestModel.create({
+      id: randomUUID(),
+      submittedBy: 'employee_self_service',
+      status: 'pending',
+      notes: String(payload.notes || '').trim(),
+      updates: [entry],
+      employeeCount: 1,
+      fieldChangeCount: Object.keys(delta).length,
+      source: 'employee_self_service',
+      pendingDocuments,
+    });
+
+    return this.toPlain(doc);
+  }
+
   async findAll(status?: string): Promise<Record<string, unknown>[]> {
     const filter: Record<string, unknown> = {};
     if (status?.trim()) filter.status = status.trim();
@@ -128,12 +179,36 @@ export class EmployeeChangeRequestsService {
       .find(filter)
       .sort({ createdAt: -1 })
       .exec();
-    return docs.map((d) => this.toPlain(d));
+    return docs.map((d) => this.toPlain(d, { omitPendingDocumentFiles: true }));
   }
 
   async findById(id: string): Promise<Record<string, unknown> | null> {
     const doc = await this.changeRequestModel.findOne({ id }).exec();
     return doc ? this.toPlain(doc) : null;
+  }
+
+  async getPendingDocument(
+    requestId: string,
+    index: number,
+  ): Promise<Record<string, unknown>> {
+    const doc = await this.changeRequestModel.findOne({ id: requestId }).exec();
+    if (!doc) throw new NotFoundException('Change request not found.');
+
+    const items = doc.pendingDocuments ?? [];
+    if (!Number.isInteger(index) || index < 0 || index >= items.length) {
+      throw new NotFoundException('Pending document not found.');
+    }
+
+    const item = items[index];
+    return {
+      employeeId: item.employeeId,
+      label: item.label,
+      mimeType: item.mimeType,
+      originalSizeBytes: item.originalSizeBytes,
+      storedSizeBytes: item.storedSizeBytes,
+      quality: item.quality,
+      fileBase64: item.fileBase64,
+    };
   }
 
   async approve(
@@ -166,6 +241,32 @@ export class EmployeeChangeRequestsService {
             `${employeeDisplayName(updated)} (${updated.employeeCode}): ${changedFields.join('; ')}`,
           );
         }
+      }
+    }
+
+    if (doc.pendingDocuments?.length) {
+      const grouped = new Map<string, PendingEmployeeDocument[]>();
+      for (const item of doc.pendingDocuments) {
+        const list = grouped.get(item.employeeId) ?? [];
+        list.push(item);
+        grouped.set(item.employeeId, list);
+      }
+
+      for (const [employeeId, docs] of grouped) {
+        await this.employeeDocumentsService.createMany(
+          employeeId,
+          doc.submittedBy === 'employee_self_service'
+            ? 'employee_self_service'
+            : reviewedBy,
+          docs.map((item) => ({
+            label: item.label,
+            fileBase64: item.fileBase64,
+            mimeType: item.mimeType,
+            originalSizeBytes: item.originalSizeBytes,
+            storedSizeBytes: item.storedSizeBytes,
+            quality: item.quality,
+          })),
+        );
       }
     }
 
@@ -205,9 +306,29 @@ export class EmployeeChangeRequestsService {
     return this.changeRequestModel.countDocuments({ status: 'pending' });
   }
 
-  private toPlain(doc: EmployeeChangeRequestDocument): Record<string, unknown> {
+  private toPlain(
+    doc: EmployeeChangeRequestDocument,
+    options?: { omitPendingDocumentFiles?: boolean },
+  ): Record<string, unknown> {
     const obj = doc.toObject();
     const { _id, __v, ...rest } = obj as unknown as Record<string, unknown>;
+
+    if (
+      options?.omitPendingDocumentFiles &&
+      Array.isArray(rest.pendingDocuments)
+    ) {
+      rest.pendingDocuments = (
+        rest.pendingDocuments as PendingEmployeeDocument[]
+      ).map((item) => ({
+        employeeId: item.employeeId,
+        label: item.label,
+        mimeType: item.mimeType,
+        originalSizeBytes: item.originalSizeBytes,
+        storedSizeBytes: item.storedSizeBytes,
+        quality: item.quality,
+      }));
+    }
+
     return rest;
   }
 }

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -36,6 +37,16 @@ export class ContractsController {
       expiry,
       bgDue: bgDue === 'true' || bgDue === '1',
     });
+  }
+
+  @Get(':id')
+  @RequirePermissions('bids', 'view')
+  async findOne(@Param('id') id: string) {
+    const row = await this.contractsService.findById(id);
+    if (!row) {
+      throw new NotFoundException('Contract not found.');
+    }
+    return row;
   }
 
   @Post()

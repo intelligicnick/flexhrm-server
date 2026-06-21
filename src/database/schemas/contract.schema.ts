@@ -106,6 +106,10 @@ export class Contract {
   /** Base64 contract identifier from GeM fulfilment portal */
   @Prop({ default: '' })
   gemContractId!: string;
+
+  /** Office locations assigned to this contract, in display/priority order */
+  @Prop({ type: [String], default: [] })
+  linkedLocations!: string[];
 }
 
 export const ContractSchema = SchemaFactory.createForClass(Contract);

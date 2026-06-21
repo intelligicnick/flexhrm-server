@@ -14,6 +14,7 @@ import {
 } from '../../database/schemas/bg-dd.schema';
 import { CreateBgDdDto, UpdateBgDdDto } from './dto/bg-dd.dto';
 import { BgDdDocumentsService } from './bg-dd-documents.service';
+import { ContractBgSyncService } from '../contracts/contract-bg-sync.service';
 
 @Injectable()
 export class BgDdService {
@@ -21,6 +22,7 @@ export class BgDdService {
     @InjectModel(BgDdRecord.name)
     private readonly bgDdModel: Model<BgDdRecordDocument>,
     private readonly bgDdDocumentsService: BgDdDocumentsService,
+    private readonly contractBgSyncService: ContractBgSyncService,
   ) {}
 
   private generateId(): string {
@@ -116,6 +118,7 @@ export class BgDdService {
         new Date().toISOString().slice(0, 10),
     });
 
+    await this.contractBgSyncService.syncFromBgRecord(doc);
     return this.toPlain(doc);
   }
 
@@ -145,6 +148,7 @@ export class BgDdService {
     if (dto.entryDate !== undefined) doc.entryDate = dto.entryDate.trim();
 
     await doc.save();
+    await this.contractBgSyncService.syncFromBgRecord(doc);
     return this.toPlain(doc);
   }
 

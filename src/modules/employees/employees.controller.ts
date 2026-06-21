@@ -4,17 +4,20 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   NotFoundException,
   Param,
   Post,
   Put,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { EmployeesService } from './employees.service';
 import { EmployeeChangeRequestsService } from './employee-change-requests.service';
+import { EmployeeDataGatherService } from './employee-data-gather.service';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -47,6 +50,11 @@ import {
 } from './dto/employee-document.dto';
 import { EmployeeDocumentsService } from './employee-documents.service';
 import {
+  SubmitDataGatherDto,
+  VerifyDataGatherOtpDto,
+} from './dto/employee-data-gather.dto';
+import { PRODUCTION_FRONTEND_ORIGIN } from '../../config/deploy-urls';
+import {
   employeeDisplayName,
   summarizeEmployeeChanges,
 } from '../../common/utils/audit-log-format.util';
@@ -58,7 +66,20 @@ export class EmployeesController {
     private readonly auditLogsService: AuditLogsService,
     private readonly changeRequestsService: EmployeeChangeRequestsService,
     private readonly employeeDocumentsService: EmployeeDocumentsService,
+    private readonly employeeDataGatherService: EmployeeDataGatherService,
   ) {}
+
+  private resolveFrontendOrigin(req: Request): string {
+    const raw = req.headers.origin || req.headers.referer;
+    if (raw) {
+      try {
+        return new URL(String(raw)).origin;
+      } catch {
+        /* fall through */
+      }
+    }
+    return process.env.FRONTEND_ORIGIN?.trim() || PRODUCTION_FRONTEND_ORIGIN;
+  }
 
   @Get()
   @RequireAnyPermissions(
@@ -99,6 +120,19 @@ export class EmployeesController {
   @RequireAnyPermissions(['employees', 'admin'], 'view')
   listChangeRequests(@Query('status') status?: string) {
     return this.changeRequestsService.findAll(status);
+  }
+
+  @Get('change-requests/:requestId/pending-documents/:index')
+  @RequireAnyPermissions(['employees', 'admin'], 'view')
+  getChangeRequestPendingDocument(
+    @Param('requestId') requestId: string,
+    @Param('index') index: string,
+  ) {
+    const docIndex = Number.parseInt(index, 10);
+    if (!Number.isFinite(docIndex)) {
+      throw new BadRequestException('Invalid document index.');
+    }
+    return this.changeRequestsService.getPendingDocument(requestId, docIndex);
   }
 
   @Get('change-requests/:requestId')
@@ -189,6 +223,127 @@ export class EmployeesController {
       },
     });
     return { success: true, request };
+  }
+
+  @Get('data-gather/:token/status')
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  getDataGatherLinkStatus(@Param('token') token: string) {
+    return this.employeeDataGatherService.getLinkStatus(token);
+  }
+
+  @Get('data-gather/:token/form')
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  getDataGatherForm(
+    @Param('token') token: string,
+    @Headers('x-gather-session') sessionToken?: string,
+  ) {
+    if (!sessionToken?.trim()) {
+      throw new BadRequestException('Session token is required.');
+    }
+    return this.employeeDataGatherService.getForm(token, sessionToken);
+  }
+
+  @Post('data-gather/:token/verify-otp')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  verifyDataGatherOtp(
+    @Param('token') token: string,
+    @Body() dto: VerifyDataGatherOtpDto,
+  ) {
+    return this.employeeDataGatherService.verifyOtp(token, dto.otp);
+  }
+
+  @Post('data-gather/:token/submit')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  submitDataGather(
+    @Param('token') token: string,
+    @Headers('x-gather-session') sessionToken: string | undefined,
+    @Body() dto: SubmitDataGatherDto,
+  ) {
+    if (!sessionToken?.trim()) {
+      throw new BadRequestException('Session token is required.');
+    }
+    return this.employeeDataGatherService.submit(
+      token,
+      sessionToken,
+      dto.fieldUpdates,
+      dto.documents,
+    );
+  }
+
+  @Post('data-gather-links/:linkId/revoke')
+  @RequirePermissions('employees', 'edit')
+  async revokeDataGatherLink(
+    @CurrentUsername() username: string,
+    @Param('linkId') linkId: string,
+  ) {
+    await this.employeeDataGatherService.revokeLink(linkId);
+    await this.auditLogsService.append({
+      username,
+      action: 'REVOKE_EMPLOYEE_DATA_GATHER_LINK',
+      target: `Employee Data Collection Link Revoked: Link ${linkId} was cancelled before use.`,
+      details: { linkId, summary: `Revoked data collection link ${linkId}.` },
+    });
+    return { success: true };
+  }
+
+  @Get(':id/data-gather/summary')
+  @RequireAnyPermissions(['employees'], 'view')
+  getDataGatherSummary(@Param('id') id: string) {
+    return this.employeeDataGatherService.getGatherSummary(id);
+  }
+
+  @Get(':id/data-gather/active-link')
+  @RequireAnyPermissions(['employees'], 'view')
+  async getActiveDataGatherLink(@Param('id') id: string) {
+    const link = await this.employeeDataGatherService.getActiveLinkForEmployee(id);
+    return { link: link ?? null };
+  }
+
+  @Post(':id/data-gather-link')
+  @RequirePermissions('employees', 'edit')
+  async createDataGatherLink(
+    @CurrentUsername() username: string,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const employee = await this.employeesService.findById(id);
+    if (!employee) throw new NotFoundException('Employee not found.');
+
+    const result = await this.employeeDataGatherService.createLink(
+      id,
+      username,
+      this.resolveFrontendOrigin(req),
+    );
+
+    const blankFieldCount = Array.isArray(result.link.blankFields)
+      ? result.link.blankFields.length
+      : 0;
+    const missingDocumentCount = Array.isArray(result.link.missingDocuments)
+      ? result.link.missingDocuments.length
+      : 0;
+
+    await this.auditLogsService.append({
+      username,
+      action: 'CREATE_EMPLOYEE_DATA_GATHER_LINK',
+      target:
+        `Employee Data Collection Link Created: Temporary link generated for "${employeeDisplayName(employee)}" (Code: ${employee.employeeCode}) ` +
+        `to collect ${blankFieldCount} blank field(s) and ${missingDocumentCount} missing document(s).`,
+      details: {
+        employeeId: id,
+        employeeCode: employee.employeeCode,
+        linkId: result.link.id,
+        blankFieldCount,
+        missingDocumentCount,
+        expiresAt: result.link.expiresAt,
+        summary: `Generated data collection link for ${employeeDisplayName(employee)}.`,
+      },
+    });
+
+    return result;
   }
 
   @Get('id-card/:idCard/verify')

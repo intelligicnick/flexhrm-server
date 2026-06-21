@@ -6,6 +6,7 @@ import { EmployeesController } from './employees.controller';
 import { EmployeeAssetsService } from './employee-assets.service';
 import { EmployeeChangeRequestsService } from './employee-change-requests.service';
 import { EmployeeDocumentsService } from './employee-documents.service';
+import { EmployeeDataGatherService } from './employee-data-gather.service';
 
 @Module({
   imports: [DatabaseModule, AuditLogsModule],
@@ -15,6 +16,7 @@ import { EmployeeDocumentsService } from './employee-documents.service';
     EmployeeAssetsService,
     EmployeeChangeRequestsService,
     EmployeeDocumentsService,
+    EmployeeDataGatherService,
   ],
   exports: [EmployeesService, EmployeeChangeRequestsService],
 })
