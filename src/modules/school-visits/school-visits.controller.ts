@@ -13,6 +13,7 @@ import {
 import { Request } from 'express';
 import { SchoolVisitsService } from './school-visits.service';
 import { SchoolWorksService } from '../school-works/school-works.service';
+import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -35,6 +36,7 @@ export class SchoolVisitsController {
   constructor(
     private readonly visitsService: SchoolVisitsService,
     private readonly schoolWorksService: SchoolWorksService,
+    private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly auditLogsService: AuditLogsService,
   ) {}
 
@@ -135,11 +137,10 @@ export class SchoolVisitsController {
     @Req() req: Request & { user: AdminSessionPayload },
     @Body() dto: CreateSchoolVisitDto,
   ) {
-    return this.visitsService.createVisit(
-      req.user.employeeId || req.user.username,
-      req.user.username,
-      dto,
-    );
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const supervisor = await this.schoolSupervisorsService.findById(supervisorId);
+    const supervisorName = String(supervisor?.name || req.user.username || supervisorId);
+    return this.visitsService.createVisit(supervisorId, supervisorName, dto);
   }
 
   @Patch(':id/status')

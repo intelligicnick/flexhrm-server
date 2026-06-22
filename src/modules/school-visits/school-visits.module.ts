@@ -9,6 +9,7 @@ import {
   CommitmentDiarySchema,
 } from '../../database/schemas/commitment-diary.schema';
 import { SchoolWorksModule } from '../school-works/school-works.module';
+import { SchoolSupervisorsModule } from '../school-supervisors/school-supervisors.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { DataArchiveModule } from '../data-archive/data-archive.module';
@@ -23,6 +24,7 @@ import { SupervisorAccessModule } from '../../common/guards/supervisor-access.mo
       { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
     ]),
     SchoolWorksModule,
+    SchoolSupervisorsModule,
     AuditLogsModule,
     NotificationsModule,
     SupervisorAccessModule,
