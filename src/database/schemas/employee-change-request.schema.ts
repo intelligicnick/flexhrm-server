@@ -23,6 +23,15 @@ export class EmployeeChangeEntry {
 }
 
 @Schema({ _id: false })
+export class PendingEmployeePhoto {
+  @Prop({ required: true })
+  employeeId!: string;
+
+  @Prop({ required: true })
+  photoBase64!: string;
+}
+
+@Schema({ _id: false })
 export class PendingEmployeeDocument {
   @Prop({ required: true })
   employeeId!: string;
@@ -83,6 +92,9 @@ export class EmployeeChangeRequest {
 
   @Prop({ type: [PendingEmployeeDocument], default: [] })
   pendingDocuments!: PendingEmployeeDocument[];
+
+  @Prop({ type: PendingEmployeePhoto })
+  pendingPhoto?: PendingEmployeePhoto;
 }
 
 export const EmployeeChangeRequestSchema = SchemaFactory.createForClass(

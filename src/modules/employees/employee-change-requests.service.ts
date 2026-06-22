@@ -11,6 +11,7 @@ import {
   EmployeeChangeRequestDocument,
   EmployeeChangeEntry,
   PendingEmployeeDocument,
+  PendingEmployeePhoto,
 } from '../../database/schemas/employee-change-request.schema';
 import { EmployeesService } from './employees.service';
 import { EmployeeDocumentsService } from './employee-documents.service';
@@ -128,6 +129,7 @@ export class EmployeeChangeRequestsService {
     employeeId: string;
     changes: Record<string, unknown>;
     pendingDocuments: PendingEmployeeDocument[];
+    pendingPhoto?: PendingEmployeePhoto;
     notes?: string;
   }): Promise<Record<string, unknown>> {
     const employeeId = String(payload.employeeId || '').trim();
@@ -144,9 +146,10 @@ export class EmployeeChangeRequestsService {
     const pendingDocuments = Array.isArray(payload.pendingDocuments)
       ? payload.pendingDocuments
       : [];
+    const pendingPhoto = payload.pendingPhoto;
 
-    if (Object.keys(delta).length === 0 && pendingDocuments.length === 0) {
-      throw new BadRequestException('No field changes or documents to submit.');
+    if (Object.keys(delta).length === 0 && pendingDocuments.length === 0 && !pendingPhoto) {
+      throw new BadRequestException('No field changes, documents, or photo to submit.');
     }
 
     const entry: EmployeeChangeEntry = {
@@ -164,9 +167,10 @@ export class EmployeeChangeRequestsService {
       notes: String(payload.notes || '').trim(),
       updates: [entry],
       employeeCount: 1,
-      fieldChangeCount: Object.keys(delta).length,
+      fieldChangeCount: Object.keys(delta).length + (pendingPhoto ? 1 : 0),
       source: 'employee_self_service',
       pendingDocuments,
+      pendingPhoto,
     });
 
     return this.toPlain(doc);
@@ -208,6 +212,21 @@ export class EmployeeChangeRequestsService {
       storedSizeBytes: item.storedSizeBytes,
       quality: item.quality,
       fileBase64: item.fileBase64,
+    };
+  }
+
+  async getPendingPhoto(
+    requestId: string,
+  ): Promise<Record<string, unknown>> {
+    const doc = await this.changeRequestModel.findOne({ id: requestId }).exec();
+    if (!doc) throw new NotFoundException('Change request not found.');
+    if (!doc.pendingPhoto?.photoBase64) {
+      throw new NotFoundException('Pending photo not found.');
+    }
+
+    return {
+      employeeId: doc.pendingPhoto.employeeId,
+      photoBase64: doc.pendingPhoto.photoBase64,
     };
   }
 
@@ -270,6 +289,13 @@ export class EmployeeChangeRequestsService {
       }
     }
 
+    if (doc.pendingPhoto?.photoBase64?.trim()) {
+      await this.employeesService.update(doc.pendingPhoto.employeeId, {
+        photo: doc.pendingPhoto.photoBase64.trim(),
+      });
+      applied++;
+    }
+
     doc.status = 'approved';
     doc.reviewedBy = reviewedBy;
     doc.reviewedAt = new Date();
@@ -327,6 +353,14 @@ export class EmployeeChangeRequestsService {
         storedSizeBytes: item.storedSizeBytes,
         quality: item.quality,
       }));
+    }
+
+    if (options?.omitPendingDocumentFiles && rest.pendingPhoto) {
+      const photo = rest.pendingPhoto as PendingEmployeePhoto;
+      rest.pendingPhoto = {
+        employeeId: photo.employeeId,
+        hasPhoto: Boolean(photo.photoBase64?.trim()),
+      };
     }
 
     return rest;

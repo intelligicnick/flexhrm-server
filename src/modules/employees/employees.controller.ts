@@ -135,6 +135,12 @@ export class EmployeesController {
     return this.changeRequestsService.getPendingDocument(requestId, docIndex);
   }
 
+  @Get('change-requests/:requestId/pending-photo')
+  @RequireAnyPermissions(['employees', 'admin'], 'view')
+  getChangeRequestPendingPhoto(@Param('requestId') requestId: string) {
+    return this.changeRequestsService.getPendingPhoto(requestId);
+  }
+
   @Get('change-requests/:requestId')
   @RequireAnyPermissions(['employees', 'admin'], 'view')
   async getChangeRequest(@Param('requestId') requestId: string) {
@@ -245,6 +251,26 @@ export class EmployeesController {
     return this.employeeDataGatherService.getForm(token, sessionToken);
   }
 
+  @Get('data-gather/:token/photo')
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async getDataGatherPhoto(
+    @Param('token') token: string,
+    @Headers('x-gather-session') sessionToken: string | undefined,
+    @Res() res: Response,
+  ) {
+    if (!sessionToken?.trim()) {
+      throw new BadRequestException('Session token is required.');
+    }
+    const { buffer, contentType } = await this.employeeDataGatherService.getPhoto(
+      token,
+      sessionToken,
+    );
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buffer);
+  }
+
   @Post('data-gather/:token/verify-otp')
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -271,6 +297,7 @@ export class EmployeesController {
       sessionToken,
       dto.fieldUpdates,
       dto.documents,
+      dto.photo,
     );
   }
 

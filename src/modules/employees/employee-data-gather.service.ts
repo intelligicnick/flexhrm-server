@@ -20,6 +20,7 @@ import {
   EMPLOYEE_FIELD_LABELS,
   EMPLOYEE_SELF_SERVICE_FIELDS,
   EmployeeSelfServiceField,
+  PASSPORT_PHOTO_LABEL,
   REQUIRED_DOCUMENT_LABELS,
 } from './employee-data-gather.constants';
 import {
@@ -40,6 +41,13 @@ function isBlankValue(value: unknown): boolean {
 
 function normalizeDocLabel(label: string): string {
   return label.trim().toLowerCase();
+}
+
+function hasEmployeePhoto(employee: Record<string, unknown>): boolean {
+  const photo = String(employee.photo || '').trim();
+  const photoUrl = String(employee.photoUrl || '').trim();
+  const photoDataBase64 = String(employee.photoDataBase64 || '').trim();
+  return Boolean(photo || photoUrl || photoDataBase64);
 }
 
 @Injectable()
@@ -81,6 +89,7 @@ export class EmployeeDataGatherService {
   async getGatherSummary(employeeId: string): Promise<{
     blankFields: EmployeeSelfServiceField[];
     missingDocuments: string[];
+    missingPhoto: boolean;
     hasWork: boolean;
   }> {
     const employee = await this.employeesService.findById(employeeId);
@@ -88,11 +97,13 @@ export class EmployeeDataGatherService {
 
     const blankFields = this.detectBlankFields(employee);
     const missingDocuments = await this.detectMissingDocuments(employeeId);
+    const missingPhoto = !hasEmployeePhoto(employee);
 
     return {
       blankFields,
       missingDocuments,
-      hasWork: blankFields.length > 0 || missingDocuments.length > 0,
+      missingPhoto,
+      hasWork: blankFields.length > 0 || missingDocuments.length > 0 || missingPhoto,
     };
   }
 
@@ -123,10 +134,11 @@ export class EmployeeDataGatherService {
 
     const blankFields = this.detectBlankFields(employee);
     const missingDocuments = await this.detectMissingDocuments(employeeId);
+    const needsPhoto = !hasEmployeePhoto(employee);
 
-    if (blankFields.length === 0 && missingDocuments.length === 0) {
+    if (blankFields.length === 0 && missingDocuments.length === 0 && !needsPhoto) {
       throw new BadRequestException(
-        'This employee profile has no blank fields or missing documents to collect.',
+        'This employee profile has no blank fields, missing documents, or missing ID photo to collect.',
       );
     }
 
@@ -151,6 +163,7 @@ export class EmployeeDataGatherService {
       expiresAt,
       blankFields,
       missingDocuments,
+      needsPhoto,
     });
 
     const url = `${frontendOrigin.replace(/\/$/, '')}/employee/update/${token}`;
@@ -291,6 +304,9 @@ export class EmployeeDataGatherService {
     const doc = await this.findActiveLinkByToken(token);
     this.assertSession(doc, sessionToken);
 
+    const employee = await this.employeesService.findById(doc.employeeId);
+    const photoExists = employee ? hasEmployeePhoto(employee) : false;
+
     const fields = doc.blankFields.map((field) => {
       const key = field as EmployeeSelfServiceField;
       return {
@@ -307,8 +323,28 @@ export class EmployeeDataGatherService {
       expiresAt: doc.expiresAt.toISOString(),
       fields,
       missingDocuments: doc.missingDocuments,
+      photo: {
+        label: PASSPORT_PHOTO_LABEL,
+        hasPhoto: photoExists,
+        canUpload: doc.needsPhoto && !photoExists,
+      },
       sessionExpiresAt: doc.sessionExpiresAt?.toISOString(),
     };
+  }
+
+  async getPhoto(
+    token: string,
+    sessionToken: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const doc = await this.findActiveLinkByToken(token);
+    this.assertSession(doc, sessionToken);
+
+    const employee = await this.employeesService.findById(doc.employeeId);
+    if (!employee || !hasEmployeePhoto(employee)) {
+      throw new NotFoundException('Employee photo not found.');
+    }
+
+    return this.employeesService.getPhotoContent(doc.employeeId);
   }
 
   async submit(
@@ -316,6 +352,7 @@ export class EmployeeDataGatherService {
     sessionToken: string,
     fieldUpdates: Record<string, unknown>,
     documents: SubmitDataGatherDocumentDto[],
+    photo?: string,
   ): Promise<{ changeRequestId: string; message: string }> {
     const doc = await this.findActiveLinkByToken(token);
     this.assertSession(doc, sessionToken);
@@ -355,9 +392,25 @@ export class EmployeeDataGatherService {
       pendingDocuments.push(item);
     }
 
-    if (Object.keys(changes).length === 0 && pendingDocuments.length === 0) {
+    const photoPayload = String(photo || '').trim();
+    let pendingPhoto: string | undefined;
+    if (photoPayload) {
+      if (!doc.needsPhoto) {
+        throw new BadRequestException(
+          'A passport photo was not requested for this link.',
+        );
+      }
+      if (hasEmployeePhoto(employee)) {
+        throw new BadRequestException(
+          'A passport photo is already on file and cannot be changed via this link.',
+        );
+      }
+      pendingPhoto = photoPayload;
+    }
+
+    if (Object.keys(changes).length === 0 && pendingDocuments.length === 0 && !pendingPhoto) {
       throw new BadRequestException(
-        'Please fill at least one blank field or upload at least one document.',
+        'Please fill at least one blank field, upload at least one document, or add a passport photo.',
       );
     }
 
@@ -373,6 +426,9 @@ export class EmployeeDataGatherService {
         storedSizeBytes: item.storedSizeBytes,
         quality: item.quality,
       })),
+      pendingPhoto: pendingPhoto
+        ? { employeeId: doc.employeeId, photoBase64: pendingPhoto }
+        : undefined,
       notes: `Employee self-service submission via data collection link for ${doc.employeeName} (${doc.employeeCode}).`,
     });
 

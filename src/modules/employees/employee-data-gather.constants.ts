@@ -48,6 +48,8 @@ export const REQUIRED_DOCUMENT_LABELS = [
   'Address Proof',
 ] as const;
 
+export const PASSPORT_PHOTO_LABEL = 'Passport Photo (ID Card)';
+
 /** Unused links expire after 2 days. */
 export const DATA_GATHER_LINK_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 export const DATA_GATHER_SESSION_TTL_MS = 2 * 60 * 60 * 1000;

@@ -54,6 +54,10 @@ export class EmployeeDataGatherLink {
 
   @Prop({ type: [String], default: [] })
   missingDocuments!: string[];
+
+  /** Snapshot: employee had no ID card photo when the link was created. */
+  @Prop({ default: false })
+  needsPhoto!: boolean;
 }
 
 export const EmployeeDataGatherLinkSchema = SchemaFactory.createForClass(

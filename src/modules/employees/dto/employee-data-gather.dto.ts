@@ -51,4 +51,8 @@ export class SubmitDataGatherDto {
   @ValidateNested({ each: true })
   @Type(() => SubmitDataGatherDocumentDto)
   documents!: SubmitDataGatherDocumentDto[];
+
+  @IsOptional()
+  @IsString()
+  photo?: string;
 }
