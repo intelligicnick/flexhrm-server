@@ -68,7 +68,11 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 900000 } })
-  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() dto: LoginDto,
+    @Headers('x-flexhrm-client') clientHeader: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (!this.captchaService.verify(dto.captchaId, dto.captchaAnswer)) {
       throw new BadRequestException('Incorrect or expired captcha. Please try again.');
     }
@@ -126,6 +130,7 @@ export class AuthController {
 
       const roles = await this.rolesService.findAll();
       const roleConfig = resolveRoleConfig(admin.role || 'admin', roles);
+      const isObserverClient = clientHeader?.trim().toLowerCase() === 'observer';
 
       return {
         success: true,
@@ -134,6 +139,7 @@ export class AuthController {
         locations: admin.locations || [],
         permissions: roleConfig.permissions,
         uiRestrictions: roleConfig.uiRestrictions,
+        ...(isObserverClient ? { token } : {}),
       };
     }
 
