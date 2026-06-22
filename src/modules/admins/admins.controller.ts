@@ -189,31 +189,53 @@ export class AdminsController {
     @CurrentUser() user: AdminSessionPayload,
     @Body() dto: ChangePasswordDto,
   ) {
-    if (
-      user.username.toLowerCase() !== dto.username.trim().toLowerCase() &&
-      user.username.toLowerCase() !== 'admin'
-    ) {
+    const targetUsername = dto.username.trim();
+    const isSelf =
+      user.username.toLowerCase() === targetUsername.toLowerCase();
+    const isSuperAdmin =
+      user.username.toLowerCase() === 'admin' ||
+      (user.role || '').toLowerCase() === 'admin';
+
+    if (!isSelf && !isSuperAdmin) {
       throw new ForbiddenException('You can only change your own password.');
+    }
+
+    if (!isSelf && targetUsername.toLowerCase() === 'admin') {
+      throw new BadRequestException(
+        'The root administrator password can only be changed by signing in as that account.',
+      );
     }
 
     const passwordError = validatePasswordStrength(dto.newPassword);
     if (passwordError) throw new BadRequestException(passwordError);
 
-    const admin = await this.adminsService.ensureExists(dto.username);
-    if (!verifyPassword(dto.oldPassword, admin.password)) {
-      throw new BadRequestException('Incorrect old password verification.');
+    const admin = await this.adminsService.ensureExists(targetUsername);
+
+    if (isSelf) {
+      const oldPassword = dto.oldPassword?.trim();
+      if (!oldPassword) {
+        throw new BadRequestException('Current password is required.');
+      }
+      if (!verifyPassword(oldPassword, admin.password)) {
+        throw new BadRequestException('Incorrect old password verification.');
+      }
     }
 
-    await this.adminsService.update(dto.username.trim(), {
+    await this.adminsService.update(targetUsername, {
       password: hashPassword(dto.newPassword),
     });
     await this.sessionsService.destroyAllForUser(admin.username);
 
     await this.auditLogsService.append({
-      username: dto.username,
+      username: user.username,
       action: 'CHANGE_PASSWORD',
-      target: `Credential Lifecycle: Password successfully changed for administrator "${dto.username}".`,
-      details: { username: dto.username },
+      target: isSelf
+        ? `Credential Lifecycle: Password successfully changed for administrator "${targetUsername}".`
+        : `Credential Override: Super-admin "${user.username}" reset the password for administrator "${targetUsername}".`,
+      details: {
+        username: targetUsername,
+        resetBySuperAdmin: !isSelf,
+      },
     });
 
     return { success: true, message: 'Password updated successfully.' };

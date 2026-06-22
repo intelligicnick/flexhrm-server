@@ -19,7 +19,10 @@ export interface AdminSessionPayload {
 export interface RoleDocumentLike {
   name: string;
   permissions?: Partial<Record<PermissionModule, { view?: boolean; edit?: boolean }>>;
+  uiRestrictions?: Record<string, Record<string, unknown>>;
 }
+
+export type RoleUiRestrictionsMap = Record<string, Record<string, unknown>>;
 
 export function buildPermissions(
   role: string,
@@ -45,6 +48,25 @@ export function buildPermissions(
     };
   });
   return result;
+}
+
+export function buildUiRestrictions(
+  role: string,
+  rolesDb: RoleDocumentLike[],
+): RoleUiRestrictionsMap {
+  const isSuperAdmin =
+    role.toLowerCase() === 'admin' || !role.trim();
+  if (isSuperAdmin) return {};
+
+  const matched = rolesDb.find((r) => r.name.toLowerCase() === role.toLowerCase());
+  return (matched?.uiRestrictions as RoleUiRestrictionsMap) ?? {};
+}
+
+export function resolveRoleConfig(role: string, rolesDb: RoleDocumentLike[]) {
+  return {
+    permissions: buildPermissions(role, rolesDb),
+    uiRestrictions: buildUiRestrictions(role, rolesDb),
+  };
 }
 
 export function hasPermission(

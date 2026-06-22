@@ -17,7 +17,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { Public, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUser, CurrentUsername } from '../../common/decorators/current-user.decorator';
-import { AdminSessionPayload, buildPermissions } from '../../common/utils/permissions.util';
+import { AdminSessionPayload, resolveRoleConfig } from '../../common/utils/permissions.util';
 import { assertSupervisorRegisteredDevice } from '../../common/utils/supervisor-device.util';
 import {
   hashPassword,
@@ -124,11 +124,16 @@ export class AuthController {
         },
       });
 
+      const roles = await this.rolesService.findAll();
+      const roleConfig = resolveRoleConfig(admin.role || 'admin', roles);
+
       return {
         success: true,
         username: admin.username,
         role: admin.role || 'admin',
         locations: admin.locations || [],
+        permissions: roleConfig.permissions,
+        uiRestrictions: roleConfig.uiRestrictions,
       };
     }
 
@@ -292,11 +297,16 @@ export class AuthController {
       details: { role: defaultAdmin.role || 'admin', method: 'quick-login' },
     });
 
+    const roles = await this.rolesService.findAll();
+    const roleConfig = resolveRoleConfig(defaultAdmin.role || 'admin', roles);
+
     return {
       success: true,
       username: defaultAdmin.username,
       role: defaultAdmin.role || 'admin',
       locations: defaultAdmin.locations || [],
+      permissions: roleConfig.permissions,
+      uiRestrictions: roleConfig.uiRestrictions,
     };
   }
 
@@ -564,11 +574,13 @@ export class AuthController {
       throw new ForbiddenException('Use /auth/supervisor/me for supervisor sessions.');
     }
     const roles = await this.rolesService.findAll();
+    const roleConfig = resolveRoleConfig(user.role, roles);
     return {
       username: user.username,
       role: user.role,
       locations: user.locations,
-      permissions: buildPermissions(user.role, roles),
+      permissions: roleConfig.permissions,
+      uiRestrictions: roleConfig.uiRestrictions,
     };
   }
 

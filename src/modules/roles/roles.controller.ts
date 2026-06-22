@@ -26,6 +26,7 @@ export class RolesController {
       name: cleanName,
       description: dto.description ?? '',
       permissions: (dto.permissions ?? {}) as Record<string, { view: boolean; edit: boolean }>,
+      uiRestrictions: (dto.uiRestrictions ?? {}) as Record<string, Record<string, unknown>>,
     });
     const rulesList = Object.entries(dto.permissions ?? {})
       .map(([m, p]) => `${m}: ${p?.view ? 'View' : '-'}/${p?.edit ? 'Edit' : '-'}`)

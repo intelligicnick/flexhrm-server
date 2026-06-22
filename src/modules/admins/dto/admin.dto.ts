@@ -69,9 +69,9 @@ export class ChangePasswordDto {
   @IsNotEmpty()
   username!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  oldPassword!: string;
+  oldPassword?: string;
 
   @IsString()
   @MinLength(8)

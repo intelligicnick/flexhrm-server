@@ -21,6 +21,7 @@ export class RolesService {
           name: data.name,
           description: data.description ?? '',
           permissions: data.permissions ?? {},
+          uiRestrictions: data.uiRestrictions ?? {},
         },
         { upsert: true, new: true },
       )

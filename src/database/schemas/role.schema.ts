@@ -19,6 +19,10 @@ export class Role {
 
   @Prop({ type: Object, default: {} })
   permissions!: Record<string, RolePermissionSchema>;
+
+  /** Optional per-module UI limits (visible filters/columns, locked values). */
+  @Prop({ type: Object, default: {} })
+  uiRestrictions!: Record<string, Record<string, unknown>>;
 }
 
 export const RoleSchema = SchemaFactory.createForClass(Role);

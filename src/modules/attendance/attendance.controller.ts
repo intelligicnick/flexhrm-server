@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
-import { RequirePermissions } from '../../common/decorators/auth.decorators';
+import { RequireAnyPermissions, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUsername, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { BulkAttendanceDto, UpsertAttendanceDto } from './dto/attendance.dto';
@@ -15,7 +15,7 @@ export class AttendanceController {
   ) {}
 
   @Get()
-  @RequirePermissions('attendance', 'view')
+  @RequireAnyPermissions(['attendance', 'salary', 'ledger'], 'view')
   async findAll(@Query('monthKey') monthKey?: string) {
     if (monthKey) {
       return this.attendanceService.getMonthGrid(monthKey);
