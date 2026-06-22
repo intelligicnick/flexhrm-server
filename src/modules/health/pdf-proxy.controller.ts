@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Res, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
-import { RequirePermissions } from '../../common/decorators/auth.decorators';
+import { RequireAnyPermissions } from '../../common/decorators/auth.decorators';
 
 const ALLOWED_HOSTS = [
   'bidplus.gem.gov.in',
@@ -23,7 +23,7 @@ function isAllowedPdfUrl(raw: string): boolean {
 @Controller('proxy')
 export class PdfProxyController {
   @Get('pdf')
-  @RequirePermissions('bids', 'view')
+  @RequireAnyPermissions(['bids', 'renewals'], 'view')
   async proxyPdf(@Query('url') url: string, @Res() res: Response) {
     const trimmed = url?.trim() ?? '';
     if (!trimmed || !isAllowedPdfUrl(trimmed)) {
