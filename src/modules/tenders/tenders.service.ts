@@ -16,6 +16,10 @@ import {
   SyncTenderDto,
   UpdateTenderDto,
 } from './dto/tender.dto';
+import {
+  inferTenderOutcomeFromGemSyncFields,
+  inferTenderStatusFromGemSyncFields,
+} from './gem-status-inference.util';
 
 @Injectable()
 export class TendersService {
@@ -63,7 +67,9 @@ export class TendersService {
       outcome.includes('participated') ||
       outcome.includes('qualified') ||
       outcome.includes('disqualified') ||
-      outcome.includes('won')
+      outcome.includes('won') ||
+      outcome.includes('bid awarded') ||
+      outcome.includes('bid not awarded')
     );
   }
 
@@ -72,22 +78,15 @@ export class TendersService {
     gemCurrentStage?: string;
     outcome?: string;
   }): TenderStatus | undefined {
-    const stage = String(item.gemCurrentStage || '').toLowerCase();
-    const outcome = String(item.outcome || '').toLowerCase();
-    const combined = `${stage} ${outcome}`;
+    return inferTenderStatusFromGemSyncFields(item);
+  }
 
-    if (outcome.includes('won') && outcome.includes('bid')) return 'won_bid';
-    if (/bid award|bid \/ ra award|bid\/ra award/.test(combined)) {
-      return outcome.includes('won') ? 'won_bid' : 'qualified';
-    }
-    if (combined.includes('disqualified')) return 'disqualified';
-    if (combined.includes('financial evaluation') || outcome.includes('financial evaluation')) {
-      return 'financial';
-    }
-    if (outcome.includes('qualified') || stage.includes('technical evaluation (completed)')) {
-      return 'technical_qualified';
-    }
-    return undefined;
+  private inferOutcomeFromGemFields(item: {
+    status?: TenderStatus;
+    gemCurrentStage?: string;
+    outcome?: string;
+  }): string | undefined {
+    return inferTenderOutcomeFromGemSyncFields(item);
   }
 
   private applyGemStatusUpdate(
@@ -96,6 +95,9 @@ export class TendersService {
   ): void {
     if (item.status === undefined && !item.gemCurrentStage && !item.outcome) return;
 
+    const hasGemStageData = Boolean(item.gemCurrentStage?.trim());
+    const inferred = this.inferStatusFromGemFields(item);
+
     let nextStatus: TenderStatus | undefined =
       item.status === undefined
         ? undefined
@@ -103,8 +105,9 @@ export class TendersService {
           ? 'filed'
           : item.status;
 
-    const inferred = this.inferStatusFromGemFields(item);
-    if (
+    if (inferred && hasGemStageData) {
+      nextStatus = inferred;
+    } else if (
       inferred &&
       (nextStatus === undefined || nextStatus === 'filed' || nextStatus === 'not_filed')
     ) {
@@ -505,7 +508,21 @@ export class TendersService {
         if (item.status !== undefined) {
           this.applyGemStatusUpdate(doc, item);
         }
-        if (item.outcome !== undefined) doc.outcome = item.outcome.trim();
+        if (item.outcome !== undefined) {
+          const inferredOutcome = this.inferOutcomeFromGemFields({
+            status: doc.status,
+            gemCurrentStage: item.gemCurrentStage ?? doc.gemCurrentStage,
+            outcome: item.outcome,
+          });
+          doc.outcome = (inferredOutcome || item.outcome).trim();
+        } else if (item.gemCurrentStage?.trim()) {
+          const inferredOutcome = this.inferOutcomeFromGemFields({
+            status: doc.status,
+            gemCurrentStage: item.gemCurrentStage,
+            outcome: doc.outcome,
+          });
+          if (inferredOutcome) doc.outcome = inferredOutcome;
+        }
         if (item.gemCurrentStage !== undefined) {
           doc.gemCurrentStage = item.gemCurrentStage.trim();
         }

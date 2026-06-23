@@ -18,6 +18,8 @@ export const TENDER_STATUSES = [
   'representation_asked',
   'challenged_representation',
   'financial',
+  'bid_awarded',
+  'bid_not_awarded',
   'won_bid',
 ] as const;
 export type TenderStatus = (typeof TENDER_STATUSES)[number];
