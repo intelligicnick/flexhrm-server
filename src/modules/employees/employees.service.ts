@@ -7,6 +7,7 @@ import { Contract, ContractDocument } from '../../database/schemas/contract.sche
 import { resolveContractIdForLocation } from '../../common/utils/contract-locations.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { sanitizeEmployeeNumericFields } from '../../common/utils/non-negative-number.util';
+import { isHttpUrl } from '../../common/storage/file-buffer.util';
 import {
   getBirthdayAge,
   isValidDateParts,
@@ -204,6 +205,15 @@ export class EmployeesService {
       processed.photoUrl = savedPhoto.photoUrl;
       processed.photoFileId = savedPhoto.photoFileId;
       processed.photoDataBase64 = savedPhoto.photoDataBase64;
+    } else if (
+      typeof processed.photo === 'string' &&
+      isHttpUrl(processed.photo)
+    ) {
+      processed.photoUrl = processed.photo;
+      if (previous?.photoFileId && processed.photo === previous.photo) {
+        processed.photoFileId = previous.photoFileId;
+        processed.photoDataBase64 = previous.photoDataBase64;
+      }
     } else if (previous?.photo && processed.photo === undefined) {
       processed.photo = previous.photo;
       processed.photoUrl = previous.photoUrl;
@@ -320,26 +330,58 @@ export class EmployeesService {
   }
 
   async deleteByIds(ids: string[]): Promise<{ count: number; deleted: Record<string, unknown>[] }> {
-    const deletedDocs = await this.employeeModel.find({ id: { $in: ids } }).exec();
+    const trimmedIds = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+    if (trimmedIds.length === 0) {
+      return { count: 0, deleted: [] };
+    }
+
+    const deletedDocs = await this.employeeModel
+      .find({
+        $or: [{ id: { $in: trimmedIds } }, { employeeCode: { $in: trimmedIds } }],
+      })
+      .exec();
     const deleted = deletedDocs.map((d) => this.toPlain(d));
+    const resolvedIds = deletedDocs.map((d) => d.id);
+
     await Promise.all(
       deletedDocs.map((doc) =>
         (async () => {
-          const record = this.toAssetRecord(
-            doc.toObject() as unknown as Record<string, unknown>,
-          );
-          await this.employeeAssetsService.deletePhoto(record);
-          await this.employeeDocumentsService.deleteAllForEmployee(doc.id);
+          try {
+            const record = this.toAssetRecord(
+              doc.toObject() as unknown as Record<string, unknown>,
+            );
+            await this.employeeAssetsService.deletePhoto(record);
+            await this.employeeDocumentsService.deleteAllForEmployee(doc.id);
+          } catch {
+            // Best-effort asset cleanup; row removal should still proceed.
+          }
         })(),
       ),
     );
-    const result = await this.employeeModel.deleteMany({ id: { $in: ids } });
-    const remaining = await this.employeeModel.find().sort({ srNo: 1 }).exec();
-    for (let i = 0; i < remaining.length; i++) {
-      remaining[i].srNo = i + 1;
-      await remaining[i].save();
-    }
+
+    const result = await this.employeeModel.deleteMany({ id: { $in: resolvedIds } });
+    await this.renumberSerialNumbers();
     return { count: result.deletedCount ?? 0, deleted };
+  }
+
+  private async renumberSerialNumbers(): Promise<void> {
+    const remaining = await this.employeeModel
+      .find()
+      .sort({ srNo: 1 })
+      .select('id')
+      .lean()
+      .exec();
+    if (remaining.length === 0) return;
+
+    await this.employeeModel.bulkWrite(
+      remaining.map((doc, index) => ({
+        updateOne: {
+          filter: { id: doc.id },
+          update: { $set: { srNo: index + 1 } },
+        },
+      })),
+      { ordered: false },
+    );
   }
 
   async markExitByIds(

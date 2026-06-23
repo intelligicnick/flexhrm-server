@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Headers,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -61,6 +62,8 @@ import {
 
 @Controller('employees')
 export class EmployeesController {
+  private readonly logger = new Logger(EmployeesController.name);
+
   constructor(
     private readonly employeesService: EmployeesService,
     private readonly auditLogsService: AuditLogsService,
@@ -765,6 +768,9 @@ export class EmployeesController {
       throw new BadRequestException('Expected an array of ids to delete.');
     }
     const { count, deleted } = await this.employeesService.deleteByIds(dto.ids.map(String));
+    if (count === 0) {
+      throw new NotFoundException('No matching employee records were found to delete.');
+    }
     const delDetails = deleted
       .map((e) => {
         const name = employeeDisplayName(e);
@@ -778,19 +784,23 @@ export class EmployeesController {
         ? `Permanently removed 1 employee profile from the HRMS registry.`
         : `Permanently removed ${count} employee profiles from the HRMS registry.`;
 
-    await this.auditLogsService.append({
-      username,
-      action: 'DELETE_EMPLOYEES',
-      target:
-        `Employee Deletion: ${summary} Deleted profile(s): ${delDetails || 'none captured'}. ` +
-        `This action removes the employee from attendance sheets, salary runs, and active directory listings. Historical payroll exports are not automatically reversed.`,
-      details: {
-        count,
-        ids: dto.ids,
-        deletedEmployees: deleted,
-        summary: `Deleted ${count} employee record(s).`,
-      },
-    });
+    try {
+      await this.auditLogsService.append({
+        username,
+        action: 'DELETE_EMPLOYEES',
+        target:
+          `Employee Deletion: ${summary} Deleted profile(s): ${delDetails || 'none captured'}. ` +
+          `This action removes the employee from attendance sheets, salary runs, and active directory listings. Historical payroll exports are not automatically reversed.`,
+        details: {
+          count,
+          ids: dto.ids,
+          deletedEmployees: deleted,
+          summary: `Deleted ${count} employee record(s).`,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Employee delete succeeded but audit log failed: ${String(err)}`);
+    }
     return { success: true, count, total: await this.employeesService.count() };
   }
 

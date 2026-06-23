@@ -58,10 +58,10 @@ export class EmployeeAssetsService implements OnModuleInit {
   }
 
   isPhotoUploadPayload(value: unknown): boolean {
-    return (
-      typeof value === 'string' &&
-      (value.startsWith('data:image/') || value.length > 256)
-    );
+    if (typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    if (!trimmed || isHttpUrl(trimmed)) return false;
+    return trimmed.startsWith('data:image/') || trimmed.length > 256;
   }
 
   async savePhoto(

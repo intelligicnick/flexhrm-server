@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ImageKitService } from '../../modules/imagekit/imagekit.service';
 
 export interface StoredMediaRecord {
@@ -16,6 +16,8 @@ export interface MediaUploadResult {
 
 @Injectable()
 export class MediaStorageService {
+  private readonly logger = new Logger(MediaStorageService.name);
+
   constructor(private readonly imageKitService: ImageKitService) {}
 
   isCloudEnabled(): boolean {
@@ -34,11 +36,17 @@ export class MediaStorageService {
     tags?: string[];
   }): Promise<MediaUploadResult> {
     if (this.imageKitService.isEnabled()) {
-      const uploaded = await this.imageKitService.upload(params);
-      return {
-        imagekitUrl: uploaded.url,
-        imagekitFileId: uploaded.fileId,
-      };
+      try {
+        const uploaded = await this.imageKitService.upload(params);
+        return {
+          imagekitUrl: uploaded.url,
+          imagekitFileId: uploaded.fileId,
+        };
+      } catch (error) {
+        this.logger.warn(
+          `ImageKit upload failed for ${params.fileName}; using local/base64 fallback: ${String(error)}`,
+        );
+      }
     }
 
     return {
