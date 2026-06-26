@@ -142,6 +142,35 @@ import {
   MonitorConsentLog,
   MonitorConsentLogSchema,
 } from './schemas/monitor-alerts.schema';
+import { LeaveType, LeaveTypeSchema } from './schemas/leave-type.schema';
+import { LeaveBalance, LeaveBalanceSchema } from './schemas/leave-balance.schema';
+import { LeaveRequest, LeaveRequestSchema } from './schemas/leave-request.schema';
+import { ShiftTemplate, ShiftTemplateSchema, ShiftRoster, ShiftRosterSchema } from './schemas/shift.schema';
+import { ensureTenantScope } from './tenant-schema.plugin';
+import { Asset, AssetSchema } from './schemas/asset.schema';
+import { CrmLead, CrmLeadSchema } from './schemas/crm-lead.schema';
+import {
+  RecruitmentJob,
+  RecruitmentJobSchema,
+  RecruitmentApplicant,
+  RecruitmentApplicantSchema,
+} from './schemas/recruitment.schema';
+import {
+  HelpdeskTicket,
+  HelpdeskTicketSchema,
+  KnowledgeBaseArticle,
+  KnowledgeBaseArticleSchema,
+} from './schemas/helpdesk.schema';
+import {
+  PayrollRun,
+  PayrollRunSchema,
+  Payslip,
+  PayslipSchema,
+} from './schemas/payroll-run.schema';
+import {
+  AutomationWorkflow,
+  AutomationWorkflowSchema,
+} from './schemas/automation-workflow.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -210,7 +239,25 @@ const MODELS = [
   { name: MonitorAlert.name, schema: MonitorAlertSchema },
   { name: EmployeeScore.name, schema: EmployeeScoreSchema },
   { name: MonitorConsentLog.name, schema: MonitorConsentLogSchema },
+  { name: LeaveType.name, schema: LeaveTypeSchema },
+  { name: LeaveBalance.name, schema: LeaveBalanceSchema },
+  { name: LeaveRequest.name, schema: LeaveRequestSchema },
+  { name: ShiftTemplate.name, schema: ShiftTemplateSchema },
+  { name: ShiftRoster.name, schema: ShiftRosterSchema },
+  { name: Asset.name, schema: AssetSchema },
+  { name: CrmLead.name, schema: CrmLeadSchema },
+  { name: RecruitmentJob.name, schema: RecruitmentJobSchema },
+  { name: RecruitmentApplicant.name, schema: RecruitmentApplicantSchema },
+  { name: HelpdeskTicket.name, schema: HelpdeskTicketSchema },
+  { name: KnowledgeBaseArticle.name, schema: KnowledgeBaseArticleSchema },
+  { name: PayrollRun.name, schema: PayrollRunSchema },
+  { name: Payslip.name, schema: PayslipSchema },
+  { name: AutomationWorkflow.name, schema: AutomationWorkflowSchema },
 ];
+
+for (const model of MODELS) {
+  ensureTenantScope(model.schema);
+}
 
 @Module({
   imports: [

@@ -11,6 +11,9 @@ export class RolePermissionSchema {
 
 @Schema({ timestamps: true, collection: 'roles' })
 export class Role {
+  @Prop({ required: true, index: true, default: 'default' })
+  tenantId!: string;
+
   @Prop({ required: true })
   name!: string;
 
@@ -28,6 +31,6 @@ export class Role {
 export const RoleSchema = SchemaFactory.createForClass(Role);
 
 RoleSchema.index(
-  { name: 1 },
+  { tenantId: 1, name: 1 },
   { unique: true, collation: { locale: 'en', strength: 2 } },
 );

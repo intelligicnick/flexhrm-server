@@ -40,9 +40,19 @@ export class SupervisorLogin {
   @Prop({ default: false }) enabled!: boolean;
 }
 
+@Schema({ _id: false })
+export class EmployeePortalLogin {
+  @Prop({ default: false }) enabled!: boolean;
+  @Prop({ default: '', select: false }) passwordHash!: string;
+  @Prop({ type: Date }) lastLoginAt?: Date;
+}
+
 @Schema({ timestamps: true, collection: 'employees' })
 export class Employee {
-  @Prop({ required: true, unique: true, index: true })
+  @Prop({ default: 'default', index: true })
+  tenantId!: string;
+
+  @Prop({ required: true, index: true })
   employeeCode!: string;
 
   @Prop({ required: true, index: true })
@@ -264,10 +274,15 @@ export class Employee {
   @Prop({ type: SupervisorLogin, default: {} })
   supervisorLogin!: SupervisorLogin;
 
+  @Prop({ type: EmployeePortalLogin, default: () => ({}) })
+  portalLogin!: EmployeePortalLogin;
+
   @Prop({ type: [String], default: [] })
   assignedBlocks!: string[];
 }
 
 export const EmployeeSchema = SchemaFactory.createForClass(Employee);
 
+EmployeeSchema.index({ tenantId: 1, employeeCode: 1 }, { unique: true });
+EmployeeSchema.index({ tenantId: 1, status: 1 });
 EmployeeSchema.index({ nameAsPerAadhar: 'text', employeeCode: 'text' });

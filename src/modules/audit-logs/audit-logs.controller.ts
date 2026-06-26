@@ -8,6 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditLogsService } from './audit-logs.service';
 import { CreateAuditLogDto } from './dto/create-audit-log.dto';
 import { FlushAuditLogsDto } from './dto/flush-audit-logs.dto';
@@ -21,7 +22,10 @@ import {
 
 @Controller('audit-logs')
 export class AuditLogsController {
-  constructor(private readonly auditLogsService: AuditLogsService) {}
+  constructor(
+    private readonly auditLogsService: AuditLogsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get()
   @RequirePermissions('admin', 'view')
@@ -66,7 +70,13 @@ export class AuditLogsController {
     @CurrentUsername() username: string,
     @Body() dto: FlushAuditLogsDto,
   ) {
-    if (!verifyFlushAuditPassword(dto.password)) {
+    const flushPassword = this.configService.get<string>('auditFlushPassword') ?? '';
+    if (!flushPassword) {
+      throw new BadRequestException(
+        'Audit flush is disabled. Set AUDIT_FLUSH_PASSWORD in server configuration.',
+      );
+    }
+    if (!verifyFlushAuditPassword(dto.password, flushPassword)) {
       throw new BadRequestException('Incorrect password.');
     }
 

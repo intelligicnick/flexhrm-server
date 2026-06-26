@@ -23,11 +23,12 @@ export class SessionsService {
     role: string,
     locations: string[],
     options?: {
-      userType?: 'admin' | 'supervisor';
+      userType?: 'admin' | 'supervisor' | 'employee';
       employeeId?: string;
       assignedBlocks?: string[];
       impersonated?: boolean;
     },
+    tenantId?: string,
   ): Promise<string> {
     const token = generateToken();
     const now = new Date();
@@ -37,6 +38,7 @@ export class SessionsService {
         : SESSION_DURATION_MS;
     await this.sessionModel.create({
       token,
+      tenantId: tenantId?.trim() || 'default',
       username,
       role: role || 'admin',
       locations: Array.isArray(locations) ? locations : [],
@@ -121,7 +123,8 @@ export class SessionsService {
       username: session.username,
       role: session.role || 'admin',
       locations: session.locations || [],
-      userType: (session.userType as 'admin' | 'supervisor') || 'admin',
+      tenantId: session.tenantId || 'default',
+      userType: (session.userType as 'admin' | 'supervisor' | 'employee') || 'admin',
       employeeId: session.employeeId || '',
       assignedBlocks: session.assignedBlocks || [],
       impersonated: !!session.impersonated,

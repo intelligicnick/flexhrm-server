@@ -7,17 +7,19 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   Res,
   UnauthorizedException,
   BadRequestException,
   HttpCode,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { Public, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUser, CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AdminSessionPayload, resolveRoleConfig } from '../../common/utils/permissions.util';
+import { SESSION_DURATION_MS } from '../../common/constants/permissions.constants';
 import { assertSupervisorRegisteredDevice } from '../../common/utils/supervisor-device.util';
 import {
   hashPassword,
@@ -42,6 +44,8 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateDto, SupervisorRegisterDeviceDto } from '../school-visits/dto/school-visit.dto';
 import { CaptchaService } from './captcha.service';
+import { CsrfService } from '../../platform/common/csrf.service';
+import { CSRF_COOKIE_NAME } from '../../platform/common/platform-metadata.constants';
 
 @Controller('auth')
 export class AuthController {
@@ -54,6 +58,7 @@ export class AuthController {
     private readonly emailService: EmailService,
     private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly captchaService: CaptchaService,
+    private readonly csrfService: CsrfService,
   ) {}
 
   @Public()
@@ -70,6 +75,7 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 900000 } })
   async login(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Headers('x-flexhrm-client') clientHeader: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -77,7 +83,8 @@ export class AuthController {
       throw new BadRequestException('Incorrect or expired captcha. Please try again.');
     }
 
-    const admin = await this.adminsService.findByUsername(dto.username.trim());
+    const tenantId = req.tenantId ?? 'default';
+    const admin = await this.adminsService.findByUsername(dto.username.trim(), tenantId);
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     const passwordValid =
       admin &&
@@ -112,8 +119,18 @@ export class AuthController {
         admin.username,
         admin.role || 'admin',
         admin.locations || [],
+        undefined,
+        tenantId,
       );
       setSessionCookie(res, token, isProduction);
+      const csrfToken = this.csrfService.generateToken();
+      res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+        httpOnly: false,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: '/',
+        maxAge: SESSION_DURATION_MS,
+      });
 
       await this.auditLogsService.append({
         username: admin.username,
@@ -139,6 +156,7 @@ export class AuthController {
         locations: admin.locations || [],
         permissions: roleConfig.permissions,
         uiRestrictions: roleConfig.uiRestrictions,
+        csrfToken,
         ...(isObserverClient ? { token } : {}),
       };
     }

@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import { RolesService } from './roles.service';
 import { UpsertRoleDto } from './dto/upsert-role.dto';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
@@ -14,20 +15,20 @@ export class RolesController {
 
   @Get()
   @RequirePermissions('admin', 'view')
-  findAll() {
-    return this.rolesService.findAll();
+  findAll(@Req() req: Request) {
+    return this.rolesService.findAll(req.tenantId);
   }
 
   @Post()
   @RequirePermissions('admin', 'edit')
-  async upsert(@CurrentUsername() username: string, @Body() dto: UpsertRoleDto) {
+  async upsert(@CurrentUsername() username: string, @Body() dto: UpsertRoleDto, @Req() req: Request) {
     const cleanName = dto.name.trim();
     await this.rolesService.upsert({
       name: cleanName,
       description: dto.description ?? '',
       permissions: (dto.permissions ?? {}) as Record<string, { view: boolean; edit: boolean }>,
       uiRestrictions: (dto.uiRestrictions ?? {}) as Record<string, Record<string, unknown>>,
-    });
+    }, req.tenantId);
     const rulesList = Object.entries(dto.permissions ?? {})
       .map(([m, p]) => `${m}: ${p?.view ? 'View' : '-'}/${p?.edit ? 'Edit' : '-'}`)
       .join(', ');
@@ -47,8 +48,8 @@ export class RolesController {
 
   @Delete(':name')
   @RequirePermissions('admin', 'edit')
-  async remove(@CurrentUsername() username: string, @Param('name') name: string) {
-    await this.rolesService.deleteByName(name);
+  async remove(@CurrentUsername() username: string, @Param('name') name: string, @Req() req: Request) {
+    await this.rolesService.deleteByName(name, req.tenantId);
     await this.auditLogsService.append({
       username,
       action: 'DELETE_ROLE',

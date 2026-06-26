@@ -5,6 +5,9 @@ export type AdminDocument = HydratedDocument<Admin>;
 
 @Schema({ timestamps: true, collection: 'admins' })
 export class Admin {
+  @Prop({ default: 'default', index: true })
+  tenantId!: string;
+
   @Prop({ required: true, lowercase: true, trim: true })
   username!: string;
 
@@ -39,6 +42,6 @@ export class Admin {
 export const AdminSchema = SchemaFactory.createForClass(Admin);
 
 AdminSchema.index(
-  { username: 1 },
+  { tenantId: 1, username: 1 },
   { unique: true, collation: { locale: 'en', strength: 2 } },
 );
