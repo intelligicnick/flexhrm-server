@@ -4,16 +4,16 @@ import * as nodemailer from 'nodemailer';
 const host = process.env.SMTP_HOST;
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
+const service = process.env.SMTP_SERVICE;
 const to = process.argv[2] || user;
 
-if (!host || !user || !pass) {
-  console.error('Set SMTP_HOST, SMTP_USER, and SMTP_PASS in backend/.env');
+if ((!host && !service) || !user || !pass) {
+  console.error('Set SMTP_USER, SMTP_PASS, and either SMTP_SERVICE or SMTP_HOST in backend/.env');
   process.exit(1);
 }
 
 const port = parseInt(process.env.SMTP_PORT ?? '587', 10);
 const secure = process.env.SMTP_SECURE === 'true';
-const service = process.env.SMTP_SERVICE;
 
 const transporter = service
   ? nodemailer.createTransport({ service, auth: { user, pass } })

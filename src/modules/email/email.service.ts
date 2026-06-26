@@ -25,10 +25,11 @@ export class EmailService implements OnModuleInit {
   }
 
   isConfigured(): boolean {
+    const service = this.configService.get<string>('smtpService');
     const host = this.configService.get<string>('smtpHost');
     const user = this.configService.get<string>('smtpUser');
     const pass = this.configService.get<string>('smtpPass');
-    return !!(host && user && pass);
+    return !!((service || host) && user && pass);
   }
 
   private createTransporter(): Transporter {

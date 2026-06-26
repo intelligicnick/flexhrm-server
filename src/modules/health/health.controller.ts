@@ -5,12 +5,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Public } from '../../common/decorators/auth.decorators';
 import { EmployeesService } from '../employees/employees.service';
+import { EmailService } from '../email/email.service';
 
 @Controller('health')
 export class HealthController {
   constructor(
     @InjectConnection() private readonly connection: Connection,
     private readonly employeesService: EmployeesService,
+    private readonly emailService: EmailService,
   ) {}
 
   @Public()
@@ -26,6 +28,7 @@ export class HealthController {
       storage: 'mongodb',
       ready,
       database: ready ? `${employeeCount} employees` : 'disconnected',
+      smtpConfigured: this.emailService.isConfigured(),
     };
   }
 

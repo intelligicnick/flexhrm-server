@@ -193,30 +193,34 @@ export class AuthController {
       username: admin.username,
     };
 
+    let emailDelivered = false;
     if (admin.email && this.emailService.isConfigured()) {
-      const sent = await this.emailService.sendPasswordResetCode(
+      emailDelivered = await this.emailService.sendPasswordResetCode(
         admin.email,
         admin.username,
         resetCode,
       );
-      if (sent) {
-        response.message =
-          'A reset code has been sent to your registered email address. It expires in 15 minutes.';
-        return response;
-      }
     }
 
-    if (admin.email && !this.emailService.isConfigured()) {
+    if (emailDelivered) {
+      response.message =
+        'A reset code has been sent to your registered email address. It expires in 15 minutes.';
+      return response;
+    }
+
+    if (admin.email && this.emailService.isConfigured()) {
+      response.message =
+        'We could not deliver the reset email. Use the reset code shown below, or ask your administrator to verify SMTP settings on the server.';
+    } else if (admin.email) {
       response.message =
         'Your account has a recovery email on file, but email delivery is not configured on this server. Use the reset code shown below. Ask your system administrator to configure SMTP for email delivery.';
-    } else if (!admin.email) {
-      response.message =
-        'No recovery email is registered for this account. Add your email in My Info after signing in, or use the reset code shown below.';
     } else {
       response.message =
-        'Use the reset code below to set a new password. The code expires in 15 minutes.';
+        'No recovery email is registered for this account. Add your email in My Info after signing in, or use the reset code shown below.';
     }
 
+    // Always return the code when email was not delivered — required for SMTP-less deployments.
+    response.resetToken = resetCode;
     return response;
   }
 
@@ -246,7 +250,9 @@ export class AuthController {
       throw new BadRequestException('Reset code has expired. Request a new one.');
     }
     if (!verifyPassword(dto.resetToken.trim(), admin.passwordResetToken)) {
-      throw new BadRequestException('Invalid reset code or username.');
+      throw new BadRequestException(
+        'Invalid or expired reset code. Request a new code and enter the latest one — each new request invalidates previous codes.',
+      );
     }
 
     await this.adminsService.update(admin.username, {

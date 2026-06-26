@@ -43,6 +43,13 @@ API: [http://localhost:3001/api](http://localhost:3001/api)
 | `npm run start:prod` | Production server |
 | `npm run migrate:json` | Import legacy JSON → MongoDB |
 
-## Production
+## Production (Hostinger)
 
-Set `MONGODB_URI` to a managed instance. Change `DEFAULT_ADMIN_PASSWORD` before first deploy.
+| Check | Command |
+|-------|---------|
+| API health | `curl https://midnightblue-partridge-476451.hostingersite.com/api/health` |
+| Pretty JSON | `curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health \| python3 -m json.tool` |
+
+Full step-by-step guide (env vars, SMTP, deploy, troubleshooting): **[HOSTINGER_SETUP.md](./HOSTINGER_SETUP.md)**
+
+Set `MONGODB_URI` to a managed instance (e.g. MongoDB Atlas). Change `DEFAULT_ADMIN_PASSWORD` before first deploy. Never commit `.env` — use hPanel environment variables on Hostinger.

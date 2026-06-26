@@ -1,6 +1,17 @@
 import { envListOrDevDefault, envOrDevDefault } from './env';
 import { PRODUCTION_ID_CARD_VERIFY_BASE } from './deploy-urls';
 
+function envTrimmed(value: string | undefined): string {
+  const trimmed = value?.trim() ?? '';
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 export default () => ({
   port: parseInt(process.env.PORT ?? '3001', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -25,13 +36,13 @@ export default () => ({
     'Head Office: F-164, B Wing Express Zone, Western Express Hwy, Malad East, Mumbai, Maharashtra 400097',
   companyPhone: process.env.COMPANY_PHONE ?? '9029965109',
   companyEmail: process.env.COMPANY_EMAIL ?? 'info@intelligic.co.in',
-  smtpService: process.env.SMTP_SERVICE ?? '',
-  smtpHost: process.env.SMTP_HOST ?? '',
+  smtpService: envTrimmed(process.env.SMTP_SERVICE),
+  smtpHost: envTrimmed(process.env.SMTP_HOST),
   smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
   smtpSecure: process.env.SMTP_SECURE === 'true',
-  smtpUser: process.env.SMTP_USER ?? '',
-  smtpPass: process.env.SMTP_PASS ?? '',
-  smtpFrom: process.env.SMTP_FROM ?? '',
+  smtpUser: envTrimmed(process.env.SMTP_USER),
+  smtpPass: envTrimmed(process.env.SMTP_PASS),
+  smtpFrom: envTrimmed(process.env.SMTP_FROM),
   archiveDataDir: process.env.ARCHIVE_DATA_DIR ?? '',
   archiveRetentionMonths: parseInt(
     process.env.ARCHIVE_RETENTION_MONTHS ?? String(6),
