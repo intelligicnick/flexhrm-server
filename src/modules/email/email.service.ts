@@ -39,8 +39,13 @@ export class EmailService implements OnModuleInit {
       pass: this.configService.get<string>('smtpPass'),
     };
 
+    const sandbox = {
+      disableFileAccess: true,
+      disableUrlAccess: true,
+    };
+
     if (service) {
-      return nodemailer.createTransport({ service, auth });
+      return nodemailer.createTransport({ service, auth, ...sandbox });
     }
 
     const port = this.configService.get<number>('smtpPort') ?? 587;
@@ -51,6 +56,7 @@ export class EmailService implements OnModuleInit {
       port,
       secure,
       auth,
+      ...sandbox,
       ...(port === 587 && !secure ? { requireTLS: true } : {}),
     });
   }

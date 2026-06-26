@@ -15,13 +15,16 @@ if ((!host && !service) || !user || !pass) {
 const port = parseInt(process.env.SMTP_PORT ?? '587', 10);
 const secure = process.env.SMTP_SECURE === 'true';
 
+const sandbox = { disableFileAccess: true, disableUrlAccess: true };
+
 const transporter = service
-  ? nodemailer.createTransport({ service, auth: { user, pass } })
+  ? nodemailer.createTransport({ service, auth: { user, pass }, ...sandbox })
   : nodemailer.createTransport({
       host,
       port,
       secure,
       auth: { user, pass },
+      ...sandbox,
       ...(port === 587 && !secure ? { requireTLS: true } : {}),
     });
 
