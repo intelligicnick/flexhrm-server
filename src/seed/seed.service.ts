@@ -23,22 +23,14 @@ export class SeedService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
-    const roleCountBefore = await this.rolesService.count();
-    const adminCountBefore = await this.adminsService.count();
-    if (!seedOnStartup) return;
-
-    const roleCount = roleCountBefore;
-    if (roleCount === 0) {
-      await this.rolesService.replaceAll([...DEFAULT_ROLES]);
-      this.logger.log('Seeded default roles');
-    }
-
     const adminCount = await this.adminsService.count();
     if (adminCount === 0) {
       const password = this.configService.get<string>('defaultAdminPassword') ?? 'admin123';
+      const companyEmail = this.configService.get<string>('companyEmail');
       await this.adminsService.create({
         username: 'admin',
         password: hashPassword(password),
+        email: companyEmail || undefined,
         invitedBy: 'System',
         role: 'admin',
         locations: [],
@@ -46,12 +38,19 @@ export class SeedService implements OnModuleInit {
         createdAt: new Date().toISOString(),
       });
       this.logger.warn(
-        'Seeded default admin account (username: admin). Change password after first login.',
+        'Bootstrapped default admin (username: admin). Change password after first login.',
       );
     }
 
-    await this.syncMasterDataFromEmployees();
+    if (!seedOnStartup) return;
 
+    const roleCount = await this.rolesService.count();
+    if (roleCount === 0) {
+      await this.rolesService.replaceAll([...DEFAULT_ROLES]);
+      this.logger.log('Seeded default roles');
+    }
+
+    await this.syncMasterDataFromEmployees();
   }
 
   private async syncMasterDataFromEmployees(): Promise<void> {

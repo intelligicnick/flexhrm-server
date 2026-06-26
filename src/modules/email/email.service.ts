@@ -32,6 +32,19 @@ export class EmailService implements OnModuleInit {
     return !!((service || host) && user && pass);
   }
 
+  async verifyConnection(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.isConfigured()) {
+      return { ok: false, error: 'SMTP not configured' };
+    }
+    try {
+      await this.getTransporter().verify();
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: message };
+    }
+  }
+
   private createTransporter(): Transporter {
     const service = this.configService.get<string>('smtpService');
     const auth = {
