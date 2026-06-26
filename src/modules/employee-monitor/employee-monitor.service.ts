@@ -746,7 +746,7 @@ export class EmployeeMonitorService {
     ]);
     const activity = activities[0];
 
-    const events: Array<{ time: string; type: string; label: string; durationSeconds?: number; sublabel?: string; category?: string }> = [];
+    const events: Array<{ time: string; endTime?: string; type: string; label: string; durationSeconds?: number; sublabel?: string; category?: string }> = [];
     if (activity?.loginTime) {
       events.push({ time: new Date(activity.loginTime).toISOString(), type: 'login', label: 'Login' });
     }
@@ -760,7 +760,7 @@ export class EmployeeMonitorService {
         sublabel: app.windowTitle && app.windowTitle !== app.appName ? app.windowTitle : undefined,
         durationSeconds: app.durationSeconds,
         category: app.category,
-      } as { time: string; endTime?: string; type: string; label: string; durationSeconds?: number; sublabel?: string; category?: string });
+      });
     }
     for (const id of idle) {
       events.push({
