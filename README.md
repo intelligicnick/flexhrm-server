@@ -18,7 +18,7 @@ Production URLs are defined in `src/config/deploy-urls.ts` and overridden via en
 ```bash
 cp .env.example .env
 npm install
-npm run migrate:json   # optional: import ../frontend/*-db.json
+npm run migrate:json   # optional: import JSON exports from flexhrm-client clone
 npm run start:dev
 ```
 

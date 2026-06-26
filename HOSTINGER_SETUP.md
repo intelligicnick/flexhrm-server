@@ -233,5 +233,5 @@ In hPanel, open your Node.js app → **Logs** / **Deployments** and look for:
 ## Related docs
 
 - [README.md](./README.md) — local development  
-- [../frontend/README.md](../frontend/README.md) — frontend Hostinger app (separate deployment)  
+- [flexhrm-client README](https://github.com/intelligicnick/flexhrm-client/blob/main/README.md) — frontend Hostinger app (separate deployment)  
 - [.env.example](./.env.example) — all supported environment variables  
