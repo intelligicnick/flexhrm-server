@@ -10,7 +10,8 @@ export interface AdminSessionPayload {
   role: string;
   locations: string[];
   token: string;
-  userType?: 'admin' | 'supervisor';
+  tenantId?: string;
+  userType?: 'admin' | 'supervisor' | 'employee';
   employeeId?: string;
   assignedBlocks?: string[];
   impersonated?: boolean;

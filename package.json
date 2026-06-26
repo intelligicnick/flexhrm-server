@@ -11,6 +11,8 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",
     "migrate:json": "tsx scripts/migrate-from-json.ts",
+    "migrate:multi-tenant": "tsx scripts/migrate-to-multi-tenant.ts",
+    "migrate:tenant-indexes": "tsx scripts/rebuild-tenant-indexes.ts",
     "seed:amour": "tsx scripts/seed-amour-schools.ts",
     "test:smtp": "tsx scripts/test-smtp.ts"
   },

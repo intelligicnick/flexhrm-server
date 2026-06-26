@@ -68,7 +68,12 @@ export class EmailService implements OnModuleInit {
     return this.transporter;
   }
 
-  async sendPasswordResetCode(to: string, username: string, resetCode: string): Promise<boolean> {
+  private async sendMail(options: {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+  }): Promise<boolean> {
     if (!this.isConfigured()) return false;
 
     const from =
@@ -78,27 +83,64 @@ export class EmailService implements OnModuleInit {
       'noreply@flexhrm.local';
 
     try {
-      await this.getTransporter().sendMail({
-        from,
-        to,
-        subject: 'Flex HRM — Password Reset Code',
-        text:
-          `Hello ${username},\n\n` +
-          `Your password reset code is: ${resetCode}\n\n` +
-          `This code expires in 15 minutes. If you did not request this, you can ignore this email.\n\n` +
-          `— Flex HRM`,
-        html:
-          `<p>Hello <strong>${username}</strong>,</p>` +
-          `<p>Your password reset code is:</p>` +
-          `<p style="font-size:24px;font-weight:bold;letter-spacing:4px;font-family:monospace;">${resetCode}</p>` +
-          `<p>This code expires in <strong>15 minutes</strong>. If you did not request this, you can ignore this email.</p>` +
-          `<p>— Flex HRM</p>`,
-      });
+      await this.getTransporter().sendMail({ from, ...options });
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to send password reset email to ${to}: ${message}`);
+      this.logger.error(`Failed to send email to ${options.to}: ${message}`);
       return false;
     }
+  }
+
+  async sendPasswordResetCode(to: string, username: string, resetCode: string): Promise<boolean> {
+    return this.sendMail({
+      to,
+      subject: 'Flex HRM — Password Reset Code',
+      text:
+        `Hello ${username},\n\nYour password reset code is: ${resetCode}\n\n` +
+        `This code expires in 15 minutes.\n\n— Flex HRM`,
+      html:
+        `<p>Hello <strong>${username}</strong>,</p>` +
+        `<p>Your password reset code is:</p>` +
+        `<p style="font-size:24px;font-weight:bold;letter-spacing:4px;font-family:monospace;">${resetCode}</p>` +
+        `<p>This code expires in <strong>15 minutes</strong>.</p><p>— Flex HRM</p>`,
+    });
+  }
+
+  async sendWelcomeEmail(to: string, companyName: string, adminUsername: string, trialDays: number): Promise<boolean> {
+    return this.sendMail({
+      to,
+      subject: `Welcome to Flex HRM — ${companyName}`,
+      text:
+        `Welcome to Flex HRM!\n\nYour company "${companyName}" is ready.\n` +
+        `Admin username: ${adminUsername}\nTrial period: ${trialDays} days\n\n— Flex HRM`,
+      html:
+        `<h2>Welcome to Flex HRM!</h2>` +
+        `<p>Your company <strong>${companyName}</strong> is ready to use.</p>` +
+        `<p>Admin username: <strong>${adminUsername}</strong><br/>Trial: <strong>${trialDays} days</strong></p>` +
+        `<p><a href="/hrmlogin">Sign in to your dashboard</a></p><p>— Flex HRM</p>`,
+    });
+  }
+
+  async sendTrialReminder(to: string, companyName: string, daysLeft: number): Promise<boolean> {
+    return this.sendMail({
+      to,
+      subject: `Flex HRM trial ending in ${daysLeft} day(s) — ${companyName}`,
+      text:
+        `Your Flex HRM trial for "${companyName}" ends in ${daysLeft} day(s).\n` +
+        `Upgrade now to keep your data and continue using all features.\n\n— Flex HRM`,
+      html:
+        `<p>Your Flex HRM trial for <strong>${companyName}</strong> ends in <strong>${daysLeft} day(s)</strong>.</p>` +
+        `<p><a href="/register">Upgrade your plan</a> to continue without interruption.</p><p>— Flex HRM</p>`,
+    });
+  }
+
+  async sendNotificationEmail(to: string, subject: string, text: string): Promise<boolean> {
+    return this.sendMail({
+      to,
+      subject,
+      text,
+      html: `<p>${text.replace(/\n/g, '<br/>')}</p><p>— Flex HRM</p>`,
+    });
   }
 }

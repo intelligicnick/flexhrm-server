@@ -20,6 +20,7 @@ import {
   hasPermission,
 } from '../utils/permissions.util';
 import { RolesService } from '../../modules/roles/roles.service';
+import { PlanEnforcementService } from '../services/plan-enforcement.service';
 
 type PermissionMetadata =
   | { module: PermissionModule; action: PermissionAction; anyOf: false }
@@ -30,6 +31,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly rolesService: RolesService,
+    private readonly planEnforcement: PlanEnforcementService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -67,7 +69,19 @@ export class PermissionsGuard implements CanActivate {
       );
     }
 
-    const roles = await this.rolesService.findAll();
+    if (user?.userType === 'employee') {
+      throw new ForbiddenException(
+        'Employee portal accounts cannot access administrator modules.',
+      );
+    }
+
+    const tenantId = request.tenantId ?? user?.tenantId;
+    await this.planEnforcement.assertModuleAccess(
+      tenantId,
+      permissionMeta.anyOf ? permissionMeta.modules[0] : permissionMeta.module,
+    );
+
+    const roles = await this.rolesService.findAll(tenantId);
     const permissions = buildPermissions(user.role, roles);
 
     const allowed = permissionMeta.anyOf

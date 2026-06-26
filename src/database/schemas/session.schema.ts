@@ -5,6 +5,9 @@ export type SessionDocument = HydratedDocument<Session>;
 
 @Schema({ collection: 'sessions', timestamps: false })
 export class Session {
+  @Prop({ default: 'default', index: true })
+  tenantId!: string;
+
   @Prop({ required: true, unique: true, index: true })
   token!: string;
 
@@ -17,7 +20,7 @@ export class Session {
   @Prop({ type: [String], default: [] })
   locations!: string[];
 
-  @Prop({ enum: ['admin', 'supervisor'], default: 'admin', index: true })
+  @Prop({ enum: ['admin', 'supervisor', 'employee'], default: 'admin', index: true })
   userType!: string;
 
   @Prop({ default: '' })

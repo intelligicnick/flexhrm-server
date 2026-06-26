@@ -6,6 +6,8 @@ import { Employee, EmployeeDocument, LedgerEntry } from '../../database/schemas/
 import { Contract, ContractDocument } from '../../database/schemas/contract.schema';
 import { resolveContractIdForLocation } from '../../common/utils/contract-locations.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
+import { resolveTenantId, withTenantId } from '../../common/utils/tenant.util';
+import { PaginatedResult } from '../../platform/common/pagination.dto';
 import { sanitizeEmployeeNumericFields } from '../../common/utils/non-negative-number.util';
 import { isHttpUrl } from '../../common/storage/file-buffer.util';
 import {
@@ -24,6 +26,7 @@ import {
   resolveIdCardIssueDate,
 } from '../../common/utils/id-card-verify.util';
 import { sanitizeEmployeePayrollFields } from '../../common/utils/payroll-calculation.util';
+import { PlanEnforcementService } from '../../common/services/plan-enforcement.service';
 import {
   appendLedgerItem,
   clearLedgerItemsOfType,
@@ -88,6 +91,7 @@ export class EmployeesService {
     private readonly employeeAssetsService: EmployeeAssetsService,
     private readonly employeeDocumentsService: EmployeeDocumentsService,
     private readonly config: ConfigService,
+    private readonly planEnforcement: PlanEnforcementService,
   ) {}
 
   private async resolveContractIdForEmployeeLocation(
@@ -123,11 +127,28 @@ export class EmployeesService {
       session.username.toLowerCase() === 'admin' ||
       session.role.toLowerCase() === 'admin' ||
       !session.role.trim();
-    if (isSuperAdmin || !session.locations?.length) return query;
+    if (isSuperAdmin) return query;
+    if (!session.locations?.length) {
+      return { ...query, location: { $in: [] } };
+    }
     return {
       ...query,
       location: { $in: session.locations },
     };
+  }
+
+  private canAccessEmployeeLocation(
+    location: string,
+    session?: AdminSessionPayload,
+  ): boolean {
+    if (!session) return true;
+    const isSuperAdmin =
+      session.username.toLowerCase() === 'admin' ||
+      session.role.toLowerCase() === 'admin' ||
+      !session.role.trim();
+    if (isSuperAdmin) return true;
+    if (!session.locations?.length) return false;
+    return session.locations.includes(String(location || '').trim());
   }
 
   toPlain(doc: EmployeeDocument | Record<string, unknown>): Record<string, unknown> {
@@ -255,36 +276,83 @@ export class EmployeesService {
 
   async findAll(
     session?: AdminSessionPayload,
-    options?: { lite?: boolean; ledgerMonth?: string },
+    options?: { lite?: boolean; ledgerMonth?: string; tenantId?: string },
   ): Promise<Record<string, unknown>[]> {
-    const filter = this.applyLocationScope({}, session);
+    const filter = this.applyLocationScope(
+      withTenantId(options?.tenantId ?? session?.tenantId),
+      session,
+    );
     const docs = await this.employeeModel.find(filter).sort({ srNo: 1 }).lean().exec();
     return docs.map((d) =>
       this.trimMonthlyLedger(this.toPlain(d), options),
     );
   }
 
-  async count(): Promise<number> {
-    return this.employeeModel.countDocuments();
+  async findAllPaginated(
+    session?: AdminSessionPayload,
+    options?: { lite?: boolean; ledgerMonth?: string; tenantId?: string },
+    pagination?: { page?: number; pageSize?: number },
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const filter = this.applyLocationScope(
+      withTenantId(options?.tenantId ?? session?.tenantId),
+      session,
+    );
+    const page = Math.max(1, pagination?.page ?? 1);
+    const pageSize = Math.min(500, Math.max(1, pagination?.pageSize ?? 50));
+    const skip = (page - 1) * pageSize;
+    const [docs, total] = await Promise.all([
+      this.employeeModel.find(filter).sort({ srNo: 1 }).skip(skip).limit(pageSize).lean().exec(),
+      this.employeeModel.countDocuments(filter),
+    ]);
+    return {
+      items: docs.map((d) => this.trimMonthlyLedger(this.toPlain(d), options)),
+      total,
+      page,
+      pageSize,
+      hasMore: skip + docs.length < total,
+    };
   }
 
-  async findById(id: string): Promise<Record<string, unknown> | null> {
-    const doc = await this.employeeModel.findOne({ id }).exec();
-    return doc ? this.toPlain(doc) : null;
+  async count(tenantId?: string): Promise<number> {
+    return this.employeeModel.countDocuments(withTenantId(tenantId));
   }
 
-  async existsByCode(code: string, excludeId?: string): Promise<boolean> {
-    const query: Record<string, unknown> = { employeeCode: code };
+  async findById(
+    id: string,
+    session?: AdminSessionPayload,
+    tenantId?: string,
+  ): Promise<Record<string, unknown> | null> {
+    const doc = await this.employeeModel
+      .findOne(withTenantId(tenantId ?? session?.tenantId, { id }))
+      .exec();
+    if (!doc) return null;
+    const plain = this.toPlain(doc);
+    if (session && !this.canAccessEmployeeLocation(String(plain.location || ''), session)) {
+      return null;
+    }
+    return plain;
+  }
+
+  async existsByCode(code: string, excludeId?: string, tenantId?: string): Promise<boolean> {
+    const query: Record<string, unknown> = withTenantId(tenantId, { employeeCode: code });
     if (excludeId) query.id = { $ne: excludeId };
     return !!(await this.employeeModel.findOne(query).select('_id').lean());
   }
 
-  async create(raw: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const count = await this.count();
+  async create(
+    raw: Record<string, unknown>,
+    tenantId?: string,
+  ): Promise<Record<string, unknown>> {
+    const tid = resolveTenantId(tenantId ?? (raw.tenantId as string));
+    const currentCount = await this.count(tid);
+    await this.planEnforcement.assertCanAddEmployee(tid, currentCount);
+
+    const count = currentCount;
     const employeeCode = String(raw.employeeCode || raw.id || '').trim();
     const id = String(raw.id || employeeCode);
     let processed: Record<string, unknown> = sanitizeEmployeeNumericFields({
       ...raw,
+      tenantId: tid,
       id,
       employeeCode,
       srNo: Number(raw.srNo) || count + 1,

@@ -91,13 +91,24 @@ export class EmployeesController {
   )
   findAll(
     @CurrentUser() user: AdminSessionPayload,
+    @Req() req: Request,
     @Query('lite') lite?: string,
     @Query('ledgerMonth') ledgerMonth?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.employeesService.findAll(user, {
+    const options = {
       lite: lite === '1' || lite === 'true',
       ledgerMonth: ledgerMonth?.trim() || undefined,
-    });
+      tenantId: req.tenantId ?? user.tenantId,
+    };
+    if (page || pageSize) {
+      return this.employeesService.findAllPaginated(user, options, {
+        page: page ? parseInt(page, 10) : 1,
+        pageSize: pageSize ? parseInt(pageSize, 10) : 50,
+      });
+    }
+    return this.employeesService.findAll(user, options);
   }
 
   @Get('birthdays')
@@ -625,17 +636,22 @@ export class EmployeesController {
 
   @Post()
   @RequirePermissions('employees', 'edit')
-  async create(@CurrentUsername() username: string, @Body() body: Record<string, unknown>) {
-    const count = await this.employeesService.count();
+  async create(
+    @CurrentUsername() username: string,
+    @Req() req: Request,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const tenantId = req.tenantId;
+    const count = await this.employeesService.count(tenantId);
     if (!body.employeeCode || !String(body.employeeCode).trim()) {
       body.employeeCode = `EMP-${count + 101}-${Math.floor(1000 + Math.random() * 9000)}`;
     }
-    if (await this.employeesService.existsByCode(String(body.employeeCode))) {
+    if (await this.employeesService.existsByCode(String(body.employeeCode), undefined, tenantId)) {
       throw new BadRequestException(
         `Employee with code ${body.employeeCode} already exists.`,
       );
     }
-    const processed = await this.employeesService.create(body);
+    const processed = await this.employeesService.create(body, tenantId);
     const displayName = employeeDisplayName(processed);
     await this.auditLogsService.append({
       username,

@@ -14,11 +14,13 @@ export class AdminsService {
     return admins.map(({ password: _p, ...rest }) => rest);
   }
 
-  async findByUsername(username: string): Promise<AdminDocument | null> {
+  async findByUsername(username: string, tenantId?: string): Promise<AdminDocument | null> {
+    const query: Record<string, unknown> = {
+      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    };
+    if (tenantId) query.tenantId = tenantId;
     return this.adminModel
-      .findOne({
-        username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-      })
+      .findOne(query)
       .select('+password +passwordResetToken')
       .exec();
   }

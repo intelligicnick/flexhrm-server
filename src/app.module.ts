@@ -39,10 +39,29 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { ImageKitModule } from './modules/imagekit/imagekit.module';
 import { MediaStorageModule } from './common/storage/media-storage.module';
 import { EmployeeMonitorModule } from './modules/employee-monitor/employee-monitor.module';
+import { PlatformModule } from './platform/platform.module';
+import { LeaveModule } from './modules/leave/leave.module';
+import { EmployeePortalModule } from './modules/employee-portal/employee-portal.module';
+import { ShiftModule } from './modules/shift/shift.module';
+import { AttendancePunchModule } from './modules/attendance-punch/attendance-punch.module';
+import { WorkflowModule } from './modules/workflow/workflow.module';
+import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { PlanEnforcementModule } from './common/plan-enforcement.module';
+import { AssetsModule } from './modules/assets/assets.module';
+import { CrmModule } from './modules/crm/crm.module';
+import { RecruitmentModule } from './modules/recruitment/recruitment.module';
+import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
+import { PayrollRunsModule } from './modules/payroll-runs/payroll-runs.module';
+import { AutomationModule } from './modules/automation/automation.module';
+import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
+import { QueueModule } from './modules/queue/queue.module';
+import { SsoModule } from './modules/sso/sso.module';
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
+    PlanEnforcementModule,
+    PlatformModule,
     ImageKitModule,
     MediaStorageModule,
     DatabaseModule,
@@ -79,6 +98,21 @@ import { EmployeeMonitorModule } from './modules/employee-monitor/employee-monit
     SmartCaptureModule,
     PayrollModule,
     EmployeeMonitorModule,
+    LeaveModule,
+    EmployeePortalModule,
+    ShiftModule,
+    AttendancePunchModule,
+    WorkflowModule,
+    WhatsAppModule,
+    AssetsModule,
+    CrmModule,
+    RecruitmentModule,
+    HelpdeskModule,
+    PayrollRunsModule,
+    AutomationModule,
+    AiAssistantModule,
+    QueueModule,
+    SsoModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
