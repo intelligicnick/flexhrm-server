@@ -90,4 +90,11 @@ async function bootstrap(): Promise<void> {
   console.log(`Flex HRM API running on http://0.0.0.0:${port}/api [mongodb]`);
 }
 
-bootstrap();
+bootstrap().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error('Flex HRM API failed to start:', message);
+  if (err instanceof Error && err.stack) {
+    console.error(err.stack);
+  }
+  process.exit(1);
+});

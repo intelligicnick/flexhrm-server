@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "Flex HRM — NestJS API with MongoDB",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-hostinger-entry.cjs",
-    "start": "node dist/main",
+    "start": "node dist/server.js",
     "dev": "nest start --watch",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/server.js",
     "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",
     "migrate:json": "tsx scripts/migrate-from-json.ts",
     "migrate:multi-tenant": "tsx scripts/migrate-to-multi-tenant.ts",

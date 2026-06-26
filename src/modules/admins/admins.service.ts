@@ -32,12 +32,12 @@ export class AdminsService {
       .exec();
   }
 
-  async findByUsernameOrEmail(identifier: string): Promise<AdminDocument | null> {
+  async findByUsernameOrEmail(identifier: string, tenantId?: string): Promise<AdminDocument | null> {
     const trimmed = identifier.trim();
     if (trimmed.includes('@')) {
       return this.findByEmail(trimmed);
     }
-    return this.findByUsername(trimmed);
+    return this.findByUsername(trimmed, tenantId);
   }
 
   async findProfile(username: string): Promise<Omit<Admin, 'password'> | null> {
@@ -62,12 +62,14 @@ export class AdminsService {
     });
   }
 
-  async update(username: string, patch: Partial<Admin>): Promise<AdminDocument | null> {
+  async update(username: string, patch: Partial<Admin>, tenantId?: string): Promise<AdminDocument | null> {
+    const query: Record<string, unknown> = {
+      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    };
+    if (tenantId) query.tenantId = tenantId;
     return this.adminModel
       .findOneAndUpdate(
-        {
-          username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        },
+        query,
         { $set: patch },
         { new: true },
       )
@@ -92,12 +94,14 @@ export class AdminsService {
     return admin;
   }
 
-  async clearPasswordReset(username: string): Promise<void> {
+  async clearPasswordReset(username: string, tenantId?: string): Promise<void> {
+    const query: Record<string, unknown> = {
+      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    };
+    if (tenantId) query.tenantId = tenantId;
     await this.adminModel
       .findOneAndUpdate(
-        {
-          username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        },
+        query,
         { $unset: { passwordResetToken: '', passwordResetExpires: '' } },
       )
       .exec();

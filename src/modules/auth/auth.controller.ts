@@ -179,9 +179,10 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 900000 } })
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     const identifier = dto.username.trim();
-    const admin = await this.adminsService.findByUsernameOrEmail(identifier);
+    const reqTenantId = req.tenantId ?? 'default';
+    const admin = await this.adminsService.findByUsernameOrEmail(identifier, reqTenantId);
 
     if (!admin || admin.disabled) {
       return {
@@ -193,11 +194,16 @@ export class AuthController {
 
     const resetCode = generateResetCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const adminTenantId = admin.tenantId ?? reqTenantId;
 
-    await this.adminsService.update(admin.username, {
-      passwordResetToken: hashPassword(resetCode),
-      passwordResetExpires: expiresAt,
-    });
+    await this.adminsService.update(
+      admin.username,
+      {
+        passwordResetToken: hashPassword(resetCode),
+        passwordResetExpires: expiresAt,
+      },
+      adminTenantId,
+    );
 
     await this.auditLogsService.append({
       username: admin.username,
@@ -209,6 +215,7 @@ export class AuthController {
     const response: Record<string, unknown> = {
       success: true,
       username: admin.username,
+      tenantId: adminTenantId,
     };
 
     let emailDelivered = false;
@@ -246,12 +253,14 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 900000 } })
-  async resetPassword(@Body() dto: ResetPasswordDto) {
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
     const username = dto.username.trim();
+    const reqTenantId = req.tenantId ?? 'default';
     const passwordError = validatePasswordStrength(dto.newPassword);
     if (passwordError) throw new BadRequestException(passwordError);
 
-    const admin = await this.adminsService.findByUsername(username);
+    const admin = await this.adminsService.findByUsername(username, reqTenantId);
+    const tokenTrimmed = dto.resetToken.trim();
     if (!admin) {
       throw new BadRequestException('Invalid reset code or username.');
     }
@@ -264,19 +273,22 @@ export class AuthController {
       throw new BadRequestException('No active password reset request. Request a new code first.');
     }
     if (new Date() > new Date(admin.passwordResetExpires)) {
-      await this.adminsService.clearPasswordReset(admin.username);
+      await this.adminsService.clearPasswordReset(admin.username, admin.tenantId ?? reqTenantId);
       throw new BadRequestException('Reset code has expired. Request a new one.');
     }
-    if (!verifyPassword(dto.resetToken.trim(), admin.passwordResetToken)) {
+    const tokenValid = verifyPassword(tokenTrimmed, admin.passwordResetToken);
+    if (!tokenValid) {
       throw new BadRequestException(
         'Invalid or expired reset code. Request a new code and enter the latest one — each new request invalidates previous codes.',
       );
     }
 
-    await this.adminsService.update(admin.username, {
-      password: hashPassword(dto.newPassword),
-    });
-    await this.adminsService.clearPasswordReset(admin.username);
+    await this.adminsService.update(
+      admin.username,
+      { password: hashPassword(dto.newPassword) },
+      admin.tenantId ?? reqTenantId,
+    );
+    await this.adminsService.clearPasswordReset(admin.username, admin.tenantId ?? reqTenantId);
     await this.sessionsService.destroyAllForUser(admin.username);
 
     await this.auditLogsService.append({

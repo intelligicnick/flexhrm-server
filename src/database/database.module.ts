@@ -267,7 +267,11 @@ for (const model of MODELS) {
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const uri = config.get<string>('mongodbUri') ?? '';
-        return { uri };
+        return {
+          uri,
+          serverSelectionTimeoutMS: 15_000,
+          connectTimeoutMS: 15_000,
+        };
       },
     }),
     MongooseModule.forFeature(MODELS),

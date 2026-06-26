@@ -25,7 +25,9 @@ export default () => ({
     process.env.CORS_ORIGINS,
     'http://localhost:3000',
   ),
-  seedOnStartup: process.env.SEED_ON_STARTUP !== 'false',
+  seedOnStartup:
+    process.env.SEED_ON_STARTUP === 'true' ||
+    (process.env.NODE_ENV !== 'production' && process.env.SEED_ON_STARTUP !== 'false'),
   defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD ?? 'admin123',
   migrateSourceDir: process.env.MIGRATE_SOURCE_DIR ?? '../',
   bulkPayExportDir: process.env.BULK_PAY_EXPORT_DIR ?? '',

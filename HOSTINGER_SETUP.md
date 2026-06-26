@@ -14,6 +14,40 @@ Repository: https://github.com/intelligicnick/flexhrm-server
 
 ---
 
+## 503 Service Unavailable — fix this first
+
+If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the Node.js process is **not running**. Pushing code to GitHub does not restart the app — you must fix the Hostinger deployment.
+
+### Quick checks (in order)
+
+1. **Open hPanel → Node.js Web Apps → midnightblue app → Deployments / Logs**  
+   Look for red errors. Common messages:
+   - `Missing required environment variable: MONGODB_URI` → add `MONGODB_URI` in Environment variables
+   - `Missing required environment variable: CORS_ORIGINS` → add `CORS_ORIGINS=https://greenyellow-woodpecker-750354.hostingersite.com`
+   - `Failed to build` / `JavaScript heap out of memory` → add `NODE_OPTIONS=--max-old-space-size=4096` and redeploy
+   - `Cannot find module` / `dist/server.js` not found → build failed; check build command below
+
+2. **Confirm build settings** (must match exactly):
+
+   | Setting | Value |
+   |---------|-------|
+   | **Build command** | `npm install && npm run build` |
+   | **Start command** | `npm start` or `node dist/server.js` |
+   | **Output directory** | `dist` |
+   | **Entry file** | `server.js` |
+
+3. **Confirm required env vars** are saved, then click **Redeploy** (not just Restart if build failed).
+
+4. **Verify** after deploy finishes:
+
+   ```bash
+   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health
+   ```
+
+   Until this returns JSON with `"ready": true`, the frontend login will fail.
+
+---
+
 ## 1. Hostinger app settings
 
 In **hPanel → Websites → Node.js Web Apps** (or **Deployments**), connect the `flexhrm-server` GitHub repo and use:
