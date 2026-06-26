@@ -28,6 +28,8 @@ function applyTenantFilter(this: Query<unknown, unknown>): void {
 
   const filter = this.getFilter();
   if (Object.prototype.hasOwnProperty.call(filter, 'tenantId')) return;
+  // Custom tenant matching (e.g. legacy default-tenant $or) must not be double-filtered.
+  if (Object.prototype.hasOwnProperty.call(filter, '$or')) return;
 
   this.where({ tenantId });
 }

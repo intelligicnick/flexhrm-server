@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Admin, AdminDocument } from '../../database/schemas/admin.schema';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
+import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
+import { hashPassword } from '../../common/utils/password.util';
 
 @Injectable()
 export class AdminsService {
@@ -50,20 +52,41 @@ export class AdminsService {
       .exec();
   }
 
-  /** Resolve admin for password recovery — prefers request tenant, falls back globally. */
+  /** Resolve admin for password recovery — bypasses request tenant auto-scoping. */
   async findForPasswordReset(
     identifier: string,
     preferredTenantId?: string,
   ): Promise<AdminDocument | null> {
-    const trimmed = identifier.trim();
-    if (trimmed.includes('@')) {
-      return this.findByEmail(trimmed);
-    }
-    if (preferredTenantId) {
-      const scoped = await this.findByUsername(trimmed, preferredTenantId);
-      if (scoped) return scoped;
-    }
-    return this.findByUsername(trimmed);
+    return runWithoutTenantScope(async () => {
+      const trimmed = identifier.trim();
+      if (trimmed.includes('@')) {
+        return this.findByEmail(trimmed);
+      }
+      if (preferredTenantId) {
+        const scoped = await this.findByUsername(trimmed, preferredTenantId);
+        if (scoped) return scoped;
+      }
+      return this.findByUsername(trimmed);
+    });
+  }
+
+  /** Create default admin when the database has none (Hostinger first boot). */
+  async ensureBootstrapAdmin(defaultPassword: string): Promise<boolean> {
+    return runWithoutTenantScope(async () => {
+      const count = await this.adminModel.countDocuments();
+      if (count > 0) return false;
+      await this.create({
+        tenantId: DEFAULT_TENANT_ID,
+        username: 'admin',
+        password: hashPassword(defaultPassword),
+        invitedBy: 'System',
+        role: 'admin',
+        locations: [],
+        disabled: false,
+        createdAt: new Date().toISOString(),
+      });
+      return true;
+    });
   }
 
   async findByEmail(email: string): Promise<AdminDocument | null> {

@@ -182,7 +182,16 @@ export class AuthController {
   async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     const identifier = dto.username.trim();
     const reqTenantId = req.tenantId ?? 'default';
-    const admin = await this.adminsService.findForPasswordReset(identifier, reqTenantId);
+    let admin = await this.adminsService.findForPasswordReset(identifier, reqTenantId);
+
+    if (!admin) {
+      const bootstrapped = await this.adminsService.ensureBootstrapAdmin(
+        this.configService.get<string>('defaultAdminPassword') ?? 'admin123',
+      );
+      if (bootstrapped) {
+        admin = await this.adminsService.findForPasswordReset(identifier, reqTenantId);
+      }
+    }
 
     if (!admin || admin.disabled) {
       return {
@@ -259,7 +268,7 @@ export class AuthController {
     const passwordError = validatePasswordStrength(dto.newPassword);
     if (passwordError) throw new BadRequestException(passwordError);
 
-    const admin = await this.adminsService.findByUsername(username, reqTenantId);
+    const admin = await this.adminsService.findForPasswordReset(username, reqTenantId);
     const tokenTrimmed = dto.resetToken.trim();
     if (!admin) {
       throw new BadRequestException('Invalid reset code or username.');
