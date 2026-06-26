@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Put, Query, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AttendanceService } from './attendance.service';
-import { RequireAnyPermissions, RequirePermissions } from '../../common/decorators/auth.decorators';
+import { Public, RequireAnyPermissions, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUsername, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { BulkAttendanceDto, UpsertAttendanceDto } from './dto/attendance.dto';
+import { EsslSyncDto } from './dto/essl-sync.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { summarizeAttendanceBulk } from '../../common/utils/audit-log-format.util';
 
@@ -12,6 +14,7 @@ export class AttendanceController {
   constructor(
     private readonly attendanceService: AttendanceService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -21,6 +24,12 @@ export class AttendanceController {
       return this.attendanceService.getMonthGrid(monthKey);
     }
     return this.attendanceService.getAllGrouped();
+  }
+
+  @Get('years-with-data')
+  @RequireAnyPermissions(['attendance', 'salary', 'ledger', 'employees'], 'view')
+  async yearsWithData() {
+    return this.attendanceService.getFinancialYearsWithData();
   }
 
   @Get('exit-eligibility')
@@ -68,5 +77,29 @@ export class AttendanceController {
   ) {
     const count = await this.attendanceService.importFromLocalStorage(body, username);
     return { success: true, count };
+  }
+
+  @Public()
+  @Post('essl-sync')
+  async esslSync(
+    @Headers('x-essl-sync-key') syncKey: string | undefined,
+    @Body() dto: EsslSyncDto,
+  ) {
+    const expected = this.configService.get<string>('esslSyncApiKey', '');
+    if (!expected || !syncKey || syncKey !== expected) {
+      throw new UnauthorizedException('Invalid ESSL sync key');
+    }
+
+    const result = await this.attendanceService.syncEsslPunches(dto.punches);
+    if (result.count > 0) {
+      await this.auditLogsService.append({
+        username: 'ESSL-Sync',
+        action: 'ESSL_ATTENDANCE_SYNC',
+        target: `Synced ${result.count} present mark(s) from biometric device`,
+        details: { count: result.count, skipped: result.skipped.length },
+      });
+    }
+
+    return { success: true, ...result };
   }
 }

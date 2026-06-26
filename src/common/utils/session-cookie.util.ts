@@ -33,13 +33,13 @@ export function readSessionTokenFromRequest(
   cookies: Record<string, string> | undefined,
   authHeader?: string,
 ): string | null {
-  const cookieToken = cookies?.[SESSION_COOKIE_NAME]?.trim();
-  if (cookieToken) return cookieToken;
-
   if (authHeader?.startsWith('Bearer ')) {
     const bearer = authHeader.slice(7).trim();
     if (bearer) return bearer;
   }
+
+  const cookieToken = cookies?.[SESSION_COOKIE_NAME]?.trim();
+  if (cookieToken) return cookieToken;
 
   return null;
 }

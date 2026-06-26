@@ -156,6 +156,5 @@ export class Tender {
 
 export const TenderSchema = SchemaFactory.createForClass(Tender);
 
-TenderSchema.index({ bidNo: 1 });
 TenderSchema.index({ tenderType: 1, endDate: -1 });
 TenderSchema.index({ status: 1, endDate: -1 });

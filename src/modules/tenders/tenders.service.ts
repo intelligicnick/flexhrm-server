@@ -262,6 +262,22 @@ export class TendersService {
     return doc ? this.toPlain(doc) : null;
   }
 
+  async findExistingBidNos(bidNos: string[]): Promise<string[]> {
+    const trimmed = bidNos.map((b) => b.trim()).filter(Boolean);
+    if (!trimmed.length) return [];
+
+    const docs = await this.tenderModel
+      .find({
+        bidNo: { $in: trimmed },
+        $or: [{ deletedAt: '' }, { deletedAt: { $exists: false } }],
+      })
+      .select('bidNo')
+      .exec();
+
+    const existingSet = new Set(docs.map((d) => String(d.bidNo).toUpperCase()));
+    return trimmed.filter((b) => existingSet.has(b.toUpperCase()));
+  }
+
   async create(dto: CreateTenderDto): Promise<Record<string, unknown>> {
     const bidNo = dto.bidNo.trim();
     if (!bidNo) throw new BadRequestException('Bid number is required.');

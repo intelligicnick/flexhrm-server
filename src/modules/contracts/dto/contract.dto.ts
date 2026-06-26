@@ -245,3 +245,9 @@ export class BulkImportContractDto {
   @IsNotEmpty()
   items!: CreateContractDto[];
 }
+
+export class ContractDuplicateCheckDto {
+  @IsArray()
+  @IsString({ each: true })
+  contractKeys!: string[];
+}

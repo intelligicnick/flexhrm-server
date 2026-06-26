@@ -114,6 +114,5 @@ export class Contract {
 
 export const ContractSchema = SchemaFactory.createForClass(Contract);
 
-ContractSchema.index({ contractNo: 1 });
 ContractSchema.index({ companyName: 1, toDate: -1 });
 ContractSchema.index({ status: 1, toDate: -1 });

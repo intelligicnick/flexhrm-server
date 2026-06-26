@@ -9,6 +9,7 @@ export const PERMISSION_MODULES = [
   'leave',
   'birthdays',
   'directory',
+  'monitor',
   'admin',
 ] as const;
 
@@ -46,6 +47,7 @@ export const DEFAULT_ROLES = [
       leave: { view: true, edit: true },
       birthdays: { view: true, edit: true },
       directory: { view: true, edit: true },
+      monitor: { view: true, edit: true },
       admin: { view: false, edit: false },
     },
   },
@@ -63,6 +65,7 @@ export const DEFAULT_ROLES = [
       leave: { view: true, edit: false },
       birthdays: { view: true, edit: false },
       directory: { view: true, edit: false },
+      monitor: { view: true, edit: false },
       admin: { view: false, edit: false },
     },
   },

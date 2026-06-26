@@ -13,6 +13,7 @@ import { ContractsService } from './contracts.service';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import {
   BulkImportContractDto,
+  ContractDuplicateCheckDto,
   CreateContractDto,
   UpdateContractDto,
 } from './dto/contract.dto';
@@ -59,6 +60,14 @@ export class ContractsController {
   @RequirePermissions('bids', 'edit')
   bulkImport(@Body() dto: BulkImportContractDto) {
     return this.contractsService.bulkImport(dto.items || []);
+  }
+
+  @Post('duplicate-check')
+  @RequirePermissions('bids', 'view')
+  duplicateCheck(@Body() dto: ContractDuplicateCheckDto) {
+    return this.contractsService
+      .findExistingContractKeys(dto.contractKeys || [])
+      .then((existing) => ({ existing }));
   }
 
   @Patch(':id')

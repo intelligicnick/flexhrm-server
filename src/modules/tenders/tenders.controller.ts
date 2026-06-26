@@ -15,6 +15,7 @@ import {
   BulkSyncTenderDto,
   CreateTenderDto,
   SyncTenderDto,
+  TenderDuplicateCheckDto,
   UpdateTenderDto,
 } from './dto/tender.dto';
 
@@ -54,6 +55,14 @@ export class TendersController {
   @RequirePermissions('bids', 'edit')
   syncFromGem(@Body() dto: BulkSyncTenderDto) {
     return this.tendersService.syncFromGem(dto.items || []);
+  }
+
+  @Post('duplicate-check')
+  @RequirePermissions('bids', 'view')
+  duplicateCheck(@Body() dto: TenderDuplicateCheckDto) {
+    return this.tendersService
+      .findExistingBidNos(dto.bidNos || [])
+      .then((existing) => ({ existing }));
   }
 
   @Get('lookup')

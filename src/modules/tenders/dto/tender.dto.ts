@@ -317,3 +317,9 @@ export class BulkSyncTenderDto {
   @IsNotEmpty()
   items!: SyncTenderDto[];
 }
+
+export class TenderDuplicateCheckDto {
+  @IsArray()
+  @IsString({ each: true })
+  bidNos!: string[];
+}

@@ -11,7 +11,8 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,scripts}/**/*.ts\" --fix",
     "migrate:json": "tsx scripts/migrate-from-json.ts",
-    "seed:amour": "tsx scripts/seed-amour-schools.ts"
+    "seed:amour": "tsx scripts/seed-amour-schools.ts",
+    "test:smtp": "tsx scripts/test-smtp.ts"
   },
   "dependencies": {
     "@imagekit/nodejs": "^7.8.0",

@@ -1,15 +1,64 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 @Injectable()
-export class EmailService {
+export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
+  private transporter: Transporter | null = null;
 
   constructor(private readonly configService: ConfigService) {}
 
+  onModuleInit(): void {
+    if (!this.isConfigured()) {
+      this.logger.warn('SMTP not configured — password reset codes will only be shown in the API response');
+      return;
+    }
+
+    this.transporter = this.createTransporter();
+    void this.transporter.verify().then(
+      () => this.logger.log(`SMTP ready (${this.configService.get<string>('smtpHost')})`),
+      (err: Error) =>
+        this.logger.error(`SMTP verification failed: ${err.message}`, err.stack),
+    );
+  }
+
   isConfigured(): boolean {
-    return !!this.configService.get<string>('smtpHost');
+    const host = this.configService.get<string>('smtpHost');
+    const user = this.configService.get<string>('smtpUser');
+    const pass = this.configService.get<string>('smtpPass');
+    return !!(host && user && pass);
+  }
+
+  private createTransporter(): Transporter {
+    const service = this.configService.get<string>('smtpService');
+    const auth = {
+      user: this.configService.get<string>('smtpUser'),
+      pass: this.configService.get<string>('smtpPass'),
+    };
+
+    if (service) {
+      return nodemailer.createTransport({ service, auth });
+    }
+
+    const port = this.configService.get<number>('smtpPort') ?? 587;
+    const secure = this.configService.get<boolean>('smtpSecure') ?? false;
+
+    return nodemailer.createTransport({
+      host: this.configService.get<string>('smtpHost'),
+      port,
+      secure,
+      auth,
+      ...(port === 587 && !secure ? { requireTLS: true } : {}),
+    });
+  }
+
+  private getTransporter(): Transporter {
+    if (!this.transporter) {
+      this.transporter = this.createTransporter();
+    }
+    return this.transporter;
   }
 
   async sendPasswordResetCode(to: string, username: string, resetCode: string): Promise<boolean> {
@@ -17,21 +66,12 @@ export class EmailService {
 
     const from =
       this.configService.get<string>('smtpFrom') ||
+      this.configService.get<string>('smtpUser') ||
       this.configService.get<string>('companyEmail') ||
       'noreply@flexhrm.local';
 
-    const transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('smtpHost'),
-      port: this.configService.get<number>('smtpPort') ?? 587,
-      secure: this.configService.get<boolean>('smtpSecure') ?? false,
-      auth: {
-        user: this.configService.get<string>('smtpUser'),
-        pass: this.configService.get<string>('smtpPass'),
-      },
-    });
-
     try {
-      await transporter.sendMail({
+      await this.getTransporter().sendMail({
         from,
         to,
         subject: 'Flex HRM — Password Reset Code',
@@ -49,7 +89,8 @@ export class EmailService {
       });
       return true;
     } catch (err) {
-      this.logger.error(`Failed to send password reset email to ${to}`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to send password reset email to ${to}: ${message}`);
       return false;
     }
   }

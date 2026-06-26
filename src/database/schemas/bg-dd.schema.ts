@@ -58,4 +58,3 @@ export class BgDdRecord {
 export const BgDdRecordSchema = SchemaFactory.createForClass(BgDdRecord);
 
 BgDdRecordSchema.index({ instrumentType: 1, expiryDate: -1 });
-BgDdRecordSchema.index({ contractId: 1 });

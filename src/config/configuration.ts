@@ -25,6 +25,7 @@ export default () => ({
     'Head Office: F-164, B Wing Express Zone, Western Express Hwy, Malad East, Mumbai, Maharashtra 400097',
   companyPhone: process.env.COMPANY_PHONE ?? '9029965109',
   companyEmail: process.env.COMPANY_EMAIL ?? 'info@intelligic.co.in',
+  smtpService: process.env.SMTP_SERVICE ?? '',
   smtpHost: process.env.SMTP_HOST ?? '',
   smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
   smtpSecure: process.env.SMTP_SECURE === 'true',
@@ -42,4 +43,5 @@ export default () => ({
   imagekitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY ?? '',
   imagekitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY ?? '',
   imagekitUrlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT ?? '',
+  esslSyncApiKey: process.env.ESSL_SYNC_API_KEY ?? '',
 });

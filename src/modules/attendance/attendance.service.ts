@@ -6,8 +6,20 @@ import {
   AttendanceRecordDocument,
 } from '../../database/schemas/attendance-record.schema';
 import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
+import {
+  BulkPayExport,
+  BulkPayExportDocument,
+} from '../../database/schemas/bulk-pay-export.schema';
+import {
+  SchoolMonthlyBilling,
+  SchoolMonthlyBillingDocument,
+} from '../../database/schemas/school-monthly-billing.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { MONTH_NAME_LIST } from '../../common/utils/date-of-birth.util';
+import {
+  monthKeyToFYRange,
+  normalizeFYRange,
+} from '../../common/utils/financial-year.util';
 
 export type ExitEligibleEmployee = {
   employeeId: string;
@@ -25,6 +37,10 @@ export class AttendanceService {
     private readonly attendanceModel: Model<AttendanceRecordDocument>,
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<EmployeeDocument>,
+    @InjectModel(BulkPayExport.name)
+    private readonly bulkPayExportModel: Model<BulkPayExportDocument>,
+    @InjectModel(SchoolMonthlyBilling.name)
+    private readonly schoolBillingModel: Model<SchoolMonthlyBillingDocument>,
   ) {}
 
   private applyLocationScope(
@@ -258,5 +274,103 @@ export class AttendanceService {
       }
     }
     return count;
+  }
+
+  async syncEsslPunches(
+    punches: Array<{ employeeCode: string; timestamp: string }>,
+  ): Promise<{ count: number; skipped: Array<{ employeeCode: string; reason: string }> }> {
+    let count = 0;
+    const skipped: Array<{ employeeCode: string; reason: string }> = [];
+    const seen = new Set<string>();
+
+    for (const punch of punches) {
+      const code = punch.employeeCode.trim();
+      if (!code) {
+        skipped.push({ employeeCode: '', reason: 'empty employeeCode' });
+        continue;
+      }
+
+      const punchedAt = new Date(punch.timestamp);
+      if (Number.isNaN(punchedAt.getTime())) {
+        skipped.push({ employeeCode: code, reason: 'invalid timestamp' });
+        continue;
+      }
+
+      const monthKey = `${MONTH_NAME_LIST[punchedAt.getMonth()]} ${punchedAt.getFullYear()}`;
+      const day = punchedAt.getDate();
+      const dedupeKey = `${code}|${monthKey}|${day}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      const employee = await this.employeeModel
+        .findOne({ employeeCode: code })
+        .select({ id: 1, employeeCode: 1, location: 1 })
+        .lean()
+        .exec();
+
+      if (!employee) {
+        skipped.push({ employeeCode: code, reason: 'employee not found' });
+        continue;
+      }
+
+      await this.upsertCell({
+        employeeId: employee.id,
+        employeeCode: employee.employeeCode,
+        monthKey,
+        day,
+        status: 'P',
+        location: employee.location || '',
+        markedBy: 'ESSL-Sync',
+      });
+      count++;
+    }
+
+    return { count, skipped };
+  }
+
+  async getFinancialYearsWithData(): Promise<string[]> {
+    const years = new Set<string>();
+
+    const attendanceMonths = await this.attendanceModel.distinct('monthKey').exec();
+    for (const monthKey of attendanceMonths) {
+      const fy = monthKeyToFYRange(String(monthKey));
+      if (fy) years.add(fy);
+    }
+
+    const employees = await this.employeeModel
+      .find({}, { monthlyLedger: 1 })
+      .lean()
+      .exec();
+    for (const employee of employees) {
+      const ledger = employee.monthlyLedger as Record<string, unknown> | undefined;
+      for (const monthKey of Object.keys(ledger || {})) {
+        const fy = monthKeyToFYRange(monthKey);
+        if (fy) years.add(fy);
+      }
+    }
+
+    const bulkExports = await this.bulkPayExportModel
+      .find({}, { month: 1, year: 1 })
+      .lean()
+      .exec();
+    for (const item of bulkExports) {
+      const fy = monthKeyToFYRange(`${item.month} ${item.year}`);
+      if (fy) years.add(fy);
+    }
+
+    const billings = await this.schoolBillingModel
+      .find({}, { monthKey: 1, financialYear: 1 })
+      .lean()
+      .exec();
+    for (const billing of billings) {
+      const fy =
+        normalizeFYRange(String(billing.financialYear || '')) ||
+        monthKeyToFYRange(String(billing.monthKey || ''));
+      if (fy) years.add(fy);
+    }
+
+    return Array.from(years).sort(
+      (a, b) => parseInt(a.split('-')[0], 10) - parseInt(b.split('-')[0], 10),
+    );
   }
 }

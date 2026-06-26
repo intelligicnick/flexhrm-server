@@ -90,6 +90,58 @@ import {
   ExtensionConnectionCode,
   ExtensionConnectionCodeSchema,
 } from './schemas/extension-connection-code.schema';
+import { MonitorSettings, MonitorSettingsSchema } from './schemas/monitor-settings.schema';
+import { MonitorProfile, MonitorProfileSchema } from './schemas/monitor-profile.schema';
+import {
+  MonitorEmployeeCredential,
+  MonitorEmployeeCredentialSchema,
+} from './schemas/monitor-employee-credential.schema';
+import {
+  DeviceAgent,
+  DeviceAgentSchema,
+  EmployeeDevice,
+  EmployeeDeviceSchema,
+  DeviceHeartbeat,
+  DeviceHeartbeatSchema,
+  MonitorCommand,
+  MonitorCommandSchema,
+} from './schemas/monitor-device.schema';
+import {
+  ActivityLog,
+  ActivityLogSchema,
+  IdleLog,
+  IdleLogSchema,
+  ApplicationLog,
+  ApplicationLogSchema,
+  WebsiteLog,
+  WebsiteLogSchema,
+  ProductivityLog,
+  ProductivityLogSchema,
+  ScreenshotLog,
+  ScreenshotLogSchema,
+  UsbLog,
+  UsbLogSchema,
+  PrinterLog,
+  PrinterLogSchema,
+  AttendanceSyncLog,
+  AttendanceSyncLogSchema,
+  BrowserHistory,
+  BrowserHistorySchema,
+  BreakLog,
+  BreakLogSchema,
+  KeyboardSequenceLog,
+  KeyboardSequenceLogSchema,
+  FileActivityLog,
+  FileActivityLogSchema,
+} from './schemas/monitor-logs.schema';
+import {
+  MonitorAlert,
+  MonitorAlertSchema,
+  EmployeeScore,
+  EmployeeScoreSchema,
+  MonitorConsentLog,
+  MonitorConsentLogSchema,
+} from './schemas/monitor-alerts.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -135,6 +187,29 @@ const MODELS = [
   { name: CaptureActivityLog.name, schema: CaptureActivityLogSchema },
   { name: ExtensionApiSettings.name, schema: ExtensionApiSettingsSchema },
   { name: ExtensionConnectionCode.name, schema: ExtensionConnectionCodeSchema },
+  { name: MonitorSettings.name, schema: MonitorSettingsSchema },
+  { name: MonitorProfile.name, schema: MonitorProfileSchema },
+  { name: MonitorEmployeeCredential.name, schema: MonitorEmployeeCredentialSchema },
+  { name: DeviceAgent.name, schema: DeviceAgentSchema },
+  { name: EmployeeDevice.name, schema: EmployeeDeviceSchema },
+  { name: DeviceHeartbeat.name, schema: DeviceHeartbeatSchema },
+  { name: MonitorCommand.name, schema: MonitorCommandSchema },
+  { name: ActivityLog.name, schema: ActivityLogSchema },
+  { name: IdleLog.name, schema: IdleLogSchema },
+  { name: ApplicationLog.name, schema: ApplicationLogSchema },
+  { name: WebsiteLog.name, schema: WebsiteLogSchema },
+  { name: ProductivityLog.name, schema: ProductivityLogSchema },
+  { name: ScreenshotLog.name, schema: ScreenshotLogSchema },
+  { name: UsbLog.name, schema: UsbLogSchema },
+  { name: PrinterLog.name, schema: PrinterLogSchema },
+  { name: AttendanceSyncLog.name, schema: AttendanceSyncLogSchema },
+  { name: BrowserHistory.name, schema: BrowserHistorySchema },
+  { name: BreakLog.name, schema: BreakLogSchema },
+  { name: KeyboardSequenceLog.name, schema: KeyboardSequenceLogSchema },
+  { name: FileActivityLog.name, schema: FileActivityLogSchema },
+  { name: MonitorAlert.name, schema: MonitorAlertSchema },
+  { name: EmployeeScore.name, schema: EmployeeScoreSchema },
+  { name: MonitorConsentLog.name, schema: MonitorConsentLogSchema },
 ];
 
 @Module({

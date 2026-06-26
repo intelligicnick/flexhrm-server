@@ -169,6 +169,36 @@ export class ContractsService {
     return doc ? this.toPlain(doc) : null;
   }
 
+  async findExistingContractKeys(contractKeys: string[]): Promise<string[]> {
+    const trimmed = contractKeys.map((k) => k.trim()).filter(Boolean);
+    if (!trimmed.length) return [];
+
+    const docs = await this.contractModel
+      .find({
+        $or: [
+          { contractNo: { $in: trimmed } },
+          { gemContractPdfUrl: { $in: trimmed } },
+        ],
+      })
+      .select('contractNo gemContractPdfUrl')
+      .exec();
+
+    const lookup = new Set(trimmed.map((k) => k.toUpperCase()));
+    const matched = new Set<string>();
+    for (const doc of docs) {
+      const contractNo = String(doc.contractNo || '').trim();
+      const pdfUrl = String(doc.gemContractPdfUrl || '').trim();
+      if (contractNo && lookup.has(contractNo.toUpperCase())) {
+        matched.add(contractNo.toUpperCase());
+      }
+      if (pdfUrl && lookup.has(pdfUrl.toUpperCase())) {
+        matched.add(pdfUrl.toUpperCase());
+      }
+    }
+
+    return trimmed.filter((k) => matched.has(k.toUpperCase()));
+  }
+
   async create(dto: CreateContractDto): Promise<Record<string, unknown>> {
     const contractNo = dto.contractNo.trim();
     if (!contractNo) {

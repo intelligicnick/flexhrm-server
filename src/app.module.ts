@@ -38,6 +38,7 @@ import { SmartCaptureModule } from './modules/smart-capture/smart-capture.module
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ImageKitModule } from './modules/imagekit/imagekit.module';
 import { MediaStorageModule } from './common/storage/media-storage.module';
+import { EmployeeMonitorModule } from './modules/employee-monitor/employee-monitor.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { MediaStorageModule } from './common/storage/media-storage.module';
     BgDdModule,
     SmartCaptureModule,
     PayrollModule,
+    EmployeeMonitorModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

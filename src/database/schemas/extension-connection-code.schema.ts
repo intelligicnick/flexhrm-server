@@ -23,7 +23,7 @@ export class ExtensionConnectionCode {
   @Prop({ required: true })
   flexhrmUrl!: string;
 
-  @Prop({ required: true, index: true })
+  @Prop({ required: true })
   expiresAt!: Date;
 
   @Prop({ default: false })
