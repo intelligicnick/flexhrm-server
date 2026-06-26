@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Admin, AdminDocument } from '../../database/schemas/admin.schema';
+import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
 
 @Injectable()
 export class AdminsService {
@@ -9,20 +10,60 @@ export class AdminsService {
     @InjectModel(Admin.name) private readonly adminModel: Model<AdminDocument>,
   ) {}
 
+  private usernameRegex(username: string): RegExp {
+    return new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  }
+
+  /** Match tenant-scoped admins; legacy rows without tenantId count as default. */
+  private withTenantScope(
+    base: Record<string, unknown>,
+    tenantId?: string,
+  ): Record<string, unknown> {
+    if (!tenantId) return base;
+    if (tenantId === DEFAULT_TENANT_ID) {
+      return {
+        ...base,
+        $or: [
+          { tenantId: DEFAULT_TENANT_ID },
+          { tenantId: { $exists: false } },
+          { tenantId: null },
+          { tenantId: '' },
+        ],
+      };
+    }
+    return { ...base, tenantId };
+  }
+
   async findAllSafe(): Promise<Omit<Admin, 'password'>[]> {
     const admins = await this.adminModel.find().lean().exec();
     return admins.map(({ password: _p, ...rest }) => rest);
   }
 
   async findByUsername(username: string, tenantId?: string): Promise<AdminDocument | null> {
-    const query: Record<string, unknown> = {
-      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-    };
-    if (tenantId) query.tenantId = tenantId;
+    const query = this.withTenantScope(
+      { username: { $regex: this.usernameRegex(username) } },
+      tenantId,
+    );
     return this.adminModel
       .findOne(query)
       .select('+password +passwordResetToken')
       .exec();
+  }
+
+  /** Resolve admin for password recovery — prefers request tenant, falls back globally. */
+  async findForPasswordReset(
+    identifier: string,
+    preferredTenantId?: string,
+  ): Promise<AdminDocument | null> {
+    const trimmed = identifier.trim();
+    if (trimmed.includes('@')) {
+      return this.findByEmail(trimmed);
+    }
+    if (preferredTenantId) {
+      const scoped = await this.findByUsername(trimmed, preferredTenantId);
+      if (scoped) return scoped;
+    }
+    return this.findByUsername(trimmed);
   }
 
   async findByEmail(email: string): Promise<AdminDocument | null> {
@@ -33,11 +74,7 @@ export class AdminsService {
   }
 
   async findByUsernameOrEmail(identifier: string, tenantId?: string): Promise<AdminDocument | null> {
-    const trimmed = identifier.trim();
-    if (trimmed.includes('@')) {
-      return this.findByEmail(trimmed);
-    }
-    return this.findByUsername(trimmed, tenantId);
+    return this.findForPasswordReset(identifier, tenantId);
   }
 
   async findProfile(username: string): Promise<Omit<Admin, 'password'> | null> {
@@ -63,10 +100,10 @@ export class AdminsService {
   }
 
   async update(username: string, patch: Partial<Admin>, tenantId?: string): Promise<AdminDocument | null> {
-    const query: Record<string, unknown> = {
-      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-    };
-    if (tenantId) query.tenantId = tenantId;
+    const query = this.withTenantScope(
+      { username: { $regex: this.usernameRegex(username) } },
+      tenantId,
+    );
     return this.adminModel
       .findOneAndUpdate(
         query,
@@ -95,10 +132,10 @@ export class AdminsService {
   }
 
   async clearPasswordReset(username: string, tenantId?: string): Promise<void> {
-    const query: Record<string, unknown> = {
-      username: { $regex: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-    };
-    if (tenantId) query.tenantId = tenantId;
+    const query = this.withTenantScope(
+      { username: { $regex: this.usernameRegex(username) } },
+      tenantId,
+    );
     await this.adminModel
       .findOneAndUpdate(
         query,

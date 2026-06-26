@@ -20,12 +20,11 @@ export class PlatformSeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.seedDefaultTenant();
-
     const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
     if (!seedOnStartup) return;
 
     await this.seedPlans();
+    await this.seedDefaultTenant();
     await this.seedPlatformAdmin();
   }
 

@@ -233,9 +233,7 @@ curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | pyt
 |---------|----------------|
 | Health returns `ready: false` | `MONGODB_URI` in hPanel; MongoDB Atlas → Network Access → allow `0.0.0.0/0` (or Hostinger egress IPs) |
 | `smtpConfigured: false` | All of `SMTP_USER`, `SMTP_PASS`, and (`SMTP_SERVICE` or `SMTP_HOST`) set in hPanel; redeploy after saving |
-| `smtpConfigured: true` but emails fail | Run `curl -s 'https://YOUR-BACKEND/api/health?verifySmtp=true'` — check `"smtp":{"ok":true}`. If `"ok":false`, fix credentials (Gmail needs App Password, not account password) |
-| Forgot-password stays on step 1 (no OTP fields) | Usually no admin account in MongoDB — redeploy backend; it auto-creates `admin` on first boot when DB is empty. Then try forgot-password again |
-| Forgot-password shows code on screen, no email | `smtpConfigured` is false, or SMTP verify failed — try Hostinger/Brevo SMTP; check spam folder |
+| Forgot-password shows code on screen, no email | `smtpConfigured` is false, or Gmail blocked — try Hostinger/Brevo SMTP; check spam folder |
 | CORS errors in browser | `CORS_ORIGINS` must exactly match frontend URL (https, no trailing slash) |
 | Build fails on Hostinger | Check deploy logs in hPanel; run `npm run build` locally to reproduce |
 | Data missing after redeploy | MongoDB data lives in Atlas — not on Hostinger disk. Disk under `backend/data/` is ephemeral. |
@@ -261,8 +259,7 @@ In hPanel, open your Node.js app → **Logs** / **Deployments** and look for:
 - [ ] `CORS_ORIGINS` = frontend Hostinger URL  
 - [ ] `curl .../api/health` → `"status": "healthy"`, `"ready": true`  
 - [ ] SMTP vars set → `"smtpConfigured": true`  
-- [ ] `curl '.../api/health?verifySmtp=true'` → `"smtp": {"ok": true}`  
-- [ ] Forgot-password shows Reset Password form (OTP + new password fields) after Send Reset Code  
+- [ ] Forgot-password email received (check spam)  
 - [ ] `DEFAULT_ADMIN_PASSWORD` changed from default on production DB  
 
 ---

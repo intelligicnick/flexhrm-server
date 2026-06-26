@@ -182,10 +182,7 @@ export class AuthController {
   async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     const identifier = dto.username.trim();
     const reqTenantId = req.tenantId ?? 'default';
-    let admin = await this.adminsService.findByUsernameOrEmail(identifier, reqTenantId);
-    if (!admin && !identifier.includes('@')) {
-      admin = await this.adminsService.findByUsername(identifier);
-    }
+    const admin = await this.adminsService.findForPasswordReset(identifier, reqTenantId);
 
     if (!admin || admin.disabled) {
       return {
@@ -262,9 +259,7 @@ export class AuthController {
     const passwordError = validatePasswordStrength(dto.newPassword);
     if (passwordError) throw new BadRequestException(passwordError);
 
-    const admin =
-      (await this.adminsService.findByUsername(username, reqTenantId)) ??
-      (await this.adminsService.findByUsername(username));
+    const admin = await this.adminsService.findByUsername(username, reqTenantId);
     const tokenTrimmed = dto.resetToken.trim();
     if (!admin) {
       throw new BadRequestException('Invalid reset code or username.');

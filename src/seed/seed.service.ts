@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DEFAULT_ROLES } from '../common/constants/permissions.constants';
+import { DEFAULT_TENANT_ID } from '../platform/common/platform.constants';
 import { hashPassword } from '../common/utils/password.util';
 import { AdminsService } from '../modules/admins/admins.service';
 import { RolesService } from '../modules/roles/roles.service';
@@ -23,23 +24,10 @@ export class SeedService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
-    const adminCount = await this.adminsService.count();
-    if (adminCount === 0) {
-      const password = this.configService.get<string>('defaultAdminPassword') ?? 'admin123';
-      const companyEmail = this.configService.get<string>('companyEmail');
-      await this.adminsService.create({
-        username: 'admin',
-        password: hashPassword(password),
-        email: companyEmail || undefined,
-        invitedBy: 'System',
-        role: 'admin',
-        locations: [],
-        disabled: false,
-        createdAt: new Date().toISOString(),
-      });
-      this.logger.warn(
-        'Bootstrapped default admin (username: admin). Change password after first login.',
-      );
+    const adminCountBefore = await this.adminsService.count();
+
+    if (adminCountBefore === 0) {
+      await this.ensureDefaultAdmin();
     }
 
     if (!seedOnStartup) return;
@@ -51,6 +39,23 @@ export class SeedService implements OnModuleInit {
     }
 
     await this.syncMasterDataFromEmployees();
+  }
+
+  private async ensureDefaultAdmin(): Promise<void> {
+    const password = this.configService.get<string>('defaultAdminPassword') ?? 'admin123';
+    await this.adminsService.create({
+      tenantId: DEFAULT_TENANT_ID,
+      username: 'admin',
+      password: hashPassword(password),
+      invitedBy: 'System',
+      role: 'admin',
+      locations: [],
+      disabled: false,
+      createdAt: new Date().toISOString(),
+    });
+    this.logger.warn(
+      'Bootstrapped default admin (username: admin). Change password after first login.',
+    );
   }
 
   private async syncMasterDataFromEmployees(): Promise<void> {

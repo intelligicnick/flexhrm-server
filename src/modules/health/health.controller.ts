@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import * as fs from 'fs';
@@ -17,26 +17,19 @@ export class HealthController {
 
   @Public()
   @Get()
-  async check(@Query('verifySmtp') verifySmtp?: string) {
+  async check() {
     const ready = this.connection.readyState === 1;
     let employeeCount = 0;
     if (ready) {
       employeeCount = await this.employeesService.count();
     }
-    const smtpConfigured = this.emailService.isConfigured();
-    const payload: Record<string, unknown> = {
+    return {
       status: ready ? 'healthy' : 'degraded',
       storage: 'mongodb',
       ready,
       database: ready ? `${employeeCount} employees` : 'disconnected',
-      smtpConfigured,
+      smtpConfigured: this.emailService.isConfigured(),
     };
-    if (verifySmtp === 'true' || verifySmtp === '1') {
-      payload.smtp = smtpConfigured
-        ? await this.emailService.verifyConnection()
-        : { ok: false, error: 'SMTP not configured' };
-    }
-    return payload;
   }
 
   /** Dev-only debug ingest for extension runtime evidence. */
