@@ -16,6 +16,8 @@ Repository: https://github.com/intelligicnick/flexhrm-server
 
 ## 403 Forbidden — fix this first
 
+**Pushing to GitHub does not start the API on Hostinger.** A 403 means the site is a static/empty website instead of a running **Node.js Web App**, or the last deploy never published files.
+
 If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) shows **403 Forbidden**, the app is **not deployed as a Node.js Web App** or the deployment never published files.
 
 | Symptom | Likely cause |
