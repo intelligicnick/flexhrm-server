@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-hostinger-entry.cjs",
+    "verify:hostinger": "node scripts/verify-hostinger-dist.mjs",
     "start": "node dist/server.js",
     "dev": "nest start --watch",
     "start:dev": "nest start --watch",
