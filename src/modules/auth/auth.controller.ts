@@ -46,6 +46,7 @@ import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateD
 import { CaptchaService } from './captcha.service';
 import { CsrfService } from '../../platform/common/csrf.service';
 import { CSRF_COOKIE_NAME } from '../../platform/common/platform-metadata.constants';
+import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
 
 @Controller('auth')
 export class AuthController {
@@ -156,6 +157,7 @@ export class AuthController {
         locations: admin.locations || [],
         permissions: roleConfig.permissions,
         uiRestrictions: roleConfig.uiRestrictions,
+        tenantId,
         csrfToken,
         ...(isObserverClient ? { token } : {}),
       };
@@ -648,6 +650,7 @@ export class AuthController {
       locations: user.locations,
       permissions: roleConfig.permissions,
       uiRestrictions: roleConfig.uiRestrictions,
+      tenantId: user.tenantId ?? DEFAULT_TENANT_ID,
       csrfToken,
     };
   }

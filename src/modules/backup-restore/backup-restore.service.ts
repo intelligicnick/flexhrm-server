@@ -12,10 +12,16 @@ import {
   getBackupModuleCategory,
   getBackupModuleLabel,
 } from '../../common/constants/backup.constants';
+import { getCurrentTenantId } from '../../platform/common/tenant-context.store';
+import {
+  DEFAULT_TENANT_ID,
+  TENANT_SCOPED_COLLECTIONS,
+} from '../../platform/common/platform.constants';
 
 const BACKUP_VERSION = '1.0';
 const META_KEY = 'last_backup';
 const RESTORE_SKIP_COLLECTIONS = new Set(['sessions']);
+const TENANT_SCOPED_SET = new Set<string>(TENANT_SCOPED_COLLECTIONS);
 const DATE_FIELD_CANDIDATES = [
   'createdAt',
   'updatedAt',
@@ -95,6 +101,19 @@ export class BackupRestoreService {
     await this.getDb()
       .collection('app_meta')
       .updateOne({ metaKey }, { $set: { metaKey, metaValue } }, { upsert: true });
+  }
+
+  private resolveRestoreTenantId(): string {
+    return getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
+  }
+
+  private stampTenantOnDocuments(
+    collectionName: string,
+    documents: Record<string, unknown>[],
+    tenantId: string,
+  ): Record<string, unknown>[] {
+    if (!TENANT_SCOPED_SET.has(collectionName)) return documents;
+    return documents.map((doc) => ({ ...doc, tenantId }));
   }
 
   private async listUserCollections(): Promise<string[]> {
@@ -346,6 +365,7 @@ export class BackupRestoreService {
     const db = this.getDb();
     const restoredCollections: string[] = [];
     let restoredDocuments = 0;
+    const targetTenantId = this.resolveRestoreTenantId();
 
     for (const [collectionName, documents] of Object.entries(payload.collections)) {
       if (!Array.isArray(documents)) {
@@ -363,7 +383,12 @@ export class BackupRestoreService {
       const collection = db.collection(collectionName);
       await collection.deleteMany({});
       if (documents.length > 0) {
-        await collection.insertMany(documents as Record<string, unknown>[], { ordered: false });
+        const stamped = this.stampTenantOnDocuments(
+          collectionName,
+          documents as Record<string, unknown>[],
+          targetTenantId,
+        );
+        await collection.insertMany(stamped, { ordered: false });
       }
       restoredCollections.push(collectionName);
       restoredDocuments += documents.length;
