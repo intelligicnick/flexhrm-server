@@ -64,6 +64,7 @@ import {
 } from '../../database/schemas/attendance-record.schema';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { generateToken, hashPassword, verifyPassword } from '../../common/utils/password.util';
+import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
 import {
   AgentHeartbeatDto,
   AgentIngestDto,
@@ -111,20 +112,39 @@ export class AgentService {
   ) {}
 
   private async getSettings(): Promise<MonitorSettingsDocument> {
-    let settings = await this.settingsModel.findOne({ id: 'default' }).exec();
-    if (!settings) {
-      settings = await this.settingsModel.create({
-        id: 'default',
-        plan: 'enterprise',
-        features: planFeatures('enterprise'),
-        classification: {
-          productive: ['excel', 'word', 'outlook', 'teams', 'vscode', 'crm', 'erp'],
-          neutral: ['chrome', 'edge', 'firefox', 'google'],
-          unproductive: ['facebook', 'instagram', 'steam', 'spotify'],
-        },
-      });
-    }
-    return settings;
+    return runWithoutTenantScope(async () => {
+      const existing = await this.settingsModel.findOne({ id: 'default' }).exec();
+      if (existing) return existing;
+
+      try {
+        const created = await this.settingsModel.findOneAndUpdate(
+          { id: 'default' },
+          {
+            $setOnInsert: {
+              id: 'default',
+              plan: 'enterprise',
+              features: planFeatures('enterprise'),
+              classification: {
+                productive: ['excel', 'word', 'outlook', 'teams', 'vscode', 'crm', 'erp'],
+                neutral: ['chrome', 'edge', 'firefox', 'google'],
+                unproductive: ['facebook', 'instagram', 'steam', 'spotify'],
+              },
+              enabled: true,
+              consentRequired: true,
+            },
+          },
+          { upsert: true, new: true },
+        ).exec();
+        if (created) return created;
+      } catch (err) {
+        const code = (err as { code?: number })?.code;
+        if (code !== 11000) throw err;
+      }
+
+      const fallback = await this.settingsModel.findOne({ id: 'default' }).exec();
+      if (!fallback) throw new NotFoundException('Monitor settings not found.');
+      return fallback;
+    });
   }
 
   private async resolveEmployeeCredential(
@@ -132,10 +152,12 @@ export class AgentService {
     monitorHash?: string,
   ): Promise<MonitorEmployeeCredentialDocument | null> {
     if (!monitorHash?.trim()) return null;
-    const creds = await this.credentialModel
-      .find({ status: 'active' })
-      .select('+keyHash +secretHash')
-      .exec();
+    const creds = await runWithoutTenantScope(() =>
+      this.credentialModel
+        .find({ status: 'active' })
+        .select('+keyHash +secretHash')
+        .exec(),
+    );
     for (const cred of creds) {
       if (verifyPassword(companyKey, cred.keyHash) && verifyPassword(monitorHash, cred.secretHash)) {
         return cred;

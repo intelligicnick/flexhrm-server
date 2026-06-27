@@ -192,4 +192,5 @@ export const TENANT_SCOPED_COLLECTIONS = [
   'automation_workflows',
   'monitor_employee_credentials',
   'device_agents',
+  'monitor_settings',
 ] as const;

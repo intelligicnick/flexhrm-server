@@ -66,7 +66,7 @@ const PLATFORM_MODELS = [
     PlatformAdminGuard,
     { provide: APP_GUARD, useClass: PlatformAdminGuard },
   ],
-  exports: [TenantContextService, MongooseModule],
+  exports: [TenantContextService, MongooseModule, CsrfService],
 })
 export class PlatformModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

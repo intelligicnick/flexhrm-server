@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/auth.decorators';
+import { SkipCsrf } from '../../common/decorators/skip-csrf.decorator';
 import { AgentService } from './agent.service';
 import {
   AgentHeartbeatDto,
@@ -23,6 +24,7 @@ import {
 import { AgentAuthGuard } from './guards/agent-auth.guard';
 import { DeviceAgentDocument } from '../../database/schemas/monitor-device.schema';
 
+@SkipCsrf()
 @Controller('monitor/agent')
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}

@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from './database/database.module';
 import { AuthGuard } from './common/guards/auth.guard';
+import { CsrfGuard } from './common/guards/csrf.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { SessionsModule } from './modules/sessions/sessions.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -115,8 +116,10 @@ import { SsoModule } from './modules/sso/sso.module';
     SsoModule,
   ],
   providers: [
+    CsrfGuard,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })

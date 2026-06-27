@@ -10,6 +10,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public, RequireAnyPermissions } from '../../common/decorators/auth.decorators';
+import { SkipCsrf } from '../../common/decorators/skip-csrf.decorator';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { SmartCaptureService } from './smart-capture.service';
 import { AiExtractionService } from './ai-extraction.service';
@@ -170,6 +171,7 @@ export class SmartCaptureController {
   }
 
   @Public()
+  @SkipCsrf()
   @Post('connect')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 900000 } })
