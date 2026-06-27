@@ -620,18 +620,35 @@ export class AuthController {
   }
 
   @Get('me')
-  async me(@CurrentUser() user: AdminSessionPayload) {
+  async me(
+    @CurrentUser() user: AdminSessionPayload,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (user.userType === 'supervisor') {
       throw new ForbiddenException('Use /auth/supervisor/me for supervisor sessions.');
     }
     const roles = await this.rolesService.findAll();
     const roleConfig = resolveRoleConfig(user.role, roles);
+    const isProduction = this.configService.get<string>('nodeEnv') === 'production';
+    let csrfToken = (req.cookies?.[CSRF_COOKIE_NAME] as string | undefined)?.trim();
+    if (!csrfToken) {
+      csrfToken = this.csrfService.generateToken();
+      res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+        httpOnly: false,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: '/',
+        maxAge: SESSION_DURATION_MS,
+      });
+    }
     return {
       username: user.username,
       role: user.role,
       locations: user.locations,
       permissions: roleConfig.permissions,
       uiRestrictions: roleConfig.uiRestrictions,
+      csrfToken,
     };
   }
 
@@ -644,6 +661,12 @@ export class AuthController {
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     await this.sessionsService.destroySession(user.token);
     clearSessionCookie(res, isProduction);
+    res.clearCookie(CSRF_COOKIE_NAME, {
+      httpOnly: false,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+    });
     await this.auditLogsService.append({
       username: user.username,
       action: 'LOGOUT',

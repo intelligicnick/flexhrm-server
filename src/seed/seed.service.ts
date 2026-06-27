@@ -32,10 +32,9 @@ export class SeedService implements OnModuleInit {
 
     if (!seedOnStartup) return;
 
-    const roleCount = await this.rolesService.count();
-    if (roleCount === 0) {
-      await this.rolesService.replaceAll([...DEFAULT_ROLES]);
-      this.logger.log('Seeded default roles');
+    const seeded = await this.rolesService.ensureDefaults([...DEFAULT_ROLES]);
+    if (seeded > 0) {
+      this.logger.log(`Seeded ${seeded} default role(s)`);
     }
 
     await this.syncMasterDataFromEmployees();

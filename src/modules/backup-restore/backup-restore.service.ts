@@ -3,10 +3,8 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
-import { Model } from 'mongoose';
-import { AppMeta, AppMetaDocument } from '../../database/schemas/app-meta.schema';
 import { ExportBackupDto, BackupFilterOptions, RestoreBackupDto } from './dto/backup-restore.dto';
 import {
   BACKUP_MODULE_CATEGORY_LABELS,
@@ -78,8 +76,6 @@ export interface BackupPayload {
 export class BackupRestoreService {
   constructor(
     @InjectConnection() private readonly connection: Connection,
-    @InjectModel(AppMeta.name)
-    private readonly appMetaModel: Model<AppMetaDocument>,
   ) {}
 
   private getDb() {
@@ -88,6 +84,17 @@ export class BackupRestoreService {
       throw new ServiceUnavailableException('Database is not connected.');
     }
     return db;
+  }
+
+  /** app_meta keys are globally unique; use the raw driver to bypass tenant auto-filter. */
+  private async findAppMeta(metaKey: string) {
+    return this.getDb().collection('app_meta').findOne({ metaKey });
+  }
+
+  private async upsertAppMeta(metaKey: string, metaValue: string): Promise<void> {
+    await this.getDb()
+      .collection('app_meta')
+      .updateOne({ metaKey }, { $set: { metaKey, metaValue } }, { upsert: true });
   }
 
   private async listUserCollections(): Promise<string[]> {
@@ -124,10 +131,7 @@ export class BackupRestoreService {
       totalDocuments += count;
     }
 
-    const meta = await this.appMetaModel
-      .findOne({ metaKey: META_KEY })
-      .lean()
-      .exec();
+    const meta = await this.findAppMeta(META_KEY);
 
     const lastBackup = this.parseMetaValue<BackupSummary['lastBackup']>(meta?.metaValue);
 
@@ -318,20 +322,14 @@ export class BackupRestoreService {
     };
 
     const totalDocuments = Object.values(stats).reduce((sum, count) => sum + count, 0);
-    await this.appMetaModel.updateOne(
-      { metaKey: META_KEY },
-      {
-        $set: {
-          metaKey: META_KEY,
-          metaValue: this.stringifyMetaValue({
-            createdAt: payload.createdAt,
-            createdBy: payload.createdBy,
-            totalDocuments,
-            collectionCount: filteredNames.length,
-          }),
-        },
-      },
-      { upsert: true },
+    await this.upsertAppMeta(
+      META_KEY,
+      this.stringifyMetaValue({
+        createdAt: payload.createdAt,
+        createdBy: payload.createdBy,
+        totalDocuments,
+        collectionCount: filteredNames.length,
+      }),
     );
 
     return payload;
@@ -371,20 +369,14 @@ export class BackupRestoreService {
       restoredDocuments += documents.length;
     }
 
-    await this.appMetaModel.updateOne(
-      { metaKey: 'last_restore' },
-      {
-        $set: {
-          metaKey: 'last_restore',
-          metaValue: this.stringifyMetaValue({
-            restoredAt: new Date().toISOString(),
-            restoredBy: username || 'System',
-            restoredCollections,
-            restoredDocuments,
-          }),
-        },
-      },
-      { upsert: true },
+    await this.upsertAppMeta(
+      'last_restore',
+      this.stringifyMetaValue({
+        restoredAt: new Date().toISOString(),
+        restoredBy: username || 'System',
+        restoredCollections,
+        restoredDocuments,
+      }),
     );
 
     return { restoredCollections, restoredDocuments };
@@ -421,22 +413,16 @@ export class BackupRestoreService {
       clearedDocuments += deletedCount;
     }
 
-    await this.appMetaModel.updateOne(
-      { metaKey: 'last_full_clear' },
-      {
-        $set: {
-          metaKey: 'last_full_clear',
-          metaValue: this.stringifyMetaValue({
-            clearedAt: new Date().toISOString(),
-            clearedBy: username || 'System',
-            includeSessions,
-            modules: targetNames,
-            clearedCollections,
-            clearedDocuments,
-          }),
-        },
-      },
-      { upsert: true },
+    await this.upsertAppMeta(
+      'last_full_clear',
+      this.stringifyMetaValue({
+        clearedAt: new Date().toISOString(),
+        clearedBy: username || 'System',
+        includeSessions,
+        modules: targetNames,
+        clearedCollections,
+        clearedDocuments,
+      }),
     );
 
     return { clearedCollections, clearedDocuments };

@@ -237,7 +237,8 @@ curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | pyt
 | CORS errors in browser | `CORS_ORIGINS` must exactly match frontend URL (https, no trailing slash) |
 | Build fails on Hostinger | Check deploy logs in hPanel; run `npm run build` locally to reproduce |
 | Data missing after redeploy | MongoDB data lives in Atlas — not on Hostinger disk. Disk under `backend/data/` is ephemeral. |
-| 401 / session issues | Expected after redeploy if using in-memory sessions; users sign in again |
+| `E11000 duplicate key ... roles ... HR Assistant` | DB has legacy data or indexes from pre–multi-tenant schema. Redeploy latest backend (auto-fixes on startup). Or run `npm run migrate:tenant-indexes` against production MongoDB. Set `SEED_ON_STARTUP=false` after first successful deploy. |
+| `Duplicate schema index on expiresAt` | Harmless warning on older builds; fixed in latest backend. |
 
 ### Logs
 

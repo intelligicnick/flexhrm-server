@@ -99,10 +99,7 @@ export class RegistrationService {
       currentPeriodEnd: trialEndsAt,
     });
 
-    const roleCount = await this.rolesService.count(tenantId);
-    if (roleCount === 0) {
-      await this.rolesService.replaceAll([...DEFAULT_ROLES], tenantId);
-    }
+    await this.rolesService.ensureDefaults([...DEFAULT_ROLES], tenantId);
 
     void this.workflowService.seedDefaults(tenantId);
 

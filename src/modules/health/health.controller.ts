@@ -19,15 +19,24 @@ export class HealthController {
   @Get()
   async check() {
     const ready = this.connection.readyState === 1;
-    let employeeCount = 0;
+    const databaseName = ready ? this.connection.db?.databaseName ?? 'unknown' : 'disconnected';
+    let employeesDefaultTenant = 0;
+    let employeesTotal = 0;
     if (ready) {
-      employeeCount = await this.employeesService.count();
+      employeesDefaultTenant = await this.employeesService.count();
+      const employeesCollection = this.connection.db?.collection('employees');
+      employeesTotal = employeesCollection
+        ? await employeesCollection.countDocuments({})
+        : 0;
     }
     return {
       status: ready ? 'healthy' : 'degraded',
       storage: 'mongodb',
       ready,
-      database: ready ? `${employeeCount} employees` : 'disconnected',
+      databaseName,
+      database: ready ? `${employeesDefaultTenant} employees (default tenant)` : 'disconnected',
+      employeesDefaultTenant,
+      employeesTotal,
       smtpConfigured: this.emailService.isConfigured(),
     };
   }

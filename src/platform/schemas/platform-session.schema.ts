@@ -11,7 +11,7 @@ export class PlatformSession {
   @Prop({ required: true, index: true })
   username!: string;
 
-  @Prop({ required: true, index: true })
+  @Prop({ required: true })
   expiresAt!: Date;
 }
 

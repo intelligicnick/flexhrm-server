@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import configuration from '../config/configuration';
+import { TenantIndexMigrationService } from './tenant-index-migration.service';
 import { Employee, EmployeeSchema } from './schemas/employee.schema';
 import { Admin, AdminSchema } from './schemas/admin.schema';
 import { Role, RoleSchema } from './schemas/role.schema';
@@ -276,6 +277,7 @@ for (const model of MODELS) {
     }),
     MongooseModule.forFeature(MODELS),
   ],
+  providers: [TenantIndexMigrationService],
   exports: [MongooseModule],
 })
 export class DatabaseModule {}
