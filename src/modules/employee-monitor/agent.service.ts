@@ -64,7 +64,8 @@ import {
 } from '../../database/schemas/attendance-record.schema';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { generateToken, hashPassword, verifyPassword } from '../../common/utils/password.util';
-import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
+import { runWithoutTenantScope, runWithTenantScope } from '../../platform/common/tenant-context.store';
+import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
 import {
   AgentHeartbeatDto,
   AgentIngestDto,
@@ -167,6 +168,10 @@ export class AgentService {
   }
 
   async register(dto: RegisterAgentDto) {
+    return runWithoutTenantScope(() => this.registerAgent(dto));
+  }
+
+  private async registerAgent(dto: RegisterAgentDto) {
     const settings = await this.getSettings();
     if (!settings.enabled) {
       throw new BadRequestException('Employee monitoring is disabled.');
@@ -186,11 +191,12 @@ export class AgentService {
       }
     }
 
-    let employee: { id: string; employeeCode: string; nameAsPerAadhar?: string } | null = null;
+    let employee: { id: string; employeeCode: string; nameAsPerAadhar?: string; tenantId?: string } | null =
+      null;
     if (matchedCredential) {
       employee = await this.employeeModel
         .findOne({ id: matchedCredential.employeeId })
-        .select({ id: 1, employeeCode: 1, nameAsPerAadhar: 1 })
+        .select({ id: 1, employeeCode: 1, nameAsPerAadhar: 1, tenantId: 1 })
         .lean()
         .exec();
       if (!employee) {
@@ -201,7 +207,7 @@ export class AgentService {
       if (employeeCode) {
         employee = await this.employeeModel
           .findOne({ employeeCode })
-          .select({ id: 1, employeeCode: 1, nameAsPerAadhar: 1 })
+          .select({ id: 1, employeeCode: 1, nameAsPerAadhar: 1, tenantId: 1 })
           .lean()
           .exec();
         if (!employee) {
@@ -209,6 +215,11 @@ export class AgentService {
         }
       }
     }
+
+    const agentTenantId =
+      matchedCredential?.tenantId?.trim() ||
+      employee?.tenantId?.trim() ||
+      DEFAULT_TENANT_ID;
 
     const existing = await this.deviceAgentModel.findOne({ deviceHash: dto.deviceHash }).exec();
     if (existing) {
@@ -223,6 +234,7 @@ export class AgentService {
         existing.employeeId = employee.id;
         existing.employeeCode = employee.employeeCode;
       }
+      existing.tenantId = agentTenantId;
       await existing.save();
       return this.buildAgentConfig(existing, token, settings, employee);
     }
@@ -230,6 +242,7 @@ export class AgentService {
     const token = generateToken();
     const agent = await this.deviceAgentModel.create({
       id: randomUUID(),
+      tenantId: agentTenantId,
       employeeId: employee?.id ?? '',
       employeeCode: employee?.employeeCode ?? '',
       deviceName: dto.deviceName,
@@ -335,6 +348,11 @@ export class AgentService {
   }
 
   async heartbeat(agent: DeviceAgentDocument, dto: AgentHeartbeatDto) {
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, () => this.heartbeatAgent(agent, dto));
+  }
+
+  private async heartbeatAgent(agent: DeviceAgentDocument, dto: AgentHeartbeatDto) {
     const now = new Date();
     agent.lastHeartbeatAt = now;
     agent.lastActivityAt = now;
@@ -361,6 +379,11 @@ export class AgentService {
   }
 
   async ingest(agent: DeviceAgentDocument, dto: AgentIngestDto) {
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, () => this.ingestAgent(agent, dto));
+  }
+
+  private async ingestAgent(agent: DeviceAgentDocument, dto: AgentIngestDto) {
     const settings = await this.getSettings();
     const date = toDateKey();
     const employeeId = agent.employeeId;
@@ -626,6 +649,11 @@ export class AgentService {
   }
 
   async uploadScreenshot(agent: DeviceAgentDocument, dto: ScreenshotUploadDto) {
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, () => this.uploadScreenshotAgent(agent, dto));
+  }
+
+  private async uploadScreenshotAgent(agent: DeviceAgentDocument, dto: ScreenshotUploadDto) {
     const settings = await this.getSettings();
     if (!settings.features?.screenshots && !planFeatures(settings.plan).screenshots) {
       throw new BadRequestException('Screenshots are not enabled for your plan.');
@@ -668,30 +696,44 @@ export class AgentService {
   }
 
   async getAgentConfig(agent: DeviceAgentDocument) {
-    const settings = await this.getSettings();
-    const commands = await this.getPendingCommands(agent.id);
-    return this.buildAgentConfig(agent, '', settings, undefined, commands);
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, async () => {
+      const settings = await this.getSettings();
+      const commands = await this.getPendingCommands(agent.id);
+      return this.buildAgentConfig(agent, '', settings, undefined, commands);
+    });
   }
 
-  async completeCommand(commandId: string, screenshotId?: string, failed = false) {
+  async completeCommand(
+    agent: DeviceAgentDocument,
+    commandId: string,
+    screenshotId?: string,
+    failed = false,
+  ) {
     if (!commandId) return { success: true };
-    await this.commandModel.findOneAndUpdate(
-      { id: commandId },
-      {
-        $set: {
-          status: failed ? 'failed' : 'completed',
-          screenshotId: screenshotId ?? '',
-          completedAt: new Date(),
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, async () => {
+      await this.commandModel.findOneAndUpdate(
+        { id: commandId },
+        {
+          $set: {
+            status: failed ? 'failed' : 'completed',
+            screenshotId: screenshotId ?? '',
+            completedAt: new Date(),
+          },
         },
-      },
-    ).exec();
-    return { success: true };
+      ).exec();
+      return { success: true };
+    });
   }
 
   async revokeSelf(agent: DeviceAgentDocument) {
-    agent.status = 'revoked';
-    await agent.save();
-    return { success: true };
+    const tenantId = agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+    return runWithTenantScope(tenantId, async () => {
+      agent.status = 'revoked';
+      await agent.save();
+      return { success: true };
+    });
   }
 
   private async createAlert(

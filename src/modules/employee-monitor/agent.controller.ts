@@ -87,9 +87,15 @@ export class AgentController {
   @Post('commands/:commandId/complete')
   @HttpCode(200)
   completeCommand(
+    @Req() req: { deviceAgent: DeviceAgentDocument },
     @Param('commandId') commandId: string,
     @Body() body: { failed?: boolean; screenshotId?: string },
   ) {
-    return this.agentService.completeCommand(commandId, body?.screenshotId, body?.failed);
+    return this.agentService.completeCommand(
+      req.deviceAgent,
+      commandId,
+      body?.screenshotId,
+      body?.failed,
+    );
   }
 }

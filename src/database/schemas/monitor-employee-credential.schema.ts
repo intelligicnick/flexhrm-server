@@ -31,6 +31,9 @@ export class MonitorEmployeeCredential {
 
   @Prop({ default: 0 })
   deviceCount!: number;
+
+  @Prop({ default: '', index: true })
+  tenantId!: string;
 }
 
 export const MonitorEmployeeCredentialSchema =

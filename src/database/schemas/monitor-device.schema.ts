@@ -11,6 +11,9 @@ export class DeviceAgent {
   id!: string;
 
   @Prop({ default: '', index: true })
+  tenantId!: string;
+
+  @Prop({ default: '', index: true })
   employeeId!: string;
 
   @Prop({ default: '', index: true })

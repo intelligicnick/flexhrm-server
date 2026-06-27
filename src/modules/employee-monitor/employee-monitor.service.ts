@@ -147,8 +147,9 @@ export class EmployeeMonitorService {
 
   private async resolveCredentialedEmployeeIds(session?: AdminSessionPayload): Promise<string[]> {
     const scoped = await this.resolveEmployeeIds(null, session);
+    const tenantId = this.resolveCredentialTenantId();
     const creds = await this.credentialModel
-      .find({ employeeId: { $in: scoped }, status: 'active' })
+      .find({ employeeId: { $in: scoped }, status: 'active', ...this.credentialScopeFilter(tenantId) })
       .select({ employeeId: 1 })
       .lean()
       .exec();

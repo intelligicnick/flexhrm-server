@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { DeviceAgent, DeviceAgentDocument } from '../../../database/schemas/monitor-device.schema';
 import { verifyPassword } from '../../../common/utils/password.util';
+import { runWithoutTenantScope } from '../../../platform/common/tenant-context.store';
 
 @Injectable()
 export class AgentAuthGuard implements CanActivate {
@@ -26,10 +27,12 @@ export class AgentAuthGuard implements CanActivate {
       throw new UnauthorizedException('Device authentication required.');
     }
 
-    const agent = await this.deviceAgentModel
-      .findOne({ deviceHash, status: { $in: ['active', 'pending'] } })
-      .select('+authTokenHash')
-      .exec();
+    const agent = await runWithoutTenantScope(() =>
+      this.deviceAgentModel
+        .findOne({ deviceHash, status: { $in: ['active', 'pending'] } })
+        .select('+authTokenHash')
+        .exec(),
+    );
 
     if (!agent || !verifyPassword(token, agent.authTokenHash)) {
       throw new UnauthorizedException('Invalid device credentials.');
