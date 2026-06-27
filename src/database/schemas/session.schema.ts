@@ -43,6 +43,10 @@ export class Session {
 
   @Prop({ type: Date, index: true })
   lastActiveAt?: Date;
+
+  /** Bound to browser x-csrf-token header for cookie-authenticated sessions. */
+  @Prop({ default: '' })
+  csrfToken!: string;
 }
 
 export const SessionSchema = SchemaFactory.createForClass(Session);

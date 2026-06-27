@@ -316,7 +316,7 @@ export class TenantsService {
     const admin = await this.adminsService.findByUsername(username, tenantId);
     if (!admin) throw new NotFoundException('Admin account not found');
 
-    const token = await this.sessionsService.createSession(
+    const { token } = await this.sessionsService.createSession(
       admin.username,
       admin.role || 'admin',
       admin.locations || [],

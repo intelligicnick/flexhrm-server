@@ -19,7 +19,6 @@ import { ConfigService } from '@nestjs/config';
 import { Public, RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUser, CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AdminSessionPayload, resolveRoleConfig } from '../../common/utils/permissions.util';
-import { SESSION_DURATION_MS } from '../../common/constants/permissions.constants';
 import { assertSupervisorRegisteredDevice } from '../../common/utils/supervisor-device.util';
 import {
   hashPassword,
@@ -33,6 +32,7 @@ import {
   clearSessionCookie,
   setSessionCookie,
 } from '../../common/utils/session-cookie.util';
+import { clearCsrfCookie, setCsrfCookie } from '../../common/utils/csrf-cookie.util';
 import { AdminsService } from '../admins/admins.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EmailService } from '../email/email.service';
@@ -44,8 +44,6 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateDto, SupervisorRegisterDeviceDto } from '../school-visits/dto/school-visit.dto';
 import { CaptchaService } from './captcha.service';
-import { CsrfService } from '../../platform/common/csrf.service';
-import { CSRF_COOKIE_NAME } from '../../platform/common/platform-metadata.constants';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
 
 @Controller('auth')
@@ -59,7 +57,6 @@ export class AuthController {
     private readonly emailService: EmailService,
     private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly captchaService: CaptchaService,
-    private readonly csrfService: CsrfService,
   ) {}
 
   @Public()
@@ -116,7 +113,7 @@ export class AuthController {
         });
       }
 
-      const token = await this.sessionsService.createSession(
+      const { token, csrfToken } = await this.sessionsService.createSession(
         admin.username,
         admin.role || 'admin',
         admin.locations || [],
@@ -124,14 +121,7 @@ export class AuthController {
         tenantId,
       );
       setSessionCookie(res, token, isProduction);
-      const csrfToken = this.csrfService.generateToken();
-      res.cookie(CSRF_COOKIE_NAME, csrfToken, {
-        httpOnly: false,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        path: '/',
-        maxAge: SESSION_DURATION_MS,
-      });
+      setCsrfCookie(res, csrfToken, isProduction);
 
       await this.auditLogsService.append({
         username: admin.username,
@@ -336,12 +326,13 @@ export class AuthController {
       );
     }
 
-    const token = await this.sessionsService.createSession(
+    const { token, csrfToken } = await this.sessionsService.createSession(
       defaultAdmin.username,
       defaultAdmin.role || 'admin',
       defaultAdmin.locations || [],
     );
     setSessionCookie(res, token, isProduction);
+    setCsrfCookie(res, csrfToken, isProduction);
 
     await this.auditLogsService.append({
       username: defaultAdmin.username,
@@ -360,6 +351,7 @@ export class AuthController {
       locations: defaultAdmin.locations || [],
       permissions: roleConfig.permissions,
       uiRestrictions: roleConfig.uiRestrictions,
+      csrfToken,
     };
   }
 
@@ -431,7 +423,7 @@ export class AuthController {
       ? (supervisor.assignedBlocks as string[])
       : [];
     const phone = String(login.phone || supervisor.phone || dto.phone);
-    const token = await this.sessionsService.createSupervisorSession({
+    const { token } = await this.sessionsService.createSupervisorSession({
       phone,
       employeeId: supervisorId,
       name: String(supervisor.name || phone),
@@ -530,7 +522,7 @@ export class AuthController {
     const phone = String(login?.phone || supervisor.phone || '');
     const name = String(supervisor.name || phone);
 
-    const token = await this.sessionsService.createSupervisorSession({
+    const { token } = await this.sessionsService.createSupervisorSession({
       phone,
       employeeId: String(supervisor.id),
       name,
@@ -633,16 +625,9 @@ export class AuthController {
     const roles = await this.rolesService.findAll();
     const roleConfig = resolveRoleConfig(user.role, roles);
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
-    let csrfToken = (req.cookies?.[CSRF_COOKIE_NAME] as string | undefined)?.trim();
-    if (!csrfToken) {
-      csrfToken = this.csrfService.generateToken();
-      res.cookie(CSRF_COOKIE_NAME, csrfToken, {
-        httpOnly: false,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        path: '/',
-        maxAge: SESSION_DURATION_MS,
-      });
+    const csrfToken = (await this.sessionsService.ensureCsrfToken(user.token)) ?? '';
+    if (csrfToken) {
+      setCsrfCookie(res, csrfToken, isProduction);
     }
     return {
       username: user.username,
@@ -664,12 +649,7 @@ export class AuthController {
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     await this.sessionsService.destroySession(user.token);
     clearSessionCookie(res, isProduction);
-    res.clearCookie(CSRF_COOKIE_NAME, {
-      httpOnly: false,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      path: '/',
-    });
+    clearCsrfCookie(res, isProduction);
     await this.auditLogsService.append({
       username: user.username,
       action: 'LOGOUT',

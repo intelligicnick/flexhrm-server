@@ -60,7 +60,7 @@ export class EmployeePortalService {
     emp.portalLogin.lastLoginAt = new Date();
     await emp.save();
 
-    const token = await this.sessionsService.createSession(
+    const { token } = await this.sessionsService.createSession(
       emp.employeeCode,
       'employee',
       [],

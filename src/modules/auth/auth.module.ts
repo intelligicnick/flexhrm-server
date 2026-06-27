@@ -7,11 +7,10 @@ import { SessionsModule } from '../sessions/sessions.module';
 import { SchoolSupervisorsModule } from '../school-supervisors/school-supervisors.module';
 import { AuthController } from './auth.controller';
 import { CaptchaService } from './captcha.service';
-import { CsrfService } from '../../platform/common/csrf.service';
 
 @Module({
   imports: [AdminsModule, SessionsModule, AuditLogsModule, RolesModule, EmailModule, SchoolSupervisorsModule],
   controllers: [AuthController],
-  providers: [CaptchaService, CsrfService],
+  providers: [CaptchaService],
 })
 export class AuthModule {}

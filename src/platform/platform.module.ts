@@ -9,6 +9,7 @@ import { PaymentTransaction, PaymentTransactionSchema } from './schemas/payment-
 import { PlatformAdmin, PlatformAdminSchema } from './schemas/platform-admin.schema';
 import { SupportTicket, SupportTicketSchema } from './schemas/support-ticket.schema';
 import { PlatformSession, PlatformSessionSchema } from './schemas/platform-session.schema';
+import { SessionsModule } from '../modules/sessions/sessions.module';
 import { TenantContextService } from './common/tenant-context.service';
 import { TenantMiddleware } from './common/tenant.middleware';
 import { CsrfMiddleware } from './common/csrf.middleware';
@@ -43,6 +44,7 @@ const PLATFORM_MODELS = [
 @Module({
   imports: [
     MongooseModule.forFeature(PLATFORM_MODELS),
+    SessionsModule,
     TenantsModule,
     RegistrationModule,
     PlatformAuthModule,

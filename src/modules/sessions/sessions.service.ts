@@ -11,6 +11,11 @@ import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { Session, SessionDocument } from '../../database/schemas/session.schema';
 import { SupervisorActivityService } from '../supervisor-activity/supervisor-activity.service';
 
+export interface SessionCredentials {
+  token: string;
+  csrfToken: string;
+}
+
 @Injectable()
 export class SessionsService {
   constructor(
@@ -29,8 +34,9 @@ export class SessionsService {
       impersonated?: boolean;
     },
     tenantId?: string,
-  ): Promise<string> {
+  ): Promise<SessionCredentials> {
     const token = generateToken();
+    const csrfToken = generateToken();
     const now = new Date();
     const sessionDurationMs =
       options?.userType === 'supervisor'
@@ -38,6 +44,7 @@ export class SessionsService {
         : SESSION_DURATION_MS;
     await this.sessionModel.create({
       token,
+      csrfToken,
       tenantId: tenantId?.trim() || 'default',
       username,
       role: role || 'admin',
@@ -59,7 +66,7 @@ export class SessionsService {
       void this.supervisorActivityService.startSessionOnLogin(options.employeeId, now);
     }
 
-    return token;
+    return { token, csrfToken };
   }
 
   /** Dedicated session for the browser extension — never reuses the user's login token. */
@@ -94,13 +101,40 @@ export class SessionsService {
     name: string;
     assignedBlocks: string[];
     impersonated?: boolean;
-  }): Promise<string> {
+  }): Promise<SessionCredentials> {
     return this.createSession(params.phone, 'supervisor', params.assignedBlocks, {
       userType: 'supervisor',
       employeeId: params.employeeId,
       assignedBlocks: params.assignedBlocks,
       impersonated: params.impersonated,
     });
+  }
+
+  async validateSessionCsrf(
+    sessionToken: string,
+    headerToken: string | undefined,
+  ): Promise<boolean> {
+    if (!sessionToken.trim() || !headerToken?.trim()) return false;
+    const session = await this.sessionModel
+      .findOne({ token: sessionToken.trim(), expiresAt: { $gt: new Date() } })
+      .select('csrfToken')
+      .lean()
+      .exec();
+    const stored = session?.csrfToken?.trim();
+    if (!stored) return false;
+    return stored === headerToken.trim();
+  }
+
+  async ensureCsrfToken(sessionToken: string): Promise<string | null> {
+    const session = await this.sessionModel
+      .findOne({ token: sessionToken.trim(), expiresAt: { $gt: new Date() } })
+      .exec();
+    if (!session) return null;
+    if (session.csrfToken?.trim()) return session.csrfToken.trim();
+    const csrfToken = generateToken();
+    session.csrfToken = csrfToken;
+    await session.save();
+    return csrfToken;
   }
 
   async validateToken(token: string): Promise<AdminSessionPayload | null> {

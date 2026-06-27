@@ -24,6 +24,7 @@ import {
 } from '../../../common/utils/password.util';
 import { CsrfService } from '../../common/csrf.service';
 import { CSRF_COOKIE_NAME } from '../../common/platform-metadata.constants';
+import { setCsrfCookie } from '../../../common/utils/csrf-cookie.util';
 import { PlatformSessionService } from '../../services/platform-session.service';
 
 const PLATFORM_SESSION_COOKIE = 'flexhrm_platform_session';
@@ -43,13 +44,7 @@ export class PlatformAuthController {
   getCsrf(@Res({ passthrough: true }) res: Response) {
     const token = this.csrfService.generateToken();
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
-    res.cookie(CSRF_COOKIE_NAME, token, {
-      httpOnly: false,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+    setCsrfCookie(res, token, isProduction);
     return { csrfToken: token };
   }
 
@@ -91,10 +86,14 @@ export class PlatformAuthController {
       maxAge: 8 * 60 * 60 * 1000,
     });
 
+    const csrfToken = this.csrfService.generateToken();
+    setCsrfCookie(res, csrfToken, isProduction);
+
     return {
       username: admin.username,
       name: admin.name,
       email: admin.email,
+      csrfToken,
     };
   }
 
@@ -117,7 +116,7 @@ export class PlatformAuthController {
 
   @Public()
   @Get('me')
-  async me(@Req() req: Request) {
+  async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const token = req.cookies?.[PLATFORM_SESSION_COOKIE];
     if (!token) throw new UnauthorizedException('Not authenticated');
 
@@ -129,11 +128,19 @@ export class PlatformAuthController {
       .lean();
     if (!admin) throw new UnauthorizedException('Not authenticated');
 
+    const isProduction = this.configService.get<string>('nodeEnv') === 'production';
+    let csrfToken = (req.cookies?.[CSRF_COOKIE_NAME] as string | undefined)?.trim();
+    if (!csrfToken) {
+      csrfToken = this.csrfService.generateToken();
+      setCsrfCookie(res, csrfToken, isProduction);
+    }
+
     return {
       username: admin.username,
       name: admin.name,
       email: admin.email,
       isPlatformAdmin: true,
+      csrfToken,
     };
   }
 
