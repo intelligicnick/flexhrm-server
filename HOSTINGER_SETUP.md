@@ -14,7 +14,35 @@ Repository: https://github.com/intelligicnick/flexhrm-server
 
 ---
 
-## 503 Service Unavailable — fix this first
+## 403 Forbidden — fix this first
+
+If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) shows **403 Forbidden**, the app is **not deployed as a Node.js Web App** or the deployment never published files.
+
+| Symptom | Likely cause |
+|---------|----------------|
+| **403** on `/` and `/api/health` | Site created as a **Website** (static/PHP) instead of **Node.js Web App**; or Git deploy output directory is wrong |
+| **503** | Node.js app exists but process is **not running** (crash, missing env, failed build) |
+| **502** | App crashed after start — check Logs |
+
+### Fix 403 on the API app (midnightblue)
+
+1. **hPanel → Websites** — open the **midnightblue-partridge-476451** site.
+2. Confirm the site type is **Node.js Web App** (not “Website” / static hosting). If it is static-only, create a new **Node.js Web App** and connect the `flexhrm-server` GitHub repo.
+3. **Build command:** `npm install && npm run build`  
+   **Start command:** `node dist/server.js`  
+   **Entry / output file:** `dist/server.js`
+4. Add required env vars (see section 2), **Save**, then **Redeploy**.
+5. Verify:
+
+   ```bash
+   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health
+   ```
+
+If the **frontend** (greenyellow) also shows 403, that is a separate static site — see [flexhrm-client HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-client/blob/main/HOSTINGER_SETUP.md).
+
+---
+
+## 503 Service Unavailable
 
 If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the Node.js process is **not running**. Pushing code to GitHub does not restart the app — you must fix the Hostinger deployment.
 
