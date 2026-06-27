@@ -14,6 +14,7 @@ const LEGACY_GLOBAL_INDEXES: Array<{ collection: string; indexes: string[] }> = 
   { collection: 'payroll_ledger', indexes: ['employeeId_1_monthKey_1'] },
   { collection: 'job_roles', indexes: ['name_1'] },
   { collection: 'school_works', indexes: ['id_1'] },
+  { collection: 'monitor_employee_credentials', indexes: ['employeeId_1'] },
 ];
 
 @Injectable()

@@ -190,4 +190,6 @@ export const TENANT_SCOPED_COLLECTIONS = [
   'payroll_runs',
   'payslips',
   'automation_workflows',
+  'monitor_employee_credentials',
+  'device_agents',
 ] as const;

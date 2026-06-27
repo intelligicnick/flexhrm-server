@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'crypto';
+import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
+import { getCurrentTenantId } from '../../platform/common/tenant-context.store';
 import {
   DeviceAgent,
   DeviceAgentDocument,
@@ -96,6 +98,25 @@ export class EmployeeMonitorService {
     return this.resolveEmployeeIds(employeeIds, session);
   }
 
+  /** Matches current tenant plus legacy default-tenant rows (bypasses auto tenant filter via $or). */
+  private credentialScopeFilter(tenantId: string): Record<string, unknown> {
+    if (tenantId !== DEFAULT_TENANT_ID) {
+      return { tenantId };
+    }
+    return {
+      $or: [
+        { tenantId: DEFAULT_TENANT_ID },
+        { tenantId: { $exists: false } },
+        { tenantId: null },
+        { tenantId: '' },
+      ],
+    };
+  }
+
+  private resolveCredentialTenantId(): string {
+    return getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
+  }
+
   private async resolveEmployeeIds(
     filterIds: string[] | null,
     session?: AdminSessionPayload,
@@ -161,7 +182,11 @@ export class EmployeeMonitorService {
       .exec();
 
     const creds = await this.credentialModel
-      .find({ employeeId: { $in: employees.map((e) => e.id) }, status: 'active' })
+      .find({
+        employeeId: { $in: employees.map((e) => e.id).filter(Boolean) },
+        status: 'active',
+        ...this.credentialScopeFilter(this.resolveCredentialTenantId()),
+      })
       .lean()
       .exec();
     const credMap = new Map(creds.map((c) => [c.employeeId, c]));
@@ -179,8 +204,13 @@ export class EmployeeMonitorService {
 
   async listEmployeeCredentials(session?: AdminSessionPayload) {
     const employeeIds = await this.resolveEmployeeIds(null, session);
+    const tenantId = this.resolveCredentialTenantId();
     const creds = await this.credentialModel
-      .find({ employeeId: { $in: employeeIds }, status: 'active' })
+      .find({
+        employeeId: { $in: employeeIds },
+        status: 'active',
+        ...this.credentialScopeFilter(tenantId),
+      })
       .sort({ updatedAt: -1 })
       .lean()
       .exec();
@@ -220,25 +250,39 @@ export class EmployeeMonitorService {
     const key = `FHRM-${randomUUID().slice(0, 8).toUpperCase()}`;
     const hash = `FHSH-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 
-    const existing = await this.credentialModel.findOne({ employeeId: employee.id }).exec();
-    const credId = existing?.id ?? randomUUID();
+    const tenantId = this.resolveCredentialTenantId();
+    const scopeFilter = this.credentialScopeFilter(tenantId);
+    const existing = await this.credentialModel
+      .findOne({ employeeId: employee.id, ...scopeFilter })
+      .exec();
 
-    await this.credentialModel.findOneAndUpdate(
-      { employeeId: employee.id },
-      {
-        $set: {
-          id: credId,
-          employeeId: employee.id,
-          employeeCode: employee.employeeCode,
-          keyHash: hashPassword(key),
-          keyHint: key.slice(-4).padStart(key.length, '*'),
-          secretHash: hashPassword(hash),
-          secretHint: hash.slice(-4).padStart(hash.length, '*'),
-          status: 'active',
-        },
-      },
-      { upsert: true },
-    );
+    const payload = {
+      id: existing?.id ?? randomUUID(),
+      tenantId,
+      employeeId: employee.id,
+      employeeCode: employee.employeeCode,
+      keyHash: hashPassword(key),
+      keyHint: key.slice(-4).padStart(key.length, '*'),
+      secretHash: hashPassword(hash),
+      secretHint: hash.slice(-4).padStart(hash.length, '*'),
+      status: 'active' as const,
+    };
+
+    try {
+      if (existing) {
+        await this.credentialModel.updateOne({ id: existing.id }, { $set: payload }).exec();
+      } else {
+        await this.credentialModel.create(payload);
+      }
+    } catch (err) {
+      const code = (err as { code?: number })?.code;
+      if (code === 11000) {
+        throw new BadRequestException(
+          'Agent credentials already exist for this employee. Try again or revoke existing credentials first.',
+        );
+      }
+      throw err;
+    }
 
     return {
       employeeId: employee.id,
@@ -250,8 +294,9 @@ export class EmployeeMonitorService {
   }
 
   async revokeEmployeeCredential(employeeId: string) {
+    const tenantId = this.resolveCredentialTenantId();
     const cred = await this.credentialModel.findOneAndUpdate(
-      { employeeId },
+      { employeeId, ...this.credentialScopeFilter(tenantId) },
       { $set: { status: 'revoked' } },
       { new: true },
     ).lean().exec();

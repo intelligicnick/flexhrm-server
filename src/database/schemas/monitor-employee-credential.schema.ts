@@ -8,7 +8,7 @@ export class MonitorEmployeeCredential {
   @Prop({ required: true, unique: true, index: true })
   id!: string;
 
-  @Prop({ required: true, unique: true, index: true })
+  @Prop({ required: true, index: true })
   employeeId!: string;
 
   @Prop({ required: true, index: true })
@@ -35,3 +35,5 @@ export class MonitorEmployeeCredential {
 
 export const MonitorEmployeeCredentialSchema =
   SchemaFactory.createForClass(MonitorEmployeeCredential);
+
+MonitorEmployeeCredentialSchema.index({ tenantId: 1, employeeId: 1 }, { unique: true });
