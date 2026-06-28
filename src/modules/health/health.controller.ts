@@ -16,6 +16,12 @@ export class HealthController {
   ) {}
 
   @Public()
+  @Get('live')
+  live() {
+    return { status: 'ok' };
+  }
+
+  @Public()
   @Get()
   async check() {
     const ready = this.connection.readyState === 1;

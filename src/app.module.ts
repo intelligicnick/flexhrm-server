@@ -57,6 +57,7 @@ import { AutomationModule } from './modules/automation/automation.module';
 import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { SsoModule } from './modules/sso/sso.module';
+import { DeferredStartupService } from './bootstrap/deferred-startup.service';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { SsoModule } from './modules/sso/sso.module';
     SsoModule,
   ],
   providers: [
+    DeferredStartupService,
     CsrfGuard,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },

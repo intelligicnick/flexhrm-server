@@ -8,6 +8,7 @@ import compression = require('compression');
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { DeferredStartupService } from './bootstrap/deferred-startup.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -88,6 +89,8 @@ async function bootstrap(): Promise<void> {
 
   await app.listen(port, '0.0.0.0');
   console.log(`Flex HRM API running on http://0.0.0.0:${port}/api [mongodb]`);
+
+  app.get(DeferredStartupService).run();
 }
 
 bootstrap().catch((err: unknown) => {

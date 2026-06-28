@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import {
@@ -18,12 +18,13 @@ const LEGACY_GLOBAL_INDEXES: Array<{ collection: string; indexes: string[] }> = 
 ];
 
 @Injectable()
-export class TenantIndexMigrationService implements OnModuleInit {
+export class TenantIndexMigrationService {
   private readonly logger = new Logger(TenantIndexMigrationService.name);
 
   constructor(@InjectConnection() private readonly connection: Connection) {}
 
-  async onModuleInit(): Promise<void> {
+  /** Runs after HTTP listen so Hostinger health checks succeed during slow DB work. */
+  async run(): Promise<void> {
     await this.backfillMissingTenantIds();
     await this.dropLegacyGlobalIndexes();
   }

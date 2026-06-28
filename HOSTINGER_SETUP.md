@@ -44,6 +44,45 @@ If the **frontend** (greenyellow) also shows 403, that is a separate static site
 
 ---
 
+## 408 Request Time-out — fix this first (API not responding)
+
+If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) shows **408 Request Time-out**, Hostinger’s proxy **cannot reach your Node.js process**. The app is not listening on the port the proxy expects (or it crashed on startup).
+
+| Symptom | Likely cause |
+|---------|----------------|
+| **408** on `/` and `/api/health` | Node process not running, wrong **PORT** in hPanel, or startup crash |
+| **408** only on slow routes | Rare — usually still means the app never started |
+
+### Fix 408 on the API app (midnightblue)
+
+1. **Remove `PORT` from hPanel env vars**  
+   Hostinger **injects `PORT` automatically**. If you set `PORT=3001` manually, the app listens on 3001 but the proxy routes elsewhere → **408**. Delete the `PORT` variable, Save, Redeploy.
+
+2. **hPanel → Node.js Web Apps → midnightblue → Logs / Deployments**  
+   Look for:
+   - `Missing required environment variable: MONGODB_URI` or `CORS_ORIGINS` → add them (see section 2)
+   - `Flex HRM API failed to start` → read the stack trace
+   - `Flex HRM API running on http://0.0.0.0:...` → success; if you still see 408, `PORT` was wrong (step 1)
+
+3. **Confirm build settings**:
+
+   | Setting | Value |
+   |---------|-------|
+   | **Build command** | `npm install && npm run build` |
+   | **Start command** | `node dist/server.js` |
+   | **Entry file** | `dist/server.js` |
+
+4. **Redeploy**, then verify:
+
+   ```bash
+   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health/live
+   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+   ```
+
+   `/api/health/live` returns `{"status":"ok"}` as soon as the process is up (no MongoDB check). `/api/health` confirms DB connectivity.
+
+---
+
 ## 503 Service Unavailable
 
 If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the Node.js process is **not running**. Pushing code to GitHub does not restart the app — you must fix the Hostinger deployment.
@@ -105,7 +144,6 @@ In **hPanel → your API app → Environment variables**, add:
 | Variable | Example value | Notes |
 |----------|---------------|-------|
 | `NODE_ENV` | `production` | Required |
-| `PORT` | `3001` | Hostinger usually injects its own port — keep `3001` if unsure |
 | `MONGODB_URI` | `mongodb+srv://user:pass@cluster.mongodb.net/flexhrm?...` | MongoDB Atlas or other hosted MongoDB |
 | `CORS_ORIGINS` | `https://greenyellow-woodpecker-750354.hostingersite.com` | Frontend origin (no trailing slash) |
 | `SEED_ON_STARTUP` | `false` | Set `true` only on first deploy to an empty database |
@@ -167,6 +205,7 @@ curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | pyt
 | `ready: false` or connection error | Wrong `MONGODB_URI`, Atlas IP allowlist, or DB user/password |
 | `smtpConfigured: false` | SMTP variables missing in hPanel (see section 4) |
 | `502` / `503` / timeout | App not started, build failed, or wrong start command |
+| **408** | **Remove `PORT` from hPanel** — let Hostinger inject it; check deploy logs for crash |
 | `404` on `/api/health` | Wrong deploy root or app not running NestJS build |
 
 ---
@@ -266,6 +305,7 @@ curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | pyt
 | Forgot-password shows code on screen, no email | `smtpConfigured` is false, or Gmail blocked — try Hostinger/Brevo SMTP; check spam folder |
 | CORS errors in browser | `CORS_ORIGINS` must exactly match frontend URL (https, no trailing slash) |
 | Build fails on Hostinger | Check deploy logs in hPanel; run `npm run build` locally to reproduce |
+| **408 Request Time-out** | Delete `PORT` from hPanel env; redeploy; check logs for missing `MONGODB_URI` / `CORS_ORIGINS` |
 | Data missing after redeploy | MongoDB data lives in Atlas — not on Hostinger disk. Disk under `backend/data/` is ephemeral. |
 | `E11000 duplicate key ... roles ... HR Assistant` | DB has legacy data or indexes from pre–multi-tenant schema. Redeploy latest backend (auto-fixes on startup). Or run `npm run migrate:tenant-indexes` against production MongoDB. Set `SEED_ON_STARTUP=false` after first successful deploy. |
 | `Duplicate schema index on expiresAt` | Harmless warning on older builds; fixed in latest backend. |

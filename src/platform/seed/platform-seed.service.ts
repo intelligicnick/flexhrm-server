@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -9,7 +9,7 @@ import { DEFAULT_SUBSCRIPTION_PLANS, DEFAULT_TENANT_ID } from '../common/platfor
 import { hashPassword } from '../../common/utils/password.util';
 
 @Injectable()
-export class PlatformSeedService implements OnModuleInit {
+export class PlatformSeedService {
   private readonly logger = new Logger(PlatformSeedService.name);
 
   constructor(
@@ -19,7 +19,7 @@ export class PlatformSeedService implements OnModuleInit {
     private readonly configService: ConfigService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async run(): Promise<void> {
     const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
     if (!seedOnStartup) return;
 

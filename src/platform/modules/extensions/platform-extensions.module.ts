@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { SupportTicket, SupportTicketSchema } from '../../schemas/support-ticket.schema';
 import { PlatformLead, PlatformLeadSchema } from '../../schemas/platform-lead.schema';
@@ -94,10 +94,4 @@ const MODELS = [
   providers: [PlatformExtensionsService],
   exports: [PlatformExtensionsService],
 })
-export class PlatformExtensionsModule implements OnModuleInit {
-  constructor(private readonly extensionsService: PlatformExtensionsService) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.extensionsService.seedDefaults();
-  }
-}
+export class PlatformExtensionsModule {}

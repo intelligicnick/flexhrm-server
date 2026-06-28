@@ -278,6 +278,6 @@ for (const model of MODELS) {
     MongooseModule.forFeature(MODELS),
   ],
   providers: [TenantIndexMigrationService],
-  exports: [MongooseModule],
+  exports: [MongooseModule, TenantIndexMigrationService],
 })
 export class DatabaseModule {}

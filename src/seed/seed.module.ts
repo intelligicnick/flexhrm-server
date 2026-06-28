@@ -9,5 +9,6 @@ import { SeedService } from './seed.service';
 @Module({
   imports: [AdminsModule, RolesModule, EmployeesModule, LocationsModule, JobRolesModule],
   providers: [SeedService],
+  exports: [SeedService],
 })
 export class SeedModule {}

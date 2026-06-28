@@ -21,7 +21,6 @@ export class SeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
     const password = this.configService.get<string>('defaultAdminPassword') ?? 'admin123';
     const bootstrapped = await this.adminsService.ensureBootstrapAdmin(password);
     if (bootstrapped) {
@@ -29,7 +28,11 @@ export class SeedService implements OnModuleInit {
         'Bootstrapped default admin (username: admin). Change password after first login.',
       );
     }
+  }
 
+  /** Role/location sync — deferred until after HTTP listen. */
+  async runDeferredSeed(): Promise<void> {
+    const seedOnStartup = this.configService.get<boolean>('seedOnStartup') !== false;
     if (!seedOnStartup) return;
 
     const seeded = await this.rolesService.ensureDefaults([...DEFAULT_ROLES]);
