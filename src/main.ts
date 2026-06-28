@@ -86,11 +86,16 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new LoggingInterceptor());
 
-  // Hostinger / CDN health probes often hit `/` (not `/api/*`).
+  // Hostinger / CDN health probes often hit `/` or `/healthcheck` (not `/api/*`).
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.get('/', (_req: unknown, res: { status: (n: number) => { json: (b: unknown) => void } }) => {
+  const rootHealth = (
+    _req: unknown,
+    res: { status: (n: number) => { json: (b: unknown) => void } },
+  ) => {
     res.status(200).json({ status: 'ok', service: 'flex-hrm-api' });
-  });
+  };
+  expressApp.get('/', rootHealth);
+  expressApp.get('/healthcheck', rootHealth);
 
   // Hostinger injects PORT; fallback 3000 for local dev (see Hostinger Node.js Web Apps docs).
   const port = Number(process.env.PORT) || 3000;
