@@ -31,7 +31,7 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 1. **hPanel → Websites** — open the **midnightblue-partridge-476451** site.
 2. Confirm the site type is **Node.js Web App** (not “Website” / static hosting). If it is static-only, create a new **Node.js Web App** and connect the `flexhrm-server` GitHub repo.
 3. **Build command:** `npm install && npm run build`  
-   **Start command:** `npm start` (required — Hostinger injects `PORT` when using `npm start`)  
+   **Start command:** `npm start -- --port=$PORT`  
    **Entry / output file:** `dist/server.js`
 4. Add required env vars (see section 2), **Save**, then **Redeploy**.
 5. Verify:
@@ -55,23 +55,26 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 
 ### Fix 408 on the API app (midnightblue)
 
-1. **Do not set `PORT` in hPanel env vars** — Hostinger injects it at runtime when **Start command** is `npm start`.  
-   If logs show `PORT=(unset)` and the app exits, change Start command from `node dist/server.js` to **`npm start`**.  
-   Never hardcode `PORT=3000` or `PORT=3001` — that causes **408** (proxy port mismatch).
+1. **Do not set `PORT` manually in hPanel env vars** — Hostinger injects `$PORT` at runtime.  
+   **Start command must be:** `npm start -- --port=$PORT` (or `node dist/server.js --port=$PORT`).  
+   If logs show `PORT=(unset)`, the Entry file is launching Node without passing `$PORT`.
 
 2. **hPanel → Node.js Web Apps → midnightblue → Logs / Deployments**  
    Look for:
    - `Missing required environment variable: MONGODB_URI` or `CORS_ORIGINS` → add them (see section 2)
-   - `PORT is not set` → set Start command to **`npm start`**, redeploy
+   - `PORT is not set` → set Start command to **`npm start -- --port=$PORT`**, redeploy
    - `Flex HRM API running on http://0.0.0.0:<PORT>/api` where `<PORT>` is a non-3000/3001 number → success
 
-3. **Confirm build settings**:
+3. **Confirm build settings** (must match exactly):
 
    | Setting | Value |
    |---------|-------|
    | **Build command** | `npm install && npm run build` |
-   | **Start command** | `npm start` |
-   | **Entry file** | `dist/server.js` |
+   | **Start command** | `npm start -- --port=$PORT` |
+   | **Entry file** | `server.js` (if required by UI) |
+   | **Output directory** | `dist` |
+
+   > **Important:** If **Entry file** is set, Hostinger may run `node dist/server.js` directly and **skip `npm start`**, so `PORT` never reaches the process. Use Start command **`npm start -- --port=$PORT`** or **`node dist/server.js --port=$PORT`** so `$PORT` is passed on the command line.
 
 4. **Redeploy**, then verify:
 
@@ -102,7 +105,7 @@ If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the 
    | Setting | Value |
    |---------|-------|
    | **Build command** | `npm install && npm run build` |
-   | **Start command** | `npm start` |
+   | **Start command** | `npm start -- --port=$PORT` |
    | **Output directory** | `dist` |
    | **Entry file** | `server.js` |
 
@@ -127,7 +130,7 @@ In **hPanel → Websites → Node.js Web Apps** (or **Deployments**), connect th
 | **Branch** | `main` |
 | **Root directory** | `/` (repo root — this is the backend project) |
 | **Build command** | `npm install && npm run build` |
-| **Start command** | `npm start` |
+| **Start command** | `npm start -- --port=$PORT` |
 | **Output / root file** | `dist/server.js` |
 | **Node.js version** | 20 or 22 |
 
@@ -326,7 +329,7 @@ In hPanel, open your Node.js app → **Logs** / **Deployments** and look for:
 
 - [ ] GitHub repo `flexhrm-server` connected in Hostinger  
 - [ ] Build: `npm install && npm run build`  
-- [ ] Start: `npm start` (not `node dist/server.js` — required for PORT injection)  
+- [ ] Start: `npm start -- --port=$PORT`  
 - [ ] `MONGODB_URI` set in hPanel  
 - [ ] `CORS_ORIGINS` = frontend Hostinger URL  
 - [ ] `curl .../api/health` → `"status": "healthy"`, `"ready": true`  
