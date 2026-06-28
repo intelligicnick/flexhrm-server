@@ -30,7 +30,7 @@ fs.writeFileSync(
     "const port = process.env.PORT;",
     "console.log('[Flex HRM] Booting API — NODE_ENV=%s PORT=%s', process.env.NODE_ENV, port || '(unset — Hostinger must inject PORT)');",
     "if (!port) {",
-    "  console.warn('[Flex HRM] WARNING: PORT is not set. Remove PORT from hPanel env vars so Hostinger injects it, or the proxy will return 408.');",
+    "  console.warn('[Flex HRM] PORT not set — using 3000 in production (Hostinger usually injects PORT at runtime).');",
     '}',
     "require('./main');",
     '',

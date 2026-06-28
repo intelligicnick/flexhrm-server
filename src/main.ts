@@ -14,10 +14,10 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const config = app.get(ConfigService);
-  const port = config.get<number>('port') ?? 3001;
   const nodeEnv = config.get<string>('nodeEnv') ?? 'development';
-  const corsOrigins = config.get<string[]>('corsOrigins') ?? [];
   const isProduction = nodeEnv === 'production';
+  const port = config.get<number>('port') ?? (isProduction ? 3000 : 3001);
+  const corsOrigins = config.get<string[]>('corsOrigins') ?? [];
 
   function isAllowedCorsOrigin(origin: string | undefined): boolean {
     if (!origin) return true;
