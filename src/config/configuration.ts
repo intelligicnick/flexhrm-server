@@ -1,4 +1,5 @@
 import { envListOrDevDefault, envOrDevDefault } from './env';
+import { resolveListenPort } from './resolve-listen-port';
 import { PRODUCTION_ID_CARD_VERIFY_BASE } from './deploy-urls';
 
 function envTrimmed(value: string | undefined): string {
@@ -13,10 +14,7 @@ function envTrimmed(value: string | undefined): string {
 }
 
 export default () => ({
-  port: parseInt(
-    process.env.PORT ?? (process.env.NODE_ENV === 'production' ? '3000' : '3001'),
-    10,
-  ),
+  port: resolveListenPort(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   mongodbUri: envOrDevDefault(
     'MONGODB_URI',

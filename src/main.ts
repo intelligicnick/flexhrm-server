@@ -87,6 +87,12 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new LoggingInterceptor());
 
+  // Hostinger / CDN health probes often hit `/` (not `/api/*`).
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.get('/', (_req: unknown, res: { status: (n: number) => { json: (b: unknown) => void } }) => {
+    res.status(200).json({ status: 'ok', service: 'flex-hrm-api' });
+  });
+
   await app.listen(port, '0.0.0.0');
   console.log(`Flex HRM API running on http://0.0.0.0:${port}/api [mongodb]`);
 
