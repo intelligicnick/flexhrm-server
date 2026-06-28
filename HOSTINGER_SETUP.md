@@ -6,8 +6,8 @@ Deploy the NestJS API (`flexhrm-server`) on **Hostinger Node.js Web Apps** and v
 
 | Service | URL |
 |---------|-----|
-| **API (this guide)** | https://midnightblue-partridge-476451.hostingersite.com/api |
-| **Health check** | https://midnightblue-partridge-476451.hostingersite.com/api/health |
+| **API (this guide)** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api |
+| **Health check** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health |
 | **Frontend (CORS)** | https://greenyellow-woodpecker-750354.hostingersite.com |
 
 Repository: https://github.com/intelligicnick/flexhrm-server
@@ -18,7 +18,7 @@ Repository: https://github.com/intelligicnick/flexhrm-server
 
 **Pushing to GitHub does not start the API on Hostinger.** A 403 means the site is a static/empty website instead of a running **Node.js Web App**, or the last deploy never published files.
 
-If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) shows **403 Forbidden**, the app is **not deployed as a Node.js Web App** or the deployment never published files.
+If `https://mediumseagreen-chimpanzee-998149.hostingersite.com` (or `/api/health`) shows **403 Forbidden**, the app is **not deployed as a Node.js Web App** or the deployment never published files.
 
 | Symptom | Likely cause |
 |---------|----------------|
@@ -26,9 +26,9 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 | **503** | Node.js app exists but process is **not running** (crash, missing env, failed build) |
 | **502** | App crashed after start — check Logs |
 
-### Fix 403 on the API app (midnightblue)
+### Fix 403 on the API app (mediumseagreen-chimpanzee)
 
-1. **hPanel → Websites** — open the **midnightblue-partridge-476451** site.
+1. **hPanel → Websites** — open the **mediumseagreen-chimpanzee-998149** site.
 2. Confirm the site type is **Node.js Web App** (not “Website” / static hosting). If it is static-only, create a new **Node.js Web App** and connect the `flexhrm-server` GitHub repo.
 3. **Build command:** `npm install && npm run build`  
    **Start command:** `node dist/server.js`  
@@ -37,7 +37,7 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 5. Verify:
 
    ```bash
-   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health
+   curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health
    ```
 
 If the **frontend** (greenyellow) also shows 403, that is a separate static site — see [flexhrm-client HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-client/blob/main/HOSTINGER_SETUP.md).
@@ -46,21 +46,21 @@ If the **frontend** (greenyellow) also shows 403, that is a separate static site
 
 ## 408 Request Time-out — fix this first (API not responding)
 
-If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) shows **408 Request Time-out**, Hostinger’s proxy **cannot reach your Node.js process**. The app is not listening on the port the proxy expects (or it crashed on startup).
+If `https://mediumseagreen-chimpanzee-998149.hostingersite.com` (or `/api/health`) shows **408 Request Time-out**, Hostinger’s proxy **cannot reach your Node.js process**. The app is not listening on the port the proxy expects (or it crashed on startup).
 
 | Symptom | Likely cause |
 |---------|----------------|
 | **408** on `/` and `/api/health` | Node process not running, wrong **PORT** in hPanel, or startup crash |
 | **408** only on slow routes | Rare — usually still means the app never started |
 
-### Fix 408 on the API app (midnightblue)
+### Fix 408 on the API app (mediumseagreen-chimpanzee)
 
 1. **Do not set `PORT` manually in hPanel** — Hostinger injects `PORT` at runtime. The app uses `process.env.PORT || 3000`.  
    **Start command:** `node dist/server.js`  
    **Build command:** `npm install && npm run build`  
    **Output folder:** `dist`
 
-2. **hPanel → Node.js Web Apps → midnightblue → Logs / Deployments**  
+2. **hPanel → Node.js Web Apps → mediumseagreen-chimpanzee → Logs / Deployments**  
    Look for:
    - `Missing required environment variable: MONGODB_URI` or `CORS_ORIGINS` → add them (see section 2)
    - `Flex HRM API running on http://0.0.0.0:...` → success (port should match injected `PORT` when set)
@@ -77,8 +77,8 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 4. **Redeploy**, then verify:
 
    ```bash
-   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health/live
-   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+   curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health/live
+   curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
    ```
 
    `/api/health/live` returns `{"status":"ok"}` as soon as the process is up (no MongoDB check). `/api/health` confirms DB connectivity.
@@ -87,11 +87,11 @@ If `https://midnightblue-partridge-476451.hostingersite.com` (or `/api/health`) 
 
 ## 503 Service Unavailable
 
-If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the Node.js process is **not running**. Pushing code to GitHub does not restart the app — you must fix the Hostinger deployment.
+If `https://mediumseagreen-chimpanzee-998149.hostingersite.com` shows **503**, the Node.js process is **not running**. Pushing code to GitHub does not restart the app — you must fix the Hostinger deployment.
 
 ### Quick checks (in order)
 
-1. **Open hPanel → Node.js Web Apps → midnightblue app → Deployments / Logs**  
+1. **Open hPanel → Node.js Web Apps → mediumseagreen-chimpanzee app → Deployments / Logs**  
    Look for red errors. Common messages:
    - `Missing required environment variable: MONGODB_URI` → add `MONGODB_URI` in Environment variables
    - `Missing required environment variable: CORS_ORIGINS` → add `CORS_ORIGINS=https://greenyellow-woodpecker-750354.hostingersite.com`
@@ -112,7 +112,7 @@ If `https://midnightblue-partridge-476451.hostingersite.com` shows **503**, the 
 4. **Verify** after deploy finishes:
 
    ```bash
-   curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health
+   curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health
    ```
 
    Until this returns JSON with `"ready": true`, the frontend login will fail.
@@ -172,13 +172,13 @@ Optional but recommended:
 From your Mac terminal (or any machine with internet):
 
 ```bash
-curl https://midnightblue-partridge-476451.hostingersite.com/api/health
+curl https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health
 ```
 
 Pretty-printed:
 
 ```bash
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
 ```
 
 ### Expected response (healthy)
@@ -236,7 +236,7 @@ Password reset emails are sent only when SMTP is configured **on the API server*
 5. Confirm SMTP is enabled:
 
 ```bash
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
 ```
 
 Look for `"smtpConfigured": true`.
@@ -291,7 +291,7 @@ You should see `SMTP connection OK` and `Test email sent to ...`.
 4. Run the health curl:
 
 ```bash
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
 ```
 
 5. If you changed environment variables, restart/redeploy even when code did not change.

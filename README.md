@@ -8,7 +8,7 @@ NestJS 11 REST API with MongoDB. Runs on port `3001` under `/api`.
 
 | Service | URL |
 |---------|-----|
-| **API** | https://midnightblue-partridge-476451.hostingersite.com/api |
+| **API** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api |
 | **Frontend (CORS)** | https://greenyellow-woodpecker-750354.hostingersite.com |
 
 Production URLs are defined in `src/config/deploy-urls.ts` and overridden via environment variables.
@@ -47,8 +47,8 @@ API: [http://localhost:3001/api](http://localhost:3001/api)
 
 | Check | Command |
 |-------|---------|
-| API health | `curl https://midnightblue-partridge-476451.hostingersite.com/api/health` |
-| Pretty JSON | `curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health \| python3 -m json.tool` |
+| API health | `curl https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health` |
+| Pretty JSON | `curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health \| python3 -m json.tool` |
 
 Full step-by-step guide (env vars, SMTP, deploy, troubleshooting): **[HOSTINGER_SETUP.md](./HOSTINGER_SETUP.md)**
 
