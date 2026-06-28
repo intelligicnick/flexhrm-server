@@ -14,7 +14,7 @@ function envTrimmed(value: string | undefined): string {
 }
 
 export default () => ({
-  port: resolveListenPort(),
+  port: resolveListenPort(process.env.NODE_ENV === 'production'),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   mongodbUri: envOrDevDefault(
     'MONGODB_URI',

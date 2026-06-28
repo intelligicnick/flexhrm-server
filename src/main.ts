@@ -9,6 +9,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { DeferredStartupService } from './bootstrap/deferred-startup.service';
+import { resolveListenPort } from './config/resolve-listen-port';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -16,7 +17,6 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const nodeEnv = config.get<string>('nodeEnv') ?? 'development';
   const isProduction = nodeEnv === 'production';
-  const port = config.get<number>('port') ?? (isProduction ? 3000 : 3001);
   const corsOrigins = config.get<string[]>('corsOrigins') ?? [];
 
   function isAllowedCorsOrigin(origin: string | undefined): boolean {
@@ -93,6 +93,8 @@ async function bootstrap(): Promise<void> {
     res.status(200).json({ status: 'ok', service: 'flex-hrm-api' });
   });
 
+  // Read PORT at listen time — Hostinger injects it when Start command is `npm start`.
+  const port = resolveListenPort(isProduction);
   await app.listen(port, '0.0.0.0');
   console.log(`Flex HRM API running on http://0.0.0.0:${port}/api [mongodb]`);
 

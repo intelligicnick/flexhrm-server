@@ -1,16 +1,21 @@
-/** Hostinger / PaaS may expose the listen port under different env var names. */
-export function resolveListenPort(): number {
-  const candidates = [
-    process.env.PORT,
-    process.env.SERVER_PORT,
-    process.env.PASSENGER_PORT,
-    process.env.APP_PORT,
-  ];
-  for (const value of candidates) {
-    const trimmed = value?.trim();
-    if (trimmed && /^\d+$/.test(trimmed)) {
-      return parseInt(trimmed, 10);
-    }
+/**
+ * Hostinger injects PORT at runtime. Do not hardcode 3000/3001 in production —
+ * falling back to a fixed port when PORT is unset causes 408 from the reverse proxy.
+ */
+export function resolveListenPort(isProduction: boolean): number {
+  const port = Number(process.env.PORT);
+  if (Number.isFinite(port) && port > 0) {
+    return port;
   }
-  return process.env.NODE_ENV === 'production' ? 3000 : 3001;
+
+  if (isProduction) {
+    console.error(
+      '[Flex HRM] PORT is not set. Hostinger must inject PORT at runtime.\n' +
+        '  hPanel → Start command: npm start (not "node dist/server.js" alone)\n' +
+        '  Do not set PORT=3000 manually in environment variables.',
+    );
+    process.exit(1);
+  }
+
+  return 3001;
 }
