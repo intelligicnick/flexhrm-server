@@ -670,20 +670,26 @@ export class AgentService {
       tags: ['monitor', agent.employeeId],
     });
 
-    await this.screenshotLogModel.create({
-      id: dto.id,
-      employeeId: agent.employeeId,
-      deviceAgentId: agent.id,
-      timestamp: new Date(dto.timestamp),
-      imagekitUrl: uploaded.imagekitUrl ?? '',
-      imagekitFileId: uploaded.imagekitFileId ?? '',
-      fileDataBase64: uploaded.fileDataBase64 ?? '',
-      windowTitle: dto.windowTitle ?? '',
-      appName: dto.appName ?? '',
-      blurred: dto.blurred ?? settings.screenshot?.blurSensitiveData ?? false,
-      source: dto.source ?? 'scheduled',
-      commandId: dto.commandId ?? '',
-    });
+    await this.screenshotLogModel.findOneAndUpdate(
+      { id: dto.id },
+      {
+        $set: {
+          id: dto.id,
+          employeeId: agent.employeeId,
+          deviceAgentId: agent.id,
+          timestamp: new Date(dto.timestamp),
+          imagekitUrl: uploaded.imagekitUrl ?? '',
+          imagekitFileId: uploaded.imagekitFileId ?? '',
+          fileDataBase64: uploaded.fileDataBase64 ?? '',
+          windowTitle: dto.windowTitle ?? '',
+          appName: dto.appName ?? '',
+          blurred: dto.blurred ?? settings.screenshot?.blurSensitiveData ?? false,
+          source: dto.source ?? 'scheduled',
+          commandId: dto.commandId ?? '',
+        },
+      },
+      { upsert: true },
+    );
 
     if (dto.commandId) {
       await this.commandModel.findOneAndUpdate(
