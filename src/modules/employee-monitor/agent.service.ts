@@ -223,7 +223,7 @@ export class AgentService {
 
     const existing = await this.deviceAgentModel.findOne({ deviceHash: dto.deviceHash }).exec();
     if (existing) {
-      if (existing.status === 'revoked') {
+      if (existing.status === 'revoked' && !employee) {
         throw new UnauthorizedException('This device has been revoked.');
       }
       const token = generateToken();

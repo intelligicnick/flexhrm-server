@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
-import { getCurrentTenantId } from '../../platform/common/tenant-context.store';
+import { getCurrentTenantId, runWithoutTenantScope } from '../../platform/common/tenant-context.store';
 import {
   DeviceAgent,
   DeviceAgentDocument,
@@ -57,7 +57,7 @@ import {
 } from '../../database/schemas/monitor-alerts.schema';
 import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
-import { hashPassword } from '../../common/utils/password.util';
+import { hashPassword, generateToken } from '../../common/utils/password.util';
 import { UpdateMonitorSettingsDto, CreateEmployeeCredentialDto } from './dto/employee-monitor.dto';
 import { computeProductivityScore, planFeatures, toDateKey, resolveDateRange, formatAppName, getExpectedWorkSeconds, MonitorPeriod } from './utils/monitor.util';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
@@ -115,6 +115,28 @@ export class EmployeeMonitorService {
 
   private resolveCredentialTenantId(): string {
     return getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
+  }
+
+  /** Device agents may use legacy empty tenantId; bypass auto-scoping when revoking. */
+  private async revokeEmployeeDevices(employeeId: string): Promise<void> {
+    await runWithoutTenantScope(() =>
+      this.deviceAgentModel
+        .updateMany({ employeeId }, { $set: { status: 'revoked' } })
+        .exec(),
+    );
+  }
+
+  /** Rotate keys only — keep device rows and monitoring history (screenshots, logs, etc.). */
+  private async invalidateEmployeeDeviceSessions(employeeId: string): Promise<void> {
+    const invalidatedToken = hashPassword(generateToken());
+    await runWithoutTenantScope(() =>
+      this.deviceAgentModel
+        .updateMany(
+          { employeeId, status: { $ne: 'revoked' } },
+          { $set: { authTokenHash: invalidatedToken } },
+        )
+        .exec(),
+    );
   }
 
   private async resolveEmployeeIds(
@@ -257,10 +279,8 @@ export class EmployeeMonitorService {
       .findOne({ employeeId: employee.id, ...scopeFilter })
       .exec();
 
-    const payload = {
-      id: existing?.id ?? randomUUID(),
+    const keyPayload = {
       tenantId,
-      employeeId: employee.id,
       employeeCode: employee.employeeCode,
       keyHash: hashPassword(key),
       keyHint: key.slice(-4).padStart(key.length, '*'),
@@ -269,12 +289,16 @@ export class EmployeeMonitorService {
       status: 'active' as const,
     };
 
+    if (existing) {
+      await this.invalidateEmployeeDeviceSessions(employee.id);
+    }
+
     try {
       if (existing) {
         // scopeFilter includes legacy empty/missing tenantId rows; plain updateOne would
         // add tenantId: default via the query plugin and silently match 0 documents.
         const result = await this.credentialModel
-          .updateOne({ id: existing.id, ...scopeFilter }, { $set: payload })
+          .updateOne({ id: existing.id, ...scopeFilter }, { $set: keyPayload })
           .exec();
         if (result.matchedCount === 0) {
           throw new BadRequestException(
@@ -282,7 +306,12 @@ export class EmployeeMonitorService {
           );
         }
       } else {
-        await this.credentialModel.create(payload);
+        await this.credentialModel.create({
+          id: randomUUID(),
+          employeeId: employee.id,
+          deviceCount: 0,
+          ...keyPayload,
+        });
       }
     } catch (err) {
       const code = (err as { code?: number })?.code;
@@ -311,7 +340,10 @@ export class EmployeeMonitorService {
       { new: true },
     ).lean().exec();
     if (!cred) throw new NotFoundException('Employee agent credential not found.');
-    await this.deviceAgentModel.updateMany({ employeeId }, { $set: { status: 'revoked' } }).exec();
+    await this.revokeEmployeeDevices(employeeId);
+    await this.credentialModel
+      .updateOne({ id: cred.id, ...this.credentialScopeFilter(tenantId) }, { $set: { deviceCount: 0 } })
+      .exec();
     return { success: true };
   }
 
