@@ -7,6 +7,7 @@ import { Contract, ContractDocument } from '../../database/schemas/contract.sche
 import { resolveContractIdForLocation } from '../../common/utils/contract-locations.util';
 import { AdminSessionPayload } from '../../common/utils/permissions.util';
 import { resolveTenantId, withTenantId } from '../../common/utils/tenant.util';
+import { getCurrentTenantId } from '../../platform/common/tenant-context.store';
 import { PaginatedResult } from '../../platform/common/pagination.dto';
 import { sanitizeEmployeeNumericFields } from '../../common/utils/non-negative-number.util';
 import { isHttpUrl } from '../../common/storage/file-buffer.util';
@@ -61,6 +62,30 @@ const BULK_UPDATE_IMMUTABLE_FIELDS = new Set([
   'monthlyLedger',
   'contractId',
 ]);
+
+/** Never $set these on profile updates — avoids clobbering ledger, credentials, or Mongo internals. */
+const EMPLOYEE_UPDATE_OMIT = new Set([
+  '_id',
+  '__v',
+  'createdAt',
+  'updatedAt',
+  'monthlyLedger',
+  'supervisorLogin',
+  'portalLogin',
+  'idCardVerifyToken',
+]);
+
+/** Derived fields that must be persisted when their source inputs change. */
+const EMPLOYEE_UPDATE_DERIVED = [
+  'contractId',
+  'basicSalary',
+  'esic',
+  'status',
+  'photo',
+  'photoUrl',
+  'photoFileId',
+  'photoDataBase64',
+] as const;
 
 function bulkUpdateValuesEqual(before: unknown, after: unknown): boolean {
   if (before === after) return true;
@@ -317,14 +342,89 @@ export class EmployeesService {
     return this.employeeModel.countDocuments(withTenantId(tenantId));
   }
 
+  private resolveRequestTenantId(
+    tenantId?: string,
+    session?: AdminSessionPayload,
+  ): string | undefined {
+    return tenantId ?? session?.tenantId ?? getCurrentTenantId();
+  }
+
+  private async findEmployeeDocument(
+    idOrCode: string,
+    tenantId?: string,
+    session?: AdminSessionPayload,
+  ): Promise<EmployeeDocument | null> {
+    const trimmed = String(idOrCode || '').trim();
+    if (!trimmed) return null;
+
+    const tid = this.resolveRequestTenantId(tenantId, session);
+    let doc = await this.employeeModel
+      .findOne(withTenantId(tid, { id: trimmed }))
+      .exec();
+    if (!doc) {
+      doc = await this.employeeModel
+        .findOne(withTenantId(tid, { employeeCode: trimmed }))
+        .exec();
+    }
+    return doc;
+  }
+
+  private buildEmployeeSetPatch(
+    updates: Record<string, unknown>,
+    merged: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+    const keysToSet = new Set<string>([
+      ...Object.keys(updates).filter((key) => !BULK_UPDATE_IMMUTABLE_FIELDS.has(key)),
+      ...EMPLOYEE_UPDATE_DERIVED,
+    ]);
+
+    for (const key of keysToSet) {
+      if (EMPLOYEE_UPDATE_OMIT.has(key)) continue;
+      if (key in merged) patch[key] = merged[key];
+    }
+
+    if (patch.pfCalculationMode !== undefined) {
+      const mode = String(patch.pfCalculationMode || '');
+      if (mode !== 'gross' && mode !== 'ceiling_15000') {
+        patch.pfCalculationMode = 'gross';
+      }
+    }
+    if (patch.salaryWageMode !== undefined) {
+      patch.salaryWageMode =
+        String(patch.salaryWageMode) === 'daily' ? 'daily' : 'monthly';
+    }
+    if (patch.customFields !== undefined) {
+      patch.customFields = this.sanitizeCustomFields(patch.customFields);
+    }
+
+    return patch;
+  }
+
+  private sanitizeCustomFields(
+    value: unknown,
+  ): Array<{ name: string; type: string; value: string }> {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const name = String(row?.name || '').trim();
+        if (!name) return null;
+        return {
+          name,
+          type: String(row?.type || 'text').trim() || 'text',
+          value: String(row?.value ?? ''),
+        };
+      })
+      .filter((item): item is { name: string; type: string; value: string } => item !== null);
+  }
+
   async findById(
     id: string,
     session?: AdminSessionPayload,
     tenantId?: string,
   ): Promise<Record<string, unknown> | null> {
-    const doc = await this.employeeModel
-      .findOne(withTenantId(tenantId ?? session?.tenantId, { id }))
-      .exec();
+    const doc = await this.findEmployeeDocument(id, tenantId, session);
     if (!doc) return null;
     const plain = this.toPlain(doc);
     if (session && !this.canAccessEmployeeLocation(String(plain.location || ''), session)) {
@@ -369,32 +469,51 @@ export class EmployeesService {
     id: string,
     updates: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    const existing = await this.employeeModel.findOne({ id }).exec();
+    const existing = await this.findEmployeeDocument(id);
     if (!existing) return null;
 
+    const resolvedId = existing.id;
+    const existingPlain = existing.toObject() as unknown as Record<string, unknown>;
+
     let merged: Record<string, unknown> = sanitizeEmployeeNumericFields({
-      ...(existing.toObject() as unknown as Record<string, unknown>),
+      ...existingPlain,
       ...updates,
-      id: String(updates.id || updates.employeeCode || id),
+      id: resolvedId,
+      employeeCode: String(
+        updates.employeeCode ?? existing.employeeCode ?? resolvedId,
+      ),
     });
     merged = sanitizeEmployeePayrollFields(merged);
     merged = await this.applyLocationDerivedContract(merged);
 
-    merged = await this.processEmployeeAssets(
-      id,
-      merged,
-      existing.toObject() as unknown as Record<string, unknown>,
-    );
+    merged = await this.processEmployeeAssets(resolvedId, merged, existingPlain);
 
     if (updates.exitDate !== undefined) {
       merged.status =
         updates.exitDate && String(updates.exitDate).trim() ? 'exited' : 'active';
     }
 
-    const doc = await this.employeeModel
-      .findOneAndUpdate({ id }, { $set: merged }, { new: true })
-      .exec();
-    return doc ? this.toPlain(doc) : null;
+    const patch = this.buildEmployeeSetPatch(updates, merged);
+    if (Object.keys(patch).length === 0) return this.toPlain(existing);
+
+    try {
+      const doc = await this.employeeModel
+        .findOneAndUpdate({ id: resolvedId }, { $set: patch }, { new: true })
+        .exec();
+      return doc ? this.toPlain(doc) : null;
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'name' in err && err.name === 'ValidationError') {
+        const validationErr = err as { message?: string; errors?: Record<string, { message?: string }> };
+        const details = validationErr.errors
+          ? Object.values(validationErr.errors)
+              .map((e) => e.message)
+              .filter(Boolean)
+              .join('; ')
+          : validationErr.message || 'Employee validation failed.';
+        throw new BadRequestException(details);
+      }
+      throw err;
+    }
   }
 
   async deleteByIds(ids: string[]): Promise<{ count: number; deleted: Record<string, unknown>[] }> {
@@ -537,6 +656,8 @@ export class EmployeesService {
         throw new NotFoundException(`Employee not found: ${employeeId}`);
       }
 
+      const resolvedId = String(existing.id || employeeId);
+
       const delta: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(item.changes || {})) {
         if (BULK_UPDATE_IMMUTABLE_FIELDS.has(key)) continue;
@@ -548,9 +669,9 @@ export class EmployeesService {
 
       if (Object.keys(delta).length === 0) continue;
 
-      if (delta.employeeCode && delta.employeeCode !== employeeId) {
+      if (delta.employeeCode && delta.employeeCode !== resolvedId) {
         if (
-          await this.existsByCode(String(delta.employeeCode), employeeId)
+          await this.existsByCode(String(delta.employeeCode), resolvedId)
         ) {
           throw new BadRequestException(
             `Employee code ${delta.employeeCode} is already used by another record.`,
@@ -558,7 +679,7 @@ export class EmployeesService {
         }
       }
 
-      const updated = await this.update(employeeId, delta);
+      const updated = await this.update(resolvedId, delta);
       if (updated) {
         applied++;
         fieldChangeCount += Object.keys(delta).length;

@@ -61,7 +61,9 @@ export class EmployeeAssetsService implements OnModuleInit {
     if (typeof value !== 'string') return false;
     const trimmed = value.trim();
     if (!trimmed || isHttpUrl(trimmed)) return false;
-    return trimmed.startsWith('data:image/') || trimmed.length > 256;
+    if (trimmed.startsWith('data:image/')) return true;
+    // Raw base64 only — avoid treating long stored paths or filenames as uploads.
+    return trimmed.length > 256 && /^[A-Za-z0-9+/=\s]+$/.test(trimmed);
   }
 
   async savePhoto(

@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MAX_AUDIT_LOGS_HOT } from '../../common/constants/permissions.constants';
@@ -15,6 +15,8 @@ export interface AuditLogInput {
 
 @Injectable()
 export class AuditLogsService {
+  private readonly logger = new Logger(AuditLogsService.name);
+
   constructor(
     @InjectModel(AuditLog.name)
     private readonly auditLogModel: Model<AuditLogDocument>,
@@ -56,7 +58,15 @@ export class AuditLogsService {
     const count = await this.auditLogModel.countDocuments();
     if (count > MAX_AUDIT_LOGS_HOT) {
       const excess = count - MAX_AUDIT_LOGS_HOT;
-      await this.dataArchiveService.archiveOldestAuditLogs(excess);
+      try {
+        await this.dataArchiveService.archiveOldestAuditLogs(excess);
+      } catch (err) {
+        this.logger.warn(
+          `Audit log write succeeded but archiving ${excess} oldest log(s) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
   }
 

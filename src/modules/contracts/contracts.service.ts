@@ -10,13 +10,18 @@ import * as crypto from 'crypto';
 import {
   Contract,
   ContractDocument,
+  CONTRACT_STATUSES,
+  CONTRACT_TYPES,
   ContractStatus,
+  ContractType,
 } from '../../database/schemas/contract.schema';
 import {
   CreateContractDto,
   UpdateContractDto,
 } from './dto/contract.dto';
 import { ContractBgSyncService } from './contract-bg-sync.service';
+import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
+import { parseNonNegativeNumber } from '../../common/utils/non-negative-number.util';
 
 @Injectable()
 export class ContractsService {
@@ -32,6 +37,44 @@ export class ContractsService {
     return String(value ?? '').trim();
   }
 
+  private sanitizeAmount(value: unknown): string {
+    const trimmed = this.trimText(value);
+    if (!trimmed) return '';
+    const parsed = parseNonNegativeNumber(trimmed, -1);
+    return parsed >= 0 ? String(parsed) : '';
+  }
+
+  private sanitizeContractType(value: unknown): ContractType {
+    const raw = this.trimText(value);
+    return CONTRACT_TYPES.includes(raw as ContractType)
+      ? (raw as ContractType)
+      : 'manpower';
+  }
+
+  private sanitizeContractStatus(value: unknown): ContractStatus {
+    const raw = this.trimText(value);
+    return CONTRACT_STATUSES.includes(raw as ContractStatus)
+      ? (raw as ContractStatus)
+      : 'active';
+  }
+
+  private sanitizeFlexibleDate(value: unknown): string {
+    const raw = this.trimText(value);
+    if (!raw) return '';
+
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+    const ms = this.parseDateMs(raw);
+    if (ms === null) return raw;
+
+    const date = new Date(ms);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   private parseDateMs(value: string): number | null {
     const raw = value.trim();
     if (!raw) return null;
@@ -39,7 +82,7 @@ export class ContractsService {
     const iso = Date.parse(raw);
     if (!Number.isNaN(iso)) return iso;
 
-    const match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    const match = raw.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
     if (!match) return null;
 
     const day = Number(match[1]);
@@ -92,15 +135,24 @@ export class ContractsService {
   private toPlain(doc: ContractDocument): Record<string, unknown> {
     const obj = doc.toObject() as unknown as Record<string, unknown>;
     const { _id, __v, ...rest } = obj;
+    const contractType = CONTRACT_TYPES.includes(rest.contractType as ContractType)
+      ? (rest.contractType as ContractType)
+      : 'manpower';
+    const derivedStatus = this.deriveStatus({
+      status: rest.status as ContractStatus | undefined,
+      fromDate: String(rest.fromDate || ''),
+      toDate: String(rest.toDate || ''),
+      hasExtension: Boolean(rest.hasExtension),
+      extensionEndDate: String(rest.extensionEndDate || ''),
+    });
+    const status = CONTRACT_STATUSES.includes(derivedStatus) ? derivedStatus : 'active';
     return {
       ...rest,
-      status: this.deriveStatus({
-        status: rest.status as ContractStatus | undefined,
-        fromDate: String(rest.fromDate || ''),
-        toDate: String(rest.toDate || ''),
-        hasExtension: Boolean(rest.hasExtension),
-        extensionEndDate: String(rest.extensionEndDate || ''),
-      }),
+      contractType,
+      linkedLocations: this.normalizeLinkedLocations(
+        rest.linkedLocations as string[] | undefined,
+      ),
+      status,
     };
   }
 
@@ -172,7 +224,9 @@ export class ContractsService {
   }
 
   async findById(id: string): Promise<Record<string, unknown> | null> {
-    const doc = await this.contractModel.findOne({ id }).exec();
+    const doc = await runWithoutTenantScope(() =>
+      this.contractModel.findOne({ id }).exec(),
+    );
     return doc ? this.toPlain(doc) : null;
   }
 
@@ -226,8 +280,27 @@ export class ContractsService {
       ...payload,
       entryDate: this.trimText(dto.entryDate) || new Date().toISOString().slice(0, 10),
     });
-    await this.contractBgSyncService.syncFromContract(doc);
+    try {
+      await this.contractBgSyncService.syncFromContract(doc);
+    } catch (err) {
+      this.logger.warn(
+        `Contract ${id} created but BG sync failed: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+    }
     return this.toPlain(doc);
+  }
+
+  private async saveContractDocument(doc: ContractDocument): Promise<void> {
+    try {
+      await doc.save();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to save contract.';
+      this.logger.error(`Contract save failed: ${message}`, err);
+      throw new BadRequestException(message);
+    }
   }
 
   async update(
@@ -257,7 +330,7 @@ export class ContractsService {
     if (dto.status === undefined) {
       doc.status = this.deriveStatus(doc);
     }
-    await doc.save();
+    await this.saveContractDocument(doc);
     try {
       await this.contractBgSyncService.syncFromContract(doc);
     } catch (err) {
@@ -325,25 +398,27 @@ export class ContractsService {
       officerName: this.trimText(dto.officerName),
       officeName: this.trimText(dto.officeName),
       correspondingOffice: this.trimText(dto.correspondingOffice),
-      fromDate: this.trimText(dto.fromDate),
-      toDate: this.trimText(dto.toDate),
+      fromDate: this.sanitizeFlexibleDate(dto.fromDate),
+      toDate: this.sanitizeFlexibleDate(dto.toDate),
       companyName: this.trimText(dto.companyName),
       category: this.trimText(dto.category),
-      contractType: dto.contractType || 'manpower',
+      contractType: this.sanitizeContractType(dto.contractType),
       hasExtension,
-      extensionEndDate: hasExtension ? this.trimText(dto.extensionEndDate) : '',
+      extensionEndDate: hasExtension
+        ? this.sanitizeFlexibleDate(dto.extensionEndDate)
+        : '',
       bgApplicable,
       bgNumber: bgApplicable ? this.trimText(dto.bgNumber) : '',
-      bgAmount: bgApplicable ? this.trimText(dto.bgAmount) : '',
+      bgAmount: bgApplicable ? this.sanitizeAmount(dto.bgAmount) : '',
       bgIssuingBank: bgApplicable ? this.trimText(dto.bgIssuingBank) : '',
-      bgExpiryDate: bgApplicable ? this.trimText(dto.bgExpiryDate) : '',
+      bgExpiryDate: bgApplicable ? this.sanitizeFlexibleDate(dto.bgExpiryDate) : '',
       bgDetails: bgApplicable ? this.trimText(dto.bgDetails) : '',
       ddoName: this.trimText(dto.ddoName),
       ddoIssuingDetails: this.trimText(dto.ddoIssuingDetails),
       tenderBidNo: this.trimText(dto.tenderBidNo),
-      contractValue: this.trimText(dto.contractValue),
+      contractValue: this.sanitizeAmount(dto.contractValue),
       notes: this.trimText(dto.notes),
-      status: dto.status || 'active',
+      status: this.sanitizeContractStatus(dto.status),
       gemContractPdfUrl: this.trimText(dto.gemContractPdfUrl),
       gemContractId: this.trimText(dto.gemContractId),
       linkedLocations: this.normalizeLinkedLocations(dto.linkedLocations),
@@ -361,23 +436,25 @@ export class ContractsService {
     if (dto.correspondingOffice !== undefined) {
       doc.correspondingOffice = this.trimText(dto.correspondingOffice);
     }
-    if (dto.fromDate !== undefined) doc.fromDate = this.trimText(dto.fromDate);
-    if (dto.toDate !== undefined) doc.toDate = this.trimText(dto.toDate);
+    if (dto.fromDate !== undefined) doc.fromDate = this.sanitizeFlexibleDate(dto.fromDate);
+    if (dto.toDate !== undefined) doc.toDate = this.sanitizeFlexibleDate(dto.toDate);
     if (dto.companyName !== undefined) doc.companyName = this.trimText(dto.companyName);
     if (dto.category !== undefined) doc.category = this.trimText(dto.category);
-    if (dto.contractType !== undefined) doc.contractType = dto.contractType;
+    if (dto.contractType !== undefined) {
+      doc.contractType = this.sanitizeContractType(dto.contractType);
+    }
     if (dto.hasExtension !== undefined) doc.hasExtension = dto.hasExtension;
     if (dto.extensionEndDate !== undefined) {
-      doc.extensionEndDate = this.trimText(dto.extensionEndDate);
+      doc.extensionEndDate = this.sanitizeFlexibleDate(dto.extensionEndDate);
     }
     if (dto.bgApplicable !== undefined) doc.bgApplicable = dto.bgApplicable;
     if (dto.bgNumber !== undefined) doc.bgNumber = this.trimText(dto.bgNumber);
-    if (dto.bgAmount !== undefined) doc.bgAmount = this.trimText(dto.bgAmount);
+    if (dto.bgAmount !== undefined) doc.bgAmount = this.sanitizeAmount(dto.bgAmount);
     if (dto.bgIssuingBank !== undefined) {
       doc.bgIssuingBank = this.trimText(dto.bgIssuingBank);
     }
     if (dto.bgExpiryDate !== undefined) {
-      doc.bgExpiryDate = this.trimText(dto.bgExpiryDate);
+      doc.bgExpiryDate = this.sanitizeFlexibleDate(dto.bgExpiryDate);
     }
     if (dto.bgDetails !== undefined) doc.bgDetails = this.trimText(dto.bgDetails);
     if (dto.ddoName !== undefined) doc.ddoName = this.trimText(dto.ddoName);
@@ -386,9 +463,9 @@ export class ContractsService {
     }
     if (dto.tenderBidNo !== undefined) doc.tenderBidNo = this.trimText(dto.tenderBidNo);
     if (dto.contractValue !== undefined) {
-      doc.contractValue = this.trimText(dto.contractValue);
+      doc.contractValue = this.sanitizeAmount(dto.contractValue);
     }
-    if (dto.status !== undefined) doc.status = dto.status;
+    if (dto.status !== undefined) doc.status = this.sanitizeContractStatus(dto.status);
     if (dto.notes !== undefined) doc.notes = this.trimText(dto.notes);
     if (dto.entryDate !== undefined) doc.entryDate = this.trimText(dto.entryDate);
     if (dto.gemContractPdfUrl !== undefined) {

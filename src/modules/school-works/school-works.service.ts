@@ -285,10 +285,47 @@ export class SchoolWorksService {
       id,
     });
 
+    const patch = this.buildSchoolSetPatch(updates, merged);
+    if (Object.keys(patch).length === 0) return this.toPlain(existing);
+
     const doc = await this.schoolWorkModel
-      .findOneAndUpdate({ id }, { $set: merged }, { new: true })
+      .findOneAndUpdate({ id }, { $set: patch }, { new: true })
       .exec();
     return doc ? this.toPlain(doc) : null;
+  }
+
+  private buildSchoolSetPatch(
+    updates: Record<string, unknown>,
+    merged: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const skip = new Set([
+      '_id',
+      '__v',
+      'createdAt',
+      'updatedAt',
+      'monthlyExpenseLedger',
+      'monthlyWorkdaysLedger',
+    ]);
+    const derived = new Set(['govtUnitRate', 'partnerMonthlyPay', 'rates', 'udise', 'id']);
+    const patch: Record<string, unknown> = {};
+
+    for (const key of Object.keys(updates)) {
+      if (skip.has(key)) continue;
+      if (key in merged) patch[key] = merged[key];
+    }
+
+    const categoryChanged = 'schoolCategory' in updates;
+    const ratesChanged =
+      'rates' in updates ||
+      'partnerMonthlyPay' in updates ||
+      'govtUnitRate' in updates;
+    if (categoryChanged || ratesChanged) {
+      for (const key of derived) {
+        if (key in merged) patch[key] = merged[key];
+      }
+    }
+
+    return patch;
   }
 
   async deleteByIds(
