@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
   SchoolWork,
   SchoolWorkDocument,
 } from '../../database/schemas/school-work.schema';
+import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
+import {
+  getCurrentTenantId,
+  runWithoutTenantScope,
+} from '../../platform/common/tenant-context.store';
 
 
 export function isSecondarySchoolCategory(category: string): boolean {
@@ -59,6 +64,71 @@ export class SchoolWorksService {
     return query;
   }
 
+  private resolveTenantId(): string {
+    return getCurrentTenantId() || DEFAULT_TENANT_ID;
+  }
+
+  /** Matches tenant-scoped rows and legacy imports that predate tenantId backfill. */
+  private tenantOrMissingFilter(tenantId: string): Record<string, unknown> {
+    return {
+      $or: [
+        { tenantId },
+        { tenantId: { $exists: false } },
+        { tenantId: null },
+        { tenantId: '' },
+      ],
+    };
+  }
+
+  private async findSchoolsInBlock(
+    block: string,
+    district?: string,
+  ): Promise<Record<string, unknown>[]> {
+    const tenantId = this.resolveTenantId();
+    return runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .find({
+          ...this.buildBlockDistrictQuery(block, district),
+          ...this.tenantOrMissingFilter(tenantId),
+        })
+        .sort({ srNo: 1 })
+        .lean()
+        .exec(),
+    );
+  }
+
+  private async bulkSetSchoolFields(
+    ops: Array<{ id: string; set: Record<string, unknown> }>,
+  ): Promise<void> {
+    if (ops.length === 0) return;
+
+    const tenantId = this.resolveTenantId();
+    const bulkOps = ops.map(({ id, set }) => ({
+      updateOne: {
+        filter: {
+          id,
+          ...this.tenantOrMissingFilter(tenantId),
+        },
+        update: {
+          $set: {
+            ...set,
+            tenantId,
+          },
+        },
+      },
+    }));
+
+    const result = await runWithoutTenantScope(() =>
+      this.schoolWorkModel.bulkWrite(bulkOps, { ordered: true }),
+    );
+
+    if (result.matchedCount < ops.length) {
+      throw new Error(
+        `Failed to update ${ops.length - result.matchedCount} school(s). Some records may be missing or out of sync.`,
+      );
+    }
+  }
+
   toPlain(doc: SchoolWorkDocument | Record<string, unknown>): Record<string, unknown> {
     const obj =
       typeof (doc as SchoolWorkDocument).toObject === 'function'
@@ -72,7 +142,14 @@ export class SchoolWorksService {
   }
 
   async findAll(): Promise<Record<string, unknown>[]> {
-    const docs = await this.schoolWorkModel.find().sort({ srNo: 1 }).lean().exec();
+    const tenantId = this.resolveTenantId();
+    const docs = await runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .find(this.tenantOrMissingFilter(tenantId))
+        .sort({ srNo: 1 })
+        .lean()
+        .exec(),
+    );
     return docs.map((d) => this.toPlain(d));
   }
 
@@ -97,11 +174,19 @@ export class SchoolWorksService {
   }
 
   async count(): Promise<number> {
-    return this.schoolWorkModel.countDocuments();
+    const tenantId = this.resolveTenantId();
+    return runWithoutTenantScope(() =>
+      this.schoolWorkModel.countDocuments(this.tenantOrMissingFilter(tenantId)),
+    );
   }
 
   async findById(id: string): Promise<Record<string, unknown> | null> {
-    const doc = await this.schoolWorkModel.findOne({ id }).exec();
+    const tenantId = this.resolveTenantId();
+    const doc = await runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .findOne({ id, ...this.tenantOrMissingFilter(tenantId) })
+        .exec(),
+    );
     return doc ? this.toPlain(doc) : null;
   }
 
@@ -331,15 +416,60 @@ export class SchoolWorksService {
   async deleteByIds(
     ids: string[],
   ): Promise<{ count: number; deleted: Record<string, unknown>[] }> {
-    const deletedDocs = await this.schoolWorkModel.find({ id: { $in: ids } }).exec();
-    const deleted = deletedDocs.map((d) => this.toPlain(d));
-    const result = await this.schoolWorkModel.deleteMany({ id: { $in: ids } });
-    const remaining = await this.schoolWorkModel.find().sort({ srNo: 1 }).exec();
-    for (let i = 0; i < remaining.length; i++) {
-      remaining[i].srNo = i + 1;
-      await remaining[i].save();
+    const trimmedIds = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+    if (trimmedIds.length === 0) {
+      return { count: 0, deleted: [] };
     }
+
+    const tenantId = this.resolveTenantId();
+    const tenantFilter = this.tenantOrMissingFilter(tenantId);
+    const matchFilter = { id: { $in: trimmedIds }, ...tenantFilter };
+
+    const deletedDocs = await runWithoutTenantScope(() =>
+      this.schoolWorkModel.find(matchFilter).exec(),
+    );
+    if (deletedDocs.length === 0) {
+      throw new BadRequestException('No matching school records found to delete.');
+    }
+
+    const deleted = deletedDocs.map((d) => this.toPlain(d));
+    const resolvedIds = deletedDocs.map((d) => d.id);
+
+    const result = await runWithoutTenantScope(() =>
+      this.schoolWorkModel.deleteMany({
+        id: { $in: resolvedIds },
+        ...tenantFilter,
+      }),
+    );
+
+    await this.renumberSerialNumbers();
     return { count: result.deletedCount ?? 0, deleted };
+  }
+
+  private async renumberSerialNumbers(): Promise<void> {
+    const tenantId = this.resolveTenantId();
+    const tenantFilter = this.tenantOrMissingFilter(tenantId);
+    const remaining = await runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .find(tenantFilter)
+        .sort({ srNo: 1 })
+        .select('id')
+        .lean()
+        .exec(),
+    );
+    if (remaining.length === 0) return;
+
+    await runWithoutTenantScope(() =>
+      this.schoolWorkModel.bulkWrite(
+        remaining.map((doc, index) => ({
+          updateOne: {
+            filter: { id: doc.id, ...tenantFilter },
+            update: { $set: { srNo: index + 1, tenantId } },
+          },
+        })),
+        { ordered: false },
+      ),
+    );
   }
 
   async bulkInsert(
@@ -420,10 +550,7 @@ export class SchoolWorksService {
       throw new Error('Month is required.');
     }
 
-    const schools = await this.schoolWorkModel
-      .find(this.buildBlockDistrictQuery(block, district || undefined))
-      .sort({ srNo: 1 })
-      .exec();
+    const schools = await this.findSchoolsInBlock(block, district || undefined);
     if (schools.length === 0) {
       const scope = district
         ? `block "${block}" in district "${district}"`
@@ -455,10 +582,14 @@ export class SchoolWorksService {
     const updateTrek = (Number(params.trekAmount) || 0) > 0 || trekRemark.length > 0;
     const updateMiscellaneous =
       (Number(params.miscellaneousAmount) || 0) > 0 || miscellaneousRemark.length > 0;
+    const bulkOps: Array<{ id: string; set: Record<string, unknown> }> = [];
     const updated: Record<string, unknown>[] = [];
 
     for (let i = 0; i < schools.length; i++) {
       const school = schools[i];
+      const schoolId = String(school.id || '').trim();
+      if (!schoolId) continue;
+
       const ledger = this.normalizeMonthlyLedger(school.monthlyExpenseLedger);
       const prev = ledger[monthKey] || {
         material: 0,
@@ -482,10 +613,11 @@ export class SchoolWorksService {
           ? miscellaneousDate
           : prev.miscellaneousDate,
       };
-      school.monthlyExpenseLedger = ledger;
-      await school.save();
-      updated.push(this.toPlain(school));
+      bulkOps.push({ id: schoolId, set: { monthlyExpenseLedger: ledger } });
+      updated.push(this.toPlain({ ...school, monthlyExpenseLedger: ledger }));
     }
+
+    await this.bulkSetSchoolFields(bulkOps);
 
     return {
       updatedCount: updated.length,
@@ -516,10 +648,7 @@ export class SchoolWorksService {
       throw new Error('Invalid expense type.');
     }
 
-    const schools = await this.schoolWorkModel
-      .find(this.buildBlockDistrictQuery(block, district || undefined))
-      .sort({ srNo: 1 })
-      .exec();
+    const schools = await this.findSchoolsInBlock(block, district || undefined);
     if (schools.length === 0) {
       const scope = district
         ? `block "${block}" in district "${district}"`
@@ -527,9 +656,13 @@ export class SchoolWorksService {
       throw new Error(`No schools found for ${scope}.`);
     }
 
+    const bulkOps: Array<{ id: string; set: Record<string, unknown> }> = [];
     const updated: Record<string, unknown>[] = [];
 
     for (const school of schools) {
+      const schoolId = String(school.id || '').trim();
+      if (!schoolId) continue;
+
       const ledger = this.normalizeMonthlyLedger(school.monthlyExpenseLedger);
       const prev = ledger[monthKey];
       if (!prev) continue;
@@ -550,10 +683,11 @@ export class SchoolWorksService {
       }
 
       ledger[monthKey] = next;
-      school.monthlyExpenseLedger = ledger;
-      await school.save();
-      updated.push(this.toPlain(school));
+      bulkOps.push({ id: schoolId, set: { monthlyExpenseLedger: ledger } });
+      updated.push(this.toPlain({ ...school, monthlyExpenseLedger: ledger }));
     }
+
+    await this.bulkSetSchoolFields(bulkOps);
 
     return { updatedCount: updated.length, schools: updated };
   }
@@ -572,10 +706,7 @@ export class SchoolWorksService {
     }
 
     const district = String(params.district || '').trim();
-    const schools = await this.schoolWorkModel
-      .find(this.buildBlockDistrictQuery(block, district || undefined))
-      .sort({ srNo: 1 })
-      .exec();
+    const schools = await this.findSchoolsInBlock(block, district || undefined);
     if (schools.length === 0) {
       const scope = district
         ? `block "${block}" in district "${district}"`
@@ -602,12 +733,15 @@ export class SchoolWorksService {
       31,
       Math.max(1, Math.round(Number(params.defaultDays) || 24)),
     );
+    const bulkOps: Array<{ id: string; set: Record<string, unknown> }> = [];
     const updated: Record<string, unknown>[] = [];
 
     for (const school of schools) {
+      const schoolId = String(school.id || '').trim();
+      if (!schoolId) continue;
+
       const update =
-        updateMap.get(String(school.id)) ??
-        updateMap.get(String(school.udise));
+        updateMap.get(schoolId) ?? updateMap.get(String(school.udise || '').trim());
       const days = update?.cleaningDays ?? fallbackDays;
       const ledger = this.normalizeMonthlyWorkdaysLedger(
         school.monthlyWorkdaysLedger,
@@ -621,10 +755,11 @@ export class SchoolWorksService {
         entry.billingToilets = ledger[monthKey].billingToilets;
       }
       ledger[monthKey] = entry;
-      school.monthlyWorkdaysLedger = ledger;
-      await school.save();
-      updated.push(this.toPlain(school));
+      bulkOps.push({ id: schoolId, set: { monthlyWorkdaysLedger: ledger } });
+      updated.push(this.toPlain({ ...school, monthlyWorkdaysLedger: ledger }));
     }
+
+    await this.bulkSetSchoolFields(bulkOps);
 
     return { updatedCount: updated.length, schools: updated };
   }

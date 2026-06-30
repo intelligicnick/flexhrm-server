@@ -279,20 +279,34 @@ export class SchoolWorksController {
     if (!Array.isArray(dto.ids)) {
       throw new BadRequestException('Expected an array of ids to delete.');
     }
-    const { count, deleted } = await this.schoolWorksService.deleteByIds(
-      dto.ids.map(String),
-    );
-    await this.schoolPartnersService.deleteBySchoolWorkIds(dto.ids.map(String));
-    await this.auditLogsService.append({
-      username,
-      action: 'DELETE_SCHOOL_WORKS',
-      target: `School Work Deletion: Removed ${count} school record(s).`,
-      details: { count, ids: dto.ids, deleted },
-    });
-    return {
-      success: true,
-      count,
-      total: await this.schoolWorksService.count(),
-    };
+    const ids = dto.ids.map(String);
+    try {
+      const { count, deleted } = await this.schoolWorksService.deleteByIds(ids);
+      await this.schoolPartnersService.deleteBySchoolWorkIds(ids);
+      await this.auditLogsService.append({
+        username,
+        action: 'DELETE_SCHOOL_WORKS',
+        target: `School Work Deletion: Removed ${count} school record(s).`,
+        details: {
+          count,
+          ids,
+          deleted: deleted.map((record) => ({
+            id: record.id,
+            udise: record.udise,
+            schoolName: record.schoolName,
+          })),
+        },
+      });
+      return {
+        success: true,
+        count,
+        total: await this.schoolWorksService.count(),
+      };
+    } catch (err: unknown) {
+      if (err instanceof BadRequestException) throw err;
+      const message =
+        err instanceof Error ? err.message : 'School deletion failed.';
+      throw new BadRequestException(message);
+    }
   }
 }

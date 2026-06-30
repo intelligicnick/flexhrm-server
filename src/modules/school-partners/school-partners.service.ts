@@ -9,6 +9,7 @@ import {
   SchoolWork,
   SchoolWorkDocument,
 } from '../../database/schemas/school-work.schema';
+import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
 import { UpsertSchoolPartnerDto } from './dto/school-partner.dto';
 import { generateToken } from '../../common/utils/password.util';
 
@@ -104,7 +105,9 @@ export class SchoolPartnersService {
 
   async deleteBySchoolWorkIds(schoolWorkIds: string[]): Promise<void> {
     if (!schoolWorkIds.length) return;
-    await this.partnerModel.deleteMany({ schoolWorkId: { $in: schoolWorkIds } });
+    await runWithoutTenantScope(() =>
+      this.partnerModel.deleteMany({ schoolWorkId: { $in: schoolWorkIds } }),
+    );
   }
 
   async create(dto: UpsertSchoolPartnerDto): Promise<Record<string, unknown>> {
