@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -19,11 +20,17 @@ import { ContractBgSyncService } from './contract-bg-sync.service';
 
 @Injectable()
 export class ContractsService {
+  private readonly logger = new Logger(ContractsService.name);
+
   constructor(
     @InjectModel(Contract.name)
     private readonly contractModel: Model<ContractDocument>,
     private readonly contractBgSyncService: ContractBgSyncService,
   ) {}
+
+  private trimText(value: unknown): string {
+    return String(value ?? '').trim();
+  }
 
   private parseDateMs(value: string): number | null {
     const raw = value.trim();
@@ -200,7 +207,7 @@ export class ContractsService {
   }
 
   async create(dto: CreateContractDto): Promise<Record<string, unknown>> {
-    const contractNo = dto.contractNo.trim();
+    const contractNo = this.trimText(dto.contractNo);
     if (!contractNo) {
       throw new BadRequestException('Contract number is required.');
     }
@@ -217,7 +224,7 @@ export class ContractsService {
     const doc = await this.contractModel.create({
       id,
       ...payload,
-      entryDate: dto.entryDate?.trim() || new Date().toISOString().slice(0, 10),
+      entryDate: this.trimText(dto.entryDate) || new Date().toISOString().slice(0, 10),
     });
     await this.contractBgSyncService.syncFromContract(doc);
     return this.toPlain(doc);
@@ -231,7 +238,7 @@ export class ContractsService {
     if (!doc) throw new NotFoundException('Contract not found.');
 
     if (dto.contractNo !== undefined) {
-      const contractNo = dto.contractNo.trim();
+      const contractNo = this.trimText(dto.contractNo);
       if (!contractNo) {
         throw new BadRequestException('Contract number is required.');
       }
@@ -251,7 +258,15 @@ export class ContractsService {
       doc.status = this.deriveStatus(doc);
     }
     await doc.save();
-    await this.contractBgSyncService.syncFromContract(doc);
+    try {
+      await this.contractBgSyncService.syncFromContract(doc);
+    } catch (err) {
+      this.logger.warn(
+        `Contract ${id} saved but BG sync failed: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+    }
     return this.toPlain(doc);
   }
 
@@ -269,16 +284,16 @@ export class ContractsService {
     const errors: string[] = [];
 
     for (const item of items) {
-      const contractNo = item.contractNo?.trim();
+      const contractNo = this.trimText(item.contractNo);
       if (!contractNo) {
         skipped += 1;
         continue;
       }
       try {
         let existing = await this.contractModel.findOne({ contractNo }).exec();
-        if (!existing && item.gemContractPdfUrl?.trim()) {
+        if (!existing && this.trimText(item.gemContractPdfUrl)) {
           existing = await this.contractModel
-            .findOne({ gemContractPdfUrl: item.gemContractPdfUrl.trim() })
+            .findOne({ gemContractPdfUrl: this.trimText(item.gemContractPdfUrl) })
             .exec();
         }
         if (existing) {
@@ -306,31 +321,31 @@ export class ContractsService {
     const hasExtension = dto.hasExtension ?? false;
     const bgApplicable = dto.bgApplicable ?? false;
     const payload: Partial<Contract> = {
-      contractNo: dto.contractNo.trim(),
-      officerName: dto.officerName?.trim() || '',
-      officeName: dto.officeName?.trim() || '',
-      correspondingOffice: dto.correspondingOffice?.trim() || '',
-      fromDate: dto.fromDate?.trim() || '',
-      toDate: dto.toDate?.trim() || '',
-      companyName: dto.companyName?.trim() || '',
-      category: dto.category?.trim() || '',
+      contractNo: this.trimText(dto.contractNo),
+      officerName: this.trimText(dto.officerName),
+      officeName: this.trimText(dto.officeName),
+      correspondingOffice: this.trimText(dto.correspondingOffice),
+      fromDate: this.trimText(dto.fromDate),
+      toDate: this.trimText(dto.toDate),
+      companyName: this.trimText(dto.companyName),
+      category: this.trimText(dto.category),
       contractType: dto.contractType || 'manpower',
       hasExtension,
-      extensionEndDate: hasExtension ? dto.extensionEndDate?.trim() || '' : '',
+      extensionEndDate: hasExtension ? this.trimText(dto.extensionEndDate) : '',
       bgApplicable,
-      bgNumber: bgApplicable ? dto.bgNumber?.trim() || '' : '',
-      bgAmount: bgApplicable ? dto.bgAmount?.trim() || '' : '',
-      bgIssuingBank: bgApplicable ? dto.bgIssuingBank?.trim() || '' : '',
-      bgExpiryDate: bgApplicable ? dto.bgExpiryDate?.trim() || '' : '',
-      bgDetails: bgApplicable ? dto.bgDetails?.trim() || '' : '',
-      ddoName: dto.ddoName?.trim() || '',
-      ddoIssuingDetails: dto.ddoIssuingDetails?.trim() || '',
-      tenderBidNo: dto.tenderBidNo?.trim() || '',
-      contractValue: dto.contractValue?.trim() || '',
-      notes: dto.notes?.trim() || '',
+      bgNumber: bgApplicable ? this.trimText(dto.bgNumber) : '',
+      bgAmount: bgApplicable ? this.trimText(dto.bgAmount) : '',
+      bgIssuingBank: bgApplicable ? this.trimText(dto.bgIssuingBank) : '',
+      bgExpiryDate: bgApplicable ? this.trimText(dto.bgExpiryDate) : '',
+      bgDetails: bgApplicable ? this.trimText(dto.bgDetails) : '',
+      ddoName: this.trimText(dto.ddoName),
+      ddoIssuingDetails: this.trimText(dto.ddoIssuingDetails),
+      tenderBidNo: this.trimText(dto.tenderBidNo),
+      contractValue: this.trimText(dto.contractValue),
+      notes: this.trimText(dto.notes),
       status: dto.status || 'active',
-      gemContractPdfUrl: dto.gemContractPdfUrl?.trim() || '',
-      gemContractId: dto.gemContractId?.trim() || '',
+      gemContractPdfUrl: this.trimText(dto.gemContractPdfUrl),
+      gemContractId: this.trimText(dto.gemContractId),
       linkedLocations: this.normalizeLinkedLocations(dto.linkedLocations),
     };
     payload.status = this.deriveStatus(payload);
@@ -341,45 +356,45 @@ export class ContractsService {
     doc: ContractDocument,
     dto: Partial<CreateContractDto>,
   ): void {
-    if (dto.officerName !== undefined) doc.officerName = dto.officerName.trim();
-    if (dto.officeName !== undefined) doc.officeName = dto.officeName.trim();
+    if (dto.officerName !== undefined) doc.officerName = this.trimText(dto.officerName);
+    if (dto.officeName !== undefined) doc.officeName = this.trimText(dto.officeName);
     if (dto.correspondingOffice !== undefined) {
-      doc.correspondingOffice = dto.correspondingOffice.trim();
+      doc.correspondingOffice = this.trimText(dto.correspondingOffice);
     }
-    if (dto.fromDate !== undefined) doc.fromDate = dto.fromDate.trim();
-    if (dto.toDate !== undefined) doc.toDate = dto.toDate.trim();
-    if (dto.companyName !== undefined) doc.companyName = dto.companyName.trim();
-    if (dto.category !== undefined) doc.category = dto.category.trim();
+    if (dto.fromDate !== undefined) doc.fromDate = this.trimText(dto.fromDate);
+    if (dto.toDate !== undefined) doc.toDate = this.trimText(dto.toDate);
+    if (dto.companyName !== undefined) doc.companyName = this.trimText(dto.companyName);
+    if (dto.category !== undefined) doc.category = this.trimText(dto.category);
     if (dto.contractType !== undefined) doc.contractType = dto.contractType;
     if (dto.hasExtension !== undefined) doc.hasExtension = dto.hasExtension;
     if (dto.extensionEndDate !== undefined) {
-      doc.extensionEndDate = dto.extensionEndDate.trim();
+      doc.extensionEndDate = this.trimText(dto.extensionEndDate);
     }
     if (dto.bgApplicable !== undefined) doc.bgApplicable = dto.bgApplicable;
-    if (dto.bgNumber !== undefined) doc.bgNumber = dto.bgNumber.trim();
-    if (dto.bgAmount !== undefined) doc.bgAmount = dto.bgAmount.trim();
+    if (dto.bgNumber !== undefined) doc.bgNumber = this.trimText(dto.bgNumber);
+    if (dto.bgAmount !== undefined) doc.bgAmount = this.trimText(dto.bgAmount);
     if (dto.bgIssuingBank !== undefined) {
-      doc.bgIssuingBank = dto.bgIssuingBank.trim();
+      doc.bgIssuingBank = this.trimText(dto.bgIssuingBank);
     }
     if (dto.bgExpiryDate !== undefined) {
-      doc.bgExpiryDate = dto.bgExpiryDate.trim();
+      doc.bgExpiryDate = this.trimText(dto.bgExpiryDate);
     }
-    if (dto.bgDetails !== undefined) doc.bgDetails = dto.bgDetails.trim();
-    if (dto.ddoName !== undefined) doc.ddoName = dto.ddoName.trim();
+    if (dto.bgDetails !== undefined) doc.bgDetails = this.trimText(dto.bgDetails);
+    if (dto.ddoName !== undefined) doc.ddoName = this.trimText(dto.ddoName);
     if (dto.ddoIssuingDetails !== undefined) {
-      doc.ddoIssuingDetails = dto.ddoIssuingDetails.trim();
+      doc.ddoIssuingDetails = this.trimText(dto.ddoIssuingDetails);
     }
-    if (dto.tenderBidNo !== undefined) doc.tenderBidNo = dto.tenderBidNo.trim();
+    if (dto.tenderBidNo !== undefined) doc.tenderBidNo = this.trimText(dto.tenderBidNo);
     if (dto.contractValue !== undefined) {
-      doc.contractValue = dto.contractValue.trim();
+      doc.contractValue = this.trimText(dto.contractValue);
     }
     if (dto.status !== undefined) doc.status = dto.status;
-    if (dto.notes !== undefined) doc.notes = dto.notes.trim();
-    if (dto.entryDate !== undefined) doc.entryDate = dto.entryDate.trim();
+    if (dto.notes !== undefined) doc.notes = this.trimText(dto.notes);
+    if (dto.entryDate !== undefined) doc.entryDate = this.trimText(dto.entryDate);
     if (dto.gemContractPdfUrl !== undefined) {
-      doc.gemContractPdfUrl = dto.gemContractPdfUrl.trim();
+      doc.gemContractPdfUrl = this.trimText(dto.gemContractPdfUrl);
     }
-    if (dto.gemContractId !== undefined) doc.gemContractId = dto.gemContractId.trim();
+    if (dto.gemContractId !== undefined) doc.gemContractId = this.trimText(dto.gemContractId);
     if (dto.linkedLocations !== undefined) {
       doc.linkedLocations = this.normalizeLinkedLocations(dto.linkedLocations);
     }
