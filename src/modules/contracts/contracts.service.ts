@@ -292,22 +292,41 @@ export class ContractsService {
     return this.toPlain(doc);
   }
 
-  private async saveContractDocument(doc: ContractDocument): Promise<void> {
-    try {
-      await doc.save();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to save contract.';
-      this.logger.error(`Contract save failed: ${message}`, err);
-      throw new BadRequestException(message);
+  private contractSetFields(doc: ContractDocument): Record<string, unknown> {
+    const plain = doc.toObject() as unknown as Record<string, unknown>;
+    delete plain._id;
+    delete plain.__v;
+    delete plain.createdAt;
+    delete plain.updatedAt;
+    return plain;
+  }
+
+  private async persistContractDocument(
+    doc: ContractDocument,
+  ): Promise<ContractDocument> {
+    const setFields = this.contractSetFields(doc);
+    const updated = await runWithoutTenantScope(() =>
+      this.contractModel
+        .findOneAndUpdate(
+          { id: doc.id },
+          { $set: setFields },
+          { new: true, runValidators: true },
+        )
+        .exec(),
+    );
+    if (!updated) {
+      throw new NotFoundException('Contract not found.');
     }
+    return updated;
   }
 
   async update(
     id: string,
     dto: UpdateContractDto,
   ): Promise<Record<string, unknown>> {
-    const doc = await this.contractModel.findOne({ id }).exec();
+    const doc = await runWithoutTenantScope(() =>
+      this.contractModel.findOne({ id }).exec(),
+    );
     if (!doc) throw new NotFoundException('Contract not found.');
 
     if (dto.contractNo !== undefined) {
@@ -330,9 +349,18 @@ export class ContractsService {
     if (dto.status === undefined) {
       doc.status = this.deriveStatus(doc);
     }
-    await this.saveContractDocument(doc);
+    let saved: ContractDocument;
     try {
-      await this.contractBgSyncService.syncFromContract(doc);
+      saved = await this.persistContractDocument(doc);
+    } catch (err) {
+      if (err instanceof NotFoundException) throw err;
+      const message =
+        err instanceof Error ? err.message : 'Failed to save contract.';
+      this.logger.error(`Contract update failed: ${message}`, err);
+      throw new BadRequestException(message);
+    }
+    try {
+      await this.contractBgSyncService.syncFromContract(saved);
     } catch (err) {
       this.logger.warn(
         `Contract ${id} saved but BG sync failed: ${
@@ -340,11 +368,13 @@ export class ContractsService {
         }`,
       );
     }
-    return this.toPlain(doc);
+    return this.toPlain(saved);
   }
 
   async delete(id: string): Promise<void> {
-    const result = await this.contractModel.deleteOne({ id }).exec();
+    const result = await runWithoutTenantScope(() =>
+      this.contractModel.deleteOne({ id }).exec(),
+    );
     if (!result.deletedCount) throw new NotFoundException('Contract not found.');
   }
 
@@ -372,8 +402,8 @@ export class ContractsService {
         if (existing) {
           this.applyPatch(existing, item);
           existing.status = this.deriveStatus(existing);
-          await existing.save();
-          await this.contractBgSyncService.syncFromContract(existing);
+          const saved = await this.persistContractDocument(existing);
+          await this.contractBgSyncService.syncFromContract(saved);
           updated += 1;
           continue;
         }

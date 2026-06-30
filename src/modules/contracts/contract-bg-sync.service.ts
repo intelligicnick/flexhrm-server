@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as crypto from 'crypto';
+import { runWithoutTenantScope } from '../../platform/common/tenant-context.store';
 import {
   Contract,
   ContractDocument,
@@ -64,7 +65,16 @@ export class ContractBgSyncService {
     contract.bgIssuingBank = String(record.issuingBank || '').trim();
     contract.bgExpiryDate = String(record.expiryDate || '').trim();
     contract.bgDetails = String(record.notes || '').trim();
-    await contract.save();
+    const plain = contract.toObject() as unknown as Record<string, unknown>;
+    delete plain._id;
+    delete plain.__v;
+    delete plain.createdAt;
+    delete plain.updatedAt;
+    await runWithoutTenantScope(() =>
+      this.contractModel
+        .findOneAndUpdate({ id: contract.id }, { $set: plain })
+        .exec(),
+    );
   }
 
   async syncFromContract(contract: ContractDocument): Promise<void> {
