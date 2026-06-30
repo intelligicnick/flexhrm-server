@@ -271,7 +271,16 @@ export class EmployeeMonitorService {
 
     try {
       if (existing) {
-        await this.credentialModel.updateOne({ id: existing.id }, { $set: payload }).exec();
+        // scopeFilter includes legacy empty/missing tenantId rows; plain updateOne would
+        // add tenantId: default via the query plugin and silently match 0 documents.
+        const result = await this.credentialModel
+          .updateOne({ id: existing.id, ...scopeFilter }, { $set: payload })
+          .exec();
+        if (result.matchedCount === 0) {
+          throw new BadRequestException(
+            'Failed to save agent credentials. Please try again or contact support.',
+          );
+        }
       } else {
         await this.credentialModel.create(payload);
       }
