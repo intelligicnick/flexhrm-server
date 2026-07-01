@@ -22,12 +22,20 @@ function toNonNegativeNumber(val: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-export function calculatePfWage(monthlyGross: number, mode?: string | null): number {
+export function calculatePfWage(
+  monthlyGross: number,
+  mode?: string | null,
+  monthlyBasic?: number | null,
+): number {
   const gross = toNonNegativeNumber(monthlyGross);
   if (resolvePfCalculationMode(mode) === 'gross') {
     return gross;
   }
-  return gross >= PF_STATUTORY_CEILING ? PF_STATUTORY_CEILING : gross;
+  const basic =
+    monthlyBasic !== undefined && monthlyBasic !== null
+      ? toNonNegativeNumber(monthlyBasic)
+      : gross;
+  return basic >= PF_STATUTORY_CEILING ? PF_STATUTORY_CEILING : basic;
 }
 
 export interface PfAmounts {
@@ -40,6 +48,7 @@ export function calculatePfAmounts(
   monthlyGross: number,
   options: {
     mode?: string | null;
+    monthlyBasic?: number | null;
     isCompliant?: boolean;
     employeePfRate?: number;
     employerPfRate?: number;
@@ -47,6 +56,7 @@ export function calculatePfAmounts(
 ): PfAmounts {
   const {
     mode,
+    monthlyBasic,
     isCompliant = true,
     employeePfRate = EMPLOYEE_PF_RATE,
     employerPfRate = EMPLOYER_PF_RATE,
@@ -56,7 +66,7 @@ export function calculatePfAmounts(
     return { pfWage: 0, employeePf: 0, employerPf: 0 };
   }
 
-  const pfWage = calculatePfWage(monthlyGross, mode);
+  const pfWage = calculatePfWage(monthlyGross, mode, monthlyBasic);
   return {
     pfWage,
     employeePf: Math.round(pfWage * employeePfRate),
@@ -140,7 +150,7 @@ export function calculatePayroll(input: PayrollCalculationInput): PayrollCalcula
   };
 
   const derived = calculateSalaryDetails(gross, 50, esicLimit);
-  const basicSalary = derived.basic;
+  const basicSalary = input.basicSalary ?? derived.basic;
   const esic = derived.esic;
 
   const isCompliant = isPfEsicCompliant(employee, locationCompliance);
@@ -148,6 +158,7 @@ export function calculatePayroll(input: PayrollCalculationInput): PayrollCalcula
 
   const { employeePf, employerPf } = calculatePfAmounts(gross, {
     mode: input.pfCalculationMode,
+    monthlyBasic: basicSalary,
     isCompliant,
   });
 
@@ -200,13 +211,14 @@ export function sanitizeEmployeePayrollFields(
   const gross = Number(record.grossSalary) || 0;
   if (gross <= 0) return record;
 
+  const existingBasic = Number(record.basicSalary) || 0;
   const basicPercent = options.basicPercent ?? 50;
   const esicLimit = options.esicLimit ?? 21000;
   const derived = calculateSalaryDetails(gross, basicPercent, esicLimit);
 
   return {
     ...record,
-    basicSalary: derived.basic,
+    basicSalary: existingBasic > 0 ? existingBasic : derived.basic,
     esic: derived.esic,
   };
 }
