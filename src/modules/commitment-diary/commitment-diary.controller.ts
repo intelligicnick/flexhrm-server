@@ -112,7 +112,7 @@ export class CommitmentDiaryController {
   }
 
   @Delete(':id')
-  @RequireAnyPermissions(['schoolWork'], 'edit')
+  @RequireAnyPermissions(['schoolWork'], 'delete')
   async cancelAsAdmin(
     @CurrentUsername() username: string,
     @Param('id') id: string,

@@ -26,7 +26,7 @@ export class HelplinesController {
   }
 
   @Delete(':id')
-  @RequirePermissions('directory', 'edit')
+  @RequirePermissions('directory', 'delete')
   async remove(@Param('id') id: string) {
     await this.helplinesService.delete(id);
     return { success: true };

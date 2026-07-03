@@ -26,18 +26,24 @@ export class RolesController {
     await this.rolesService.upsert({
       name: cleanName,
       description: dto.description ?? '',
-      permissions: (dto.permissions ?? {}) as Record<string, { view: boolean; edit: boolean }>,
+      permissions: (dto.permissions ?? {}) as Record<
+        string,
+        { view: boolean; edit: boolean; delete: boolean }
+      >,
       uiRestrictions: (dto.uiRestrictions ?? {}) as Record<string, Record<string, unknown>>,
     }, req.tenantId);
     const rulesList = Object.entries(dto.permissions ?? {})
-      .map(([m, p]) => `${m}: ${p?.view ? 'View' : '-'}/${p?.edit ? 'Edit' : '-'}`)
+      .map(
+        ([m, p]) =>
+          `${m}: ${p?.view ? 'View' : '-'}/${p?.edit ? 'Edit' : '-'}/${p?.delete ? 'Delete' : '-'}`,
+      )
       .join(', ');
     await this.auditLogsService.append({
       username,
       action: 'SAVE_ROLE_MATRIX',
       target:
         `Role Permissions Updated: Security role "${cleanName}" now has the following module access rules — ${rulesList}. ` +
-        `All administrators assigned this role will immediately inherit the updated view/edit permissions.`,
+        `All administrators assigned this role will immediately inherit the updated view/edit/delete permissions.`,
       details: {
         ...(dto as unknown as Record<string, unknown>),
         summary: `Updated permission matrix for role "${cleanName}".`,
@@ -47,7 +53,7 @@ export class RolesController {
   }
 
   @Delete(':name')
-  @RequirePermissions('admin', 'edit')
+  @RequirePermissions('admin', 'delete')
   async remove(@CurrentUsername() username: string, @Param('name') name: string, @Req() req: Request) {
     await this.rolesService.deleteByName(name, req.tenantId);
     await this.auditLogsService.append({

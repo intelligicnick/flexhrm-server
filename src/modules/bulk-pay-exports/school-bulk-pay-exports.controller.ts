@@ -94,7 +94,7 @@ export class SchoolBulkPayExportsController {
   }
 
   @Delete(':id')
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async remove(
     @CurrentUsername() username: string,
     @Param('id') id: string,

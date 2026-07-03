@@ -316,7 +316,7 @@ export class EmployeesController {
   }
 
   @Post('data-gather-links/:linkId/revoke')
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async revokeDataGatherLink(
     @CurrentUsername() username: string,
     @Param('linkId') linkId: string,
@@ -607,7 +607,7 @@ export class EmployeesController {
   }
 
   @Delete(':id/documents/:docId')
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async deleteDocument(
     @CurrentUsername() username: string,
     @Param('id') id: string,
@@ -778,7 +778,7 @@ export class EmployeesController {
   }
 
   @Post('delete')
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async remove(@CurrentUsername() username: string, @Body() dto: BulkDeleteDto) {
     if (!Array.isArray(dto.ids)) {
       throw new BadRequestException('Expected an array of ids to delete.');
@@ -916,7 +916,7 @@ export class EmployeesController {
   }
 
   @Post('delete-roles')
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async deleteRoles(@CurrentUsername() username: string, @Body() dto: DeleteRolesDto) {
     const count = await this.employeesService.clearRoles(dto.roles);
     await this.auditLogsService.append({
@@ -939,7 +939,7 @@ export class EmployeesController {
   }
 
   @Post('delete-locations')
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async deleteLocations(@CurrentUsername() username: string, @Body() dto: DeleteLocationsDto) {
     const count = await this.employeesService.clearLocations(dto.locations);
     await this.auditLogsService.append({
@@ -1001,7 +1001,7 @@ export class EmployeesController {
   }
 
   @Post('payroll-ledger/delete-item')
-  @RequirePermissions('ledger', 'edit')
+  @RequirePermissions('ledger', 'delete')
   async deleteLedgerItem(@CurrentUsername() username: string, @Body() dto: DeleteLedgerItemDto) {
     const deleted = await this.employeesService.deleteLedgerItem(dto.monthKey, dto.employeeId, dto.itemId);
     if (!deleted) throw new NotFoundException('Ledger entry not found.');

@@ -51,7 +51,7 @@ export class SchoolGeographyController {
   }
 
   @Delete('districts')
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async deleteDistricts(
     @CurrentUsername() username: string,
     @Body() body: { ids: string[] },
@@ -109,7 +109,7 @@ export class SchoolGeographyController {
   }
 
   @Delete('blocks')
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async deleteBlocks(
     @CurrentUsername() username: string,
     @Body() body: { ids: string[] },

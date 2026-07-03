@@ -79,7 +79,7 @@ export class RenewalsController {
   }
 
   @Delete(':id')
-  @RequirePermissions('renewals', 'edit')
+  @RequirePermissions('renewals', 'delete')
   async remove(@Param('id') id: string) {
     await this.renewalsService.delete(id);
     return { success: true };
@@ -164,7 +164,7 @@ export class RenewalsController {
   }
 
   @Delete(':id/documents/:docId')
-  @RequirePermissions('renewals', 'edit')
+  @RequirePermissions('renewals', 'delete')
   async deleteDocument(
     @Param('id') id: string,
     @Param('docId') docId: string,

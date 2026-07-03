@@ -78,7 +78,7 @@ export class TendersController {
   }
 
   @Delete(':id')
-  @RequirePermissions('bids', 'edit')
+  @RequirePermissions('bids', 'delete')
   async remove(@Param('id') id: string) {
     await this.tendersService.delete(id);
     return { success: true };

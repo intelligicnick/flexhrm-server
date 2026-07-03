@@ -75,7 +75,7 @@ export class BgDdController {
   }
 
   @Delete(':id')
-  @RequirePermissions('bids', 'edit')
+  @RequirePermissions('bids', 'delete')
   async remove(@Param('id') id: string) {
     await this.bgDdService.delete(id);
     return { success: true };
@@ -160,7 +160,7 @@ export class BgDdController {
   }
 
   @Delete(':id/documents/:docId')
-  @RequirePermissions('bids', 'edit')
+  @RequirePermissions('bids', 'delete')
   async deleteDocument(
     @Param('id') id: string,
     @Param('docId') docId: string,

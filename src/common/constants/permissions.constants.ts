@@ -15,11 +15,12 @@ export const PERMISSION_MODULES = [
 
 export type PermissionModule = (typeof PERMISSION_MODULES)[number];
 
-export type PermissionAction = 'view' | 'edit';
+export type PermissionAction = 'view' | 'edit' | 'delete';
 
 export interface RolePermission {
   view: boolean;
   edit: boolean;
+  delete: boolean;
 }
 
 export type PermissionsMap = Record<PermissionModule, RolePermission>;
@@ -37,36 +38,36 @@ export const DEFAULT_ROLES = [
     description:
       'Can view and edit employees, attendance, and leaves; can only view salary and ledgers.',
     permissions: {
-      employees: { view: true, edit: true },
-      schoolWork: { view: true, edit: true },
-      bids: { view: true, edit: true },
-      renewals: { view: true, edit: true },
-      salary: { view: true, edit: false },
-      ledger: { view: true, edit: false },
-      attendance: { view: true, edit: true },
-      leave: { view: true, edit: true },
-      birthdays: { view: true, edit: true },
-      directory: { view: true, edit: true },
-      monitor: { view: true, edit: true },
-      admin: { view: false, edit: false },
+      employees: { view: true, edit: true, delete: true },
+      schoolWork: { view: true, edit: true, delete: true },
+      bids: { view: true, edit: true, delete: true },
+      renewals: { view: true, edit: true, delete: true },
+      salary: { view: true, edit: false, delete: false },
+      ledger: { view: true, edit: false, delete: false },
+      attendance: { view: true, edit: true, delete: true },
+      leave: { view: true, edit: true, delete: true },
+      birthdays: { view: true, edit: true, delete: true },
+      directory: { view: true, edit: true, delete: true },
+      monitor: { view: true, edit: true, delete: true },
+      admin: { view: false, edit: false, delete: false },
     },
   },
   {
     name: 'Auditor',
     description: 'Read-only access across all HRMS categories.',
     permissions: {
-      employees: { view: true, edit: false },
-      schoolWork: { view: true, edit: false },
-      bids: { view: true, edit: false },
-      renewals: { view: true, edit: false },
-      salary: { view: true, edit: false },
-      ledger: { view: true, edit: false },
-      attendance: { view: true, edit: false },
-      leave: { view: true, edit: false },
-      birthdays: { view: true, edit: false },
-      directory: { view: true, edit: false },
-      monitor: { view: true, edit: false },
-      admin: { view: false, edit: false },
+      employees: { view: true, edit: false, delete: false },
+      schoolWork: { view: true, edit: false, delete: false },
+      bids: { view: true, edit: false, delete: false },
+      renewals: { view: true, edit: false, delete: false },
+      salary: { view: true, edit: false, delete: false },
+      ledger: { view: true, edit: false, delete: false },
+      attendance: { view: true, edit: false, delete: false },
+      leave: { view: true, edit: false, delete: false },
+      birthdays: { view: true, edit: false, delete: false },
+      directory: { view: true, edit: false, delete: false },
+      monitor: { view: true, edit: false, delete: false },
+      admin: { view: false, edit: false, delete: false },
     },
   },
 ] as const;

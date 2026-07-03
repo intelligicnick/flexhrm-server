@@ -173,7 +173,7 @@ export class SchoolWorksController {
   }
 
   @Post('delete-block-expense')
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async deleteBlockExpense(
     @CurrentUsername() username: string,
     @Body() dto: DeleteBlockExpenseDto,
@@ -271,7 +271,7 @@ export class SchoolWorksController {
   }
 
   @Post('delete')
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async remove(
     @CurrentUsername() username: string,
     @Body() dto: BulkDeleteSchoolWorksDto,

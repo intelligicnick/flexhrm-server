@@ -31,7 +31,7 @@ export class ExportTemplatesController {
   }
 
   @Delete()
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async remove(
     @CurrentUser() user: AdminSessionPayload,
     @Query('type') type: string,

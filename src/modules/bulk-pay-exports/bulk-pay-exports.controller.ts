@@ -90,7 +90,7 @@ export class BulkPayExportsController {
   }
 
   @Delete(':id')
-  @RequirePermissions('salary', 'edit')
+  @RequirePermissions('salary', 'delete')
   async remove(
     @CurrentUsername() username: string,
     @Param('id') id: string,

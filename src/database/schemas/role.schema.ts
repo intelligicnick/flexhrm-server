@@ -7,6 +7,7 @@ export type RoleDocument = HydratedDocument<Role>;
 export class RolePermissionSchema {
   @Prop({ default: false }) view!: boolean;
   @Prop({ default: false }) edit!: boolean;
+  @Prop({ default: false }) delete!: boolean;
 }
 
 @Schema({ timestamps: true, collection: 'roles' })

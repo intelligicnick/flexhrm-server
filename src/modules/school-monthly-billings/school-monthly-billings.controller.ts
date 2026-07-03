@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { SchoolMonthlyBillingsService } from './school-monthly-billings.service';
 import {
   RequireAnyPermissions,
@@ -25,6 +25,22 @@ export class SchoolMonthlyBillingsController {
   @RequireAnyPermissions(['schoolWork'], 'view')
   findOne(@Param('id') id: string) {
     return this.billingsService.findById(id);
+  }
+
+  @Delete(':id')
+  @RequirePermissions('schoolWork', 'delete')
+  async remove(
+    @CurrentUsername() username: string,
+    @Param('id') id: string,
+  ) {
+    const deleted = await this.billingsService.remove(id);
+    await this.auditLogsService.append({
+      username,
+      action: 'DELETE_SCHOOL_BILLING',
+      target: `Deleted saved monthly invoice ${id}.`,
+      details: deleted,
+    });
+    return { success: true };
   }
 
   @Post('generate')

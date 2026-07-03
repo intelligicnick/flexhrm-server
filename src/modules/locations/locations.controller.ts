@@ -26,7 +26,7 @@ export class LocationsController {
   }
 
   @Delete()
-  @RequirePermissions('employees', 'edit')
+  @RequirePermissions('employees', 'delete')
   async remove(@Body() body: { names: string[] }) {
     const count = await this.locationsService.softDelete(body.names || []);
     return { success: true, count };

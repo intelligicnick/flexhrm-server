@@ -19,7 +19,7 @@ export interface AdminSessionPayload {
 
 export interface RoleDocumentLike {
   name: string;
-  permissions?: Partial<Record<PermissionModule, { view?: boolean; edit?: boolean }>>;
+  permissions?: Partial<Record<PermissionModule, { view?: boolean; edit?: boolean; delete?: boolean }>>;
   uiRestrictions?: Record<string, Record<string, unknown>>;
 }
 
@@ -35,7 +35,7 @@ export function buildPermissions(
 
   if (isSuperAdmin) {
     PERMISSION_MODULES.forEach((m) => {
-      result[m] = { view: true, edit: true };
+      result[m] = { view: true, edit: true, delete: true };
     });
     return result;
   }
@@ -43,9 +43,13 @@ export function buildPermissions(
   const matched = rolesDb.find((r) => r.name.toLowerCase() === role.toLowerCase());
   PERMISSION_MODULES.forEach((m) => {
     const perm = matched?.permissions?.[m];
+    const canDelete = perm?.delete ?? !!perm?.edit;
+    const canEdit = !!perm?.edit || !!canDelete;
+    const canView = !!perm?.view || canEdit;
     result[m] = {
-      view: !!perm?.view,
-      edit: !!perm?.edit,
+      view: canView,
+      edit: canEdit,
+      delete: !!canDelete,
     };
   });
   return result;

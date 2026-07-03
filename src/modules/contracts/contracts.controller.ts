@@ -77,7 +77,7 @@ export class ContractsController {
   }
 
   @Delete(':id')
-  @RequirePermissions('bids', 'edit')
+  @RequirePermissions('bids', 'delete')
   async remove(@Param('id') id: string) {
     await this.contractsService.delete(id);
     return { success: true };

@@ -65,7 +65,7 @@ export class EmployeeMonitorController {
   }
 
   @Delete('screenshots')
-  @RequirePermissions('monitor', 'edit')
+  @RequirePermissions('monitor', 'delete')
   deleteScreenshots(@Body() body: { ids: string[] }) {
     return this.monitorService.deleteScreenshots(body.ids ?? []);
   }
@@ -147,7 +147,7 @@ export class EmployeeMonitorController {
   }
 
   @Post('devices/revoke')
-  @RequirePermissions('monitor', 'edit')
+  @RequirePermissions('monitor', 'delete')
   revokeDevice(@Body() dto: RevokeDeviceDto) {
     return this.monitorService.revokeDevice(dto.deviceAgentId);
   }
@@ -165,7 +165,7 @@ export class EmployeeMonitorController {
   }
 
   @Delete('agent-credentials/:employeeId')
-  @RequirePermissions('monitor', 'edit')
+  @RequirePermissions('monitor', 'delete')
   revokeAgentCredential(@Param('employeeId') employeeId: string) {
     return this.monitorService.revokeEmployeeCredential(employeeId);
   }

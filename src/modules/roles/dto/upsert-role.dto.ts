@@ -11,7 +11,7 @@ export class UpsertRoleDto {
 
   @IsOptional()
   @IsObject()
-  permissions?: Record<string, { view?: boolean; edit?: boolean }>;
+  permissions?: Record<string, { view?: boolean; edit?: boolean; delete?: boolean }>;
 
   @IsOptional()
   @IsObject()

@@ -126,7 +126,7 @@ export class BackupRestoreController {
   }
 
   @Post('clear-all')
-  @RequirePermissions('admin', 'edit')
+  @RequirePermissions('admin', 'delete')
   async clearAllData(
     @CurrentUsername() username: string,
     @Body() body: ClearAllDataDto = {},

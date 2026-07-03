@@ -85,7 +85,7 @@ export class SchoolPartnersController {
   }
 
   @Delete()
-  @RequirePermissions('schoolWork', 'edit')
+  @RequirePermissions('schoolWork', 'delete')
   async deleteMany(
     @CurrentUsername() username: string,
     @Body() dto: BulkDeleteSchoolPartnersDto,
