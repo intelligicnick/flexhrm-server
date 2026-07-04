@@ -10,6 +10,10 @@ export const EMPLOYEE_PF_RATE = 0.12;
 export const EMPLOYER_PF_RATE = 0.13;
 export const EMPLOYEE_ESIC_RATE = 0.0075;
 export const EMPLOYER_ESIC_RATE = 0.0325;
+export const ESIC_STATUS_YES = 'Yes';
+export const ESIC_STATUS_NO = 'No';
+export const ESIC_STATUS_EXEMPT = 'Exempt';
+export const ESIC_STATUS_APPLY_ABOVE_LIMIT = 'Apply Above 21000';
 
 export type PfCalculationMode = 'gross' | 'ceiling_15000';
 
@@ -20,6 +24,36 @@ export function resolvePfCalculationMode(mode?: string | null): PfCalculationMod
 function toNonNegativeNumber(val: unknown): number {
   const n = Number(val);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function normalizeEsicStatus(flag?: unknown): string {
+  const value = String(flag ?? '').trim();
+  if (!value) return '';
+
+  const lower = value.toLowerCase();
+  if (lower === 'yes') return ESIC_STATUS_YES;
+  if (lower === 'no') return ESIC_STATUS_NO;
+  if (lower === 'exempt') return ESIC_STATUS_EXEMPT;
+  if (
+    lower === ESIC_STATUS_APPLY_ABOVE_LIMIT.toLowerCase() ||
+    lower === 'yesabovelimit' ||
+    lower === 'yes above 21000' ||
+    lower === 'yes (above 21000)' ||
+    lower === 'yes (above 21,000)'
+  ) {
+    return ESIC_STATUS_APPLY_ABOVE_LIMIT;
+  }
+
+  return value;
+}
+
+function isEsicCoveredStatus(flag?: unknown): boolean {
+  const normalized = normalizeEsicStatus(flag);
+  return normalized === ESIC_STATUS_YES || normalized === ESIC_STATUS_APPLY_ABOVE_LIMIT;
+}
+
+function computeEsicStatusFromGross(gross: number, esicEligibilityLimit: number): string {
+  return gross > 0 && gross <= esicEligibilityLimit ? ESIC_STATUS_YES : ESIC_STATUS_NO;
 }
 
 export function calculatePfWage(
@@ -81,7 +115,7 @@ export function isEmployeeEsicCovered(
   esicFlag?: string,
 ): boolean {
   if (!isCompliant) return false;
-  return gross > 0 && (esicFlag || '').toLowerCase() === 'yes';
+  return gross > 0 && isEsicCoveredStatus(esicFlag);
 }
 
 export function calculateSalaryDetails(
@@ -91,7 +125,7 @@ export function calculateSalaryDetails(
 ): { basic: number; esic: string } {
   const pct = Math.min(100, Math.max(0, basicPercentOfGross)) / 100;
   const basic = Math.round(gross * pct);
-  const esic = gross > 0 && gross <= esicEligibilityLimit ? 'Yes' : 'No';
+  const esic = computeEsicStatusFromGross(gross, esicEligibilityLimit);
   return { basic, esic };
 }
 
@@ -144,14 +178,14 @@ export function calculatePayroll(input: PayrollCalculationInput): PayrollCalcula
     location: input.location,
     complianceEnabled: input.complianceEnabled,
     ptEnabled: input.ptEnabled,
-    esic: input.esic,
+    esic: normalizeEsicStatus(input.esic),
     gender: input.gender,
     pfCalculationMode: input.pfCalculationMode,
   };
 
   const derived = calculateSalaryDetails(gross, 50, esicLimit);
   const basicSalary = input.basicSalary ?? derived.basic;
-  const esic = derived.esic;
+  const esic = normalizeEsicStatus(input.esic) || derived.esic;
 
   const isCompliant = isPfEsicCompliant(employee, locationCompliance);
   const isPtEnabled = isProfessionalTaxApplicable(employee, locationPtEnabled);
@@ -219,6 +253,6 @@ export function sanitizeEmployeePayrollFields(
   return {
     ...record,
     basicSalary: existingBasic > 0 ? existingBasic : derived.basic,
-    esic: derived.esic,
+    esic: normalizeEsicStatus(record.esic) || derived.esic,
   };
 }
