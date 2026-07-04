@@ -1,13 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model } from 'mongoose';
 import {
   SchoolSupervisor,
   SchoolSupervisorDocument,
 } from '../../database/schemas/school-supervisor.schema';
 import { decodeImageBase64 } from '../../common/storage/file-buffer.util';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
-import { AppMeta, AppMetaDocument } from '../../database/schemas/app-meta.schema';
 import { UpsertSchoolSupervisorDto } from './dto/school-supervisor.dto';
 import {
   generateResetCode,
@@ -26,12 +25,30 @@ export class SchoolSupervisorsService {
   constructor(
     @InjectModel(SchoolSupervisor.name)
     private readonly supervisorModel: Model<SchoolSupervisorDocument>,
-    @InjectModel(AppMeta.name)
-    private readonly appMetaModel: Model<AppMetaDocument>,
+    @InjectConnection() private readonly connection: Connection,
     private readonly sessionsService: SessionsService,
     private readonly supervisorActivityService: SupervisorActivityService,
     private readonly mediaStorage: MediaStorageService,
   ) {}
+
+  /** app_meta keys are globally unique; use the raw driver to bypass tenant auto-filter. */
+  private getDb() {
+    const db = this.connection.db;
+    if (!db || this.connection.readyState !== 1) {
+      throw new Error('Database is not connected.');
+    }
+    return db;
+  }
+
+  private async findAppMeta(metaKey: string) {
+    return this.getDb().collection('app_meta').findOne({ metaKey });
+  }
+
+  private async upsertAppMeta(metaKey: string, metaValue: string): Promise<void> {
+    await this.getDb()
+      .collection('app_meta')
+      .updateOne({ metaKey }, { $set: { metaKey, metaValue } }, { upsert: true });
+  }
 
   private normalizePhoneDigits(phone: string): string {
     return String(phone || '').replace(/\D/g, '').slice(-10);
@@ -278,7 +295,7 @@ export class SchoolSupervisorsService {
   }
 
   private async getBlockedAppsFromMeta(): Promise<string[]> {
-    const doc = await this.appMetaModel.findOne({ metaKey: BLOCKED_APPS_META_KEY }).exec();
+    const doc = await this.findAppMeta(BLOCKED_APPS_META_KEY);
     if (!doc?.metaValue) return [];
     try {
       const parsed = JSON.parse(doc.metaValue);
@@ -296,11 +313,7 @@ export class SchoolSupervisorsService {
       .map((item) => String(item || '').trim())
       .filter(Boolean)
       .slice(0, 50);
-    await this.appMetaModel.findOneAndUpdate(
-      { metaKey: BLOCKED_APPS_META_KEY },
-      { $set: { metaKey: BLOCKED_APPS_META_KEY, metaValue: JSON.stringify(normalized) } },
-      { upsert: true },
-    );
+    await this.upsertAppMeta(BLOCKED_APPS_META_KEY, JSON.stringify(normalized));
     return normalized;
   }
 

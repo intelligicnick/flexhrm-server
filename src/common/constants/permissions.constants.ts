@@ -70,4 +70,36 @@ export const DEFAULT_ROLES = [
       admin: { view: false, edit: false, delete: false },
     },
   },
+  {
+    name: 'Observer Admin',
+    description:
+      'Mobile Observer Admin app: view key modules with edit on field team, bids, renewals, and salary (no delete).',
+    permissions: {
+      employees: { view: true, edit: false, delete: false },
+      schoolWork: { view: true, edit: true, delete: false },
+      bids: { view: true, edit: true, delete: false },
+      renewals: { view: true, edit: true, delete: false },
+      salary: { view: true, edit: true, delete: false },
+      ledger: { view: false, edit: false, delete: false },
+      attendance: { view: false, edit: false, delete: false },
+      leave: { view: false, edit: false, delete: false },
+      birthdays: { view: false, edit: false, delete: false },
+      directory: { view: false, edit: false, delete: false },
+      monitor: { view: false, edit: false, delete: false },
+      admin: { view: false, edit: false, delete: false },
+    },
+    uiRestrictions: {
+      salary: {
+        allowedFilters: ['month', 'search', 'location'],
+        allowedColumns: [
+          'Employee Code',
+          'Employee Name',
+          'Job Role',
+          'Present Days',
+          'Net Payable',
+          'Payment Status',
+        ],
+      },
+    },
+  },
 ] as const;
