@@ -425,6 +425,62 @@ export class TendersService {
     await doc.save();
   }
 
+  async bulkUpdate(
+    ids: string[],
+    patch: UpdateTenderDto,
+  ): Promise<{ updated: number; errors: string[] }> {
+    const tenderIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    );
+    if (!tenderIds.length) {
+      throw new BadRequestException('Select at least one tender to update.');
+    }
+    if (!patch || Object.keys(patch).length === 0) {
+      throw new BadRequestException('No bulk changes were provided.');
+    }
+
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (const id of tenderIds) {
+      try {
+        await this.update(id, patch);
+        updated += 1;
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : 'Bulk update failed.'}`,
+        );
+      }
+    }
+
+    return { updated, errors: errors.slice(0, 20) };
+  }
+
+  async bulkDelete(ids: string[]): Promise<{ deleted: number; errors: string[] }> {
+    const tenderIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    );
+    if (!tenderIds.length) {
+      throw new BadRequestException('Select at least one tender to delete.');
+    }
+
+    let deleted = 0;
+    const errors: string[] = [];
+
+    for (const id of tenderIds) {
+      try {
+        await this.delete(id);
+        deleted += 1;
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : 'Bulk delete failed.'}`,
+        );
+      }
+    }
+
+    return { deleted, errors: errors.slice(0, 20) };
+  }
+
   async bulkImport(
     items: CreateTenderDto[],
   ): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {

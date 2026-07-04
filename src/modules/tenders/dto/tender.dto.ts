@@ -1,4 +1,5 @@
 import {
+  ArrayNotEmpty,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -7,7 +8,9 @@ import {
   IsString,
   Min,
   IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { IsNonNegativeAmountString } from '../../../common/validators/is-non-negative-amount-string.decorator';
 import {
   TENDER_STATUSES,
@@ -316,6 +319,24 @@ export class BulkImportTenderDto {
 export class BulkSyncTenderDto {
   @IsNotEmpty()
   items!: SyncTenderDto[];
+}
+
+export class BulkUpdateTenderDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids!: string[];
+
+  @ValidateNested()
+  @Type(() => UpdateTenderDto)
+  patch!: UpdateTenderDto;
+}
+
+export class BulkDeleteTenderDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids!: string[];
 }
 
 export class TenderDuplicateCheckDto {

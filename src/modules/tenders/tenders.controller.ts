@@ -11,8 +11,10 @@ import {
 import { TendersService } from './tenders.service';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import {
+  BulkDeleteTenderDto,
   BulkImportTenderDto,
   BulkSyncTenderDto,
+  BulkUpdateTenderDto,
   CreateTenderDto,
   SyncTenderDto,
   TenderDuplicateCheckDto,
@@ -55,6 +57,18 @@ export class TendersController {
   @RequirePermissions('bids', 'edit')
   syncFromGem(@Body() dto: BulkSyncTenderDto) {
     return this.tendersService.syncFromGem(dto.items || []);
+  }
+
+  @Post('bulk-update')
+  @RequirePermissions('bids', 'edit')
+  bulkUpdate(@Body() dto: BulkUpdateTenderDto) {
+    return this.tendersService.bulkUpdate(dto.ids || [], dto.patch || {});
+  }
+
+  @Post('bulk-delete')
+  @RequirePermissions('bids', 'delete')
+  bulkDelete(@Body() dto: BulkDeleteTenderDto) {
+    return this.tendersService.bulkDelete(dto.ids || []);
   }
 
   @Post('duplicate-check')
