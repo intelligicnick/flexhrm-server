@@ -57,6 +57,7 @@ import { AutomationModule } from './modules/automation/automation.module';
 import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { SsoModule } from './modules/sso/sso.module';
+import { FirewallModule } from './modules/firewall/firewall.module';
 import { DeferredStartupService } from './bootstrap/deferred-startup.service';
 
 @Module({
@@ -115,6 +116,7 @@ import { DeferredStartupService } from './bootstrap/deferred-startup.service';
     AiAssistantModule,
     QueueModule,
     SsoModule,
+    FirewallModule,
   ],
   providers: [
     DeferredStartupService,

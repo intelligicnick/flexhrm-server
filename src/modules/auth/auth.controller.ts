@@ -45,6 +45,7 @@ import { SchoolSupervisorsService } from '../school-supervisors/school-superviso
 import { SupervisorLoginDto, SupervisorProfilePhotoDto, SupervisorProfileUpdateDto, SupervisorRegisterDeviceDto } from '../school-visits/dto/school-visit.dto';
 import { CaptchaService } from './captcha.service';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
+import { FirewallService } from '../firewall/firewall.service';
 
 @Controller('auth')
 export class AuthController {
@@ -57,6 +58,7 @@ export class AuthController {
     private readonly emailService: EmailService,
     private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly captchaService: CaptchaService,
+    private readonly firewallService: FirewallService,
   ) {}
 
   @Public()
@@ -79,6 +81,12 @@ export class AuthController {
   ) {
     if (!this.captchaService.verify(dto.captchaId, dto.captchaAnswer)) {
       throw new BadRequestException('Incorrect or expired captcha. Please try again.');
+    }
+
+    const clientIp = this.firewallService.getClientIp(req);
+    const loginLock = await this.firewallService.isLoginLocked(clientIp);
+    if (loginLock.locked) {
+      throw new ForbiddenException(loginLock.reason || 'Too many failed login attempts from this IP.');
     }
 
     const tenantId = req.tenantId ?? 'default';
@@ -140,6 +148,8 @@ export class AuthController {
       const roleConfig = resolveRoleConfig(admin.role || 'admin', roles);
       const isObserverClient = clientHeader?.trim().toLowerCase() === 'observer';
 
+      await this.firewallService.clearLoginFailures(clientIp);
+
       return {
         success: true,
         username: admin.username,
@@ -152,6 +162,8 @@ export class AuthController {
         ...(isObserverClient ? { token } : {}),
       };
     }
+
+    await this.firewallService.recordLoginFailure(clientIp);
 
     await this.auditLogsService.append({
       username: dto.username,

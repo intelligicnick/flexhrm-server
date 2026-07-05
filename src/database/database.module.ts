@@ -176,6 +176,11 @@ import {
   AutomationWorkflow,
   AutomationWorkflowSchema,
 } from './schemas/automation-workflow.schema';
+import { FirewallLog, FirewallLogSchema } from './schemas/firewall-log.schema';
+import { FirewallBlock, FirewallBlockSchema } from './schemas/firewall-block.schema';
+import { FirewallSettings, FirewallSettingsSchema } from './schemas/firewall-settings.schema';
+import { FirewallWhitelist, FirewallWhitelistSchema } from './schemas/firewall-whitelist.schema';
+import { FirewallLoginAttempt, FirewallLoginAttemptSchema } from './schemas/firewall-login-attempt.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -259,6 +264,11 @@ const MODELS = [
   { name: PayrollRun.name, schema: PayrollRunSchema },
   { name: Payslip.name, schema: PayslipSchema },
   { name: AutomationWorkflow.name, schema: AutomationWorkflowSchema },
+  { name: FirewallLog.name, schema: FirewallLogSchema },
+  { name: FirewallBlock.name, schema: FirewallBlockSchema },
+  { name: FirewallSettings.name, schema: FirewallSettingsSchema },
+  { name: FirewallWhitelist.name, schema: FirewallWhitelistSchema },
+  { name: FirewallLoginAttempt.name, schema: FirewallLoginAttemptSchema },
 ];
 
 for (const model of MODELS) {
