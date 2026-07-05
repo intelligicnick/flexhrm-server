@@ -67,6 +67,10 @@ import {
   SupervisorActivitySession,
   SupervisorActivitySessionSchema,
 } from './schemas/supervisor-activity-session.schema';
+import {
+  SupervisorLocationPing,
+  SupervisorLocationPingSchema,
+} from './schemas/supervisor-location-ping.schema';
 import { ArchivedRecord, ArchivedRecordSchema } from './schemas/archived-record.schema';
 import { ArchiveRun, ArchiveRunSchema } from './schemas/archive-run.schema';
 import { Tender, TenderSchema } from './schemas/tender.schema';
@@ -202,6 +206,7 @@ const MODELS = [
   { name: CommitmentDiary.name, schema: CommitmentDiarySchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: SupervisorActivitySession.name, schema: SupervisorActivitySessionSchema },
+  { name: SupervisorLocationPing.name, schema: SupervisorLocationPingSchema },
   { name: ArchivedRecord.name, schema: ArchivedRecordSchema },
   { name: ArchiveRun.name, schema: ArchiveRunSchema },
   { name: Tender.name, schema: TenderSchema },

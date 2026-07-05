@@ -5,9 +5,14 @@ import {
   SchoolSupervisor,
   SchoolSupervisorDocument,
 } from '../../database/schemas/school-supervisor.schema';
+import {
+  SupervisorLocationPing,
+  SupervisorLocationPingDocument,
+} from '../../database/schemas/supervisor-location-ping.schema';
 import { decodeImageBase64 } from '../../common/storage/file-buffer.util';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { UpsertSchoolSupervisorDto } from './dto/school-supervisor.dto';
+import type { IngestSupervisorLocationPingsDto } from './dto/school-supervisor.dto';
 import {
   generateResetCode,
   generateToken,
@@ -25,6 +30,8 @@ export class SchoolSupervisorsService {
   constructor(
     @InjectModel(SchoolSupervisor.name)
     private readonly supervisorModel: Model<SchoolSupervisorDocument>,
+    @InjectModel(SupervisorLocationPing.name)
+    private readonly locationPingModel: Model<SupervisorLocationPingDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly sessionsService: SessionsService,
     private readonly supervisorActivityService: SupervisorActivityService,
@@ -330,5 +337,49 @@ export class SchoolSupervisorsService {
     if (!supervisor) return false;
     const registered = String(supervisor.registeredDeviceId || '').trim();
     return !!registered && registered === deviceId;
+  }
+
+  async ingestLocationPings(
+    supervisorId: string,
+    deviceId: string,
+    dto: IngestSupervisorLocationPingsDto,
+  ) {
+    const now = new Date();
+    const points = (dto.points || [])
+      .map((point) => ({
+        id: String(point.id || generateToken()),
+        latitude: Number(point.latitude),
+        longitude: Number(point.longitude),
+        timestamp: new Date(Number(point.timestamp) || now.getTime()),
+        accuracy: Number(point.accuracy) || 0,
+        speed: point.speed == null ? null : Number(point.speed),
+        bearing: point.bearing == null ? null : Number(point.bearing),
+        altitude: point.altitude == null ? null : Number(point.altitude),
+        batteryPercent: Number(point.batteryPercent) || -1,
+        networkType: String(point.networkType || ''),
+        isMock: !!point.isMock,
+        deviceTime: new Date(Number(point.deviceTime) || now.getTime()),
+        serverTime: now,
+      }))
+      .filter(
+        (point) =>
+          Number.isFinite(point.latitude) &&
+          Number.isFinite(point.longitude) &&
+          Math.abs(point.latitude) <= 90 &&
+          Math.abs(point.longitude) <= 180,
+      );
+
+    if (points.length === 0) {
+      return { accepted: 0 };
+    }
+
+    await this.locationPingModel.create({
+      id: generateToken(),
+      supervisorId,
+      deviceId,
+      points,
+    });
+
+    return { accepted: points.length, serverTime: now.toISOString() };
   }
 }

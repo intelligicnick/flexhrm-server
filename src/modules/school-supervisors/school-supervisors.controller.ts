@@ -1,13 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { SchoolSupervisorsService } from './school-supervisors.service';
 import {
   BulkDeleteSchoolSupervisorsDto,
+  IngestSupervisorLocationPingsDto,
   UpdateSupervisorPortalSettingsDto,
   UpsertSchoolSupervisorDto,
 } from './dto/school-supervisor.dto';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { assertSupervisorRegisteredDevice } from '../../common/utils/supervisor-device.util';
+import { AdminSessionPayload } from '../../common/utils/permissions.util';
 
 @Controller('school-supervisors')
 export class SchoolSupervisorsController {
@@ -58,6 +62,20 @@ export class SchoolSupervisorsController {
       details: { blockedAppsToUninstall },
     });
     return { blockedAppsToUninstall };
+  }
+
+  @Post('location-pings')
+  async ingestLocationPings(
+    @Req() req: Request & { user: AdminSessionPayload },
+    @Body() dto: IngestSupervisorLocationPingsDto,
+  ) {
+    if (req.user?.userType !== 'supervisor') {
+      throw new ForbiddenException('Supervisor session required.');
+    }
+    const deviceId = String(req.headers['x-supervisor-device-id'] || dto.deviceId || '').trim();
+    await assertSupervisorRegisteredDevice(req.user, deviceId, this.supervisorsService);
+    const supervisorId = String(req.user.employeeId || req.user.username || dto.supervisorId || '');
+    return this.supervisorsService.ingestLocationPings(supervisorId, deviceId, dto);
   }
 
   @Get(':id/activity-history')

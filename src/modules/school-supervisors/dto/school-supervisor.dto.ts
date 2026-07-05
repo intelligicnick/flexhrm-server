@@ -46,3 +46,55 @@ export class UpdateSupervisorPortalSettingsDto {
   @IsString({ each: true })
   blockedAppsToUninstall!: string[];
 }
+
+export class SupervisorLocationPointDto {
+  @IsString()
+  id!: string;
+
+  @IsOptional()
+  latitude?: number;
+
+  @IsOptional()
+  longitude?: number;
+
+  @IsOptional()
+  timestamp?: number;
+
+  @IsOptional()
+  accuracy?: number;
+
+  @IsOptional()
+  speed?: number | null;
+
+  @IsOptional()
+  bearing?: number | null;
+
+  @IsOptional()
+  altitude?: number | null;
+
+  @IsOptional()
+  batteryPercent?: number;
+
+  @IsOptional()
+  @IsString()
+  networkType?: string;
+
+  @IsOptional()
+  isMock?: boolean;
+
+  @IsOptional()
+  deviceTime?: number;
+}
+
+export class IngestSupervisorLocationPingsDto {
+  @IsOptional()
+  @IsString()
+  supervisorId?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @IsArray()
+  points!: SupervisorLocationPointDto[];
+}
