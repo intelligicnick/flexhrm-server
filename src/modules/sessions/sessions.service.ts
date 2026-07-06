@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
+  OBSERVER_ACTIVITY_TOUCH_INTERVAL_MS,
+  OBSERVER_SESSION_DURATION_MS,
+} from '../../common/constants/observer-portal.constants';
+import {
   SESSION_DURATION_MS,
   SUPERVISOR_ACTIVITY_TOUCH_INTERVAL_MS,
 } from '../../common/constants/permissions.constants';
@@ -32,16 +36,20 @@ export class SessionsService {
       employeeId?: string;
       assignedBlocks?: string[];
       impersonated?: boolean;
+      sessionKind?: 'standard' | 'extension' | 'observer';
     },
     tenantId?: string,
   ): Promise<SessionCredentials> {
     const token = generateToken();
     const csrfToken = generateToken();
     const now = new Date();
+    const sessionKind = options?.sessionKind || 'standard';
     const sessionDurationMs =
-      options?.userType === 'supervisor'
-        ? SUPERVISOR_SESSION_DURATION_MS
-        : SESSION_DURATION_MS;
+      sessionKind === 'observer'
+        ? OBSERVER_SESSION_DURATION_MS
+        : options?.userType === 'supervisor'
+          ? SUPERVISOR_SESSION_DURATION_MS
+          : SESSION_DURATION_MS;
     await this.sessionModel.create({
       token,
       csrfToken,
@@ -53,6 +61,7 @@ export class SessionsService {
       employeeId: options?.employeeId || '',
       assignedBlocks: options?.assignedBlocks || [],
       impersonated: !!options?.impersonated,
+      sessionKind,
       createdAt: now,
       expiresAt: new Date(now.getTime() + sessionDurationMs),
       lastActiveAt: now,
@@ -150,6 +159,8 @@ export class SessionsService {
       session.employeeId
     ) {
       void this.touchSupervisorActivity(token, session.employeeId);
+    } else if (session.sessionKind === 'observer') {
+      void this.touchObserverSession(token);
     }
 
     return {
@@ -189,6 +200,26 @@ export class SessionsService {
       expiresAt: { $lte: new Date() },
     });
     return result.deletedCount ?? 0;
+  }
+
+  private async touchObserverSession(token: string): Promise<void> {
+    const now = new Date();
+    const touchBefore = new Date(Date.now() - OBSERVER_ACTIVITY_TOUCH_INTERVAL_MS);
+    await this.sessionModel.updateOne(
+      {
+        token,
+        $or: [
+          { lastActiveAt: { $lt: touchBefore } },
+          { lastActiveAt: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          lastActiveAt: now,
+          expiresAt: new Date(now.getTime() + OBSERVER_SESSION_DURATION_MS),
+        },
+      },
+    );
   }
 
   private async touchSupervisorActivity(token: string, supervisorId: string): Promise<void> {

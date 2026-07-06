@@ -32,7 +32,7 @@ export class Session {
   @Prop({ default: false })
   impersonated!: boolean;
 
-  @Prop({ enum: ['standard', 'extension'], default: 'standard', index: true })
+  @Prop({ enum: ['standard', 'extension', 'observer'], default: 'standard', index: true })
   sessionKind!: string;
 
   @Prop({ required: true, type: Date })

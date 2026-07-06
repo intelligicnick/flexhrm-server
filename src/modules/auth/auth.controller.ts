@@ -121,11 +121,13 @@ export class AuthController {
         });
       }
 
+      const isObserverClient = clientHeader?.trim().toLowerCase() === 'observer';
+
       const { token, csrfToken } = await this.sessionsService.createSession(
         admin.username,
         admin.role || 'admin',
         admin.locations || [],
-        undefined,
+        isObserverClient ? { sessionKind: 'observer' } : undefined,
         tenantId,
       );
       setSessionCookie(res, token, isProduction);
@@ -146,7 +148,6 @@ export class AuthController {
 
       const roles = await this.rolesService.findAll();
       const roleConfig = resolveRoleConfig(admin.role || 'admin', roles);
-      const isObserverClient = clientHeader?.trim().toLowerCase() === 'observer';
 
       await this.firewallService.clearLoginFailures(clientIp);
 
