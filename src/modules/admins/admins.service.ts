@@ -154,6 +154,15 @@ export class AdminsService {
     return admin;
   }
 
+  async deleteByUsername(username: string, tenantId?: string): Promise<boolean> {
+    const query = this.withTenantScope(
+      { username: { $regex: this.usernameRegex(username) } },
+      tenantId,
+    );
+    const result = await this.adminModel.deleteOne(query).exec();
+    return result.deletedCount > 0;
+  }
+
   async clearPasswordReset(username: string, tenantId?: string): Promise<void> {
     const query = this.withTenantScope(
       { username: { $regex: this.usernameRegex(username) } },

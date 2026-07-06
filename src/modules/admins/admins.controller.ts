@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   NotFoundException,
+  Param,
   Post,
   Query,
 } from '@nestjs/common';
@@ -131,6 +133,48 @@ export class AdminsController {
     });
 
     return { success: true, username: dto.username };
+  }
+
+  @Delete(':username')
+  @RequirePermissions('admin', 'delete')
+  async remove(
+    @CurrentUser() user: AdminSessionPayload,
+    @CurrentUsername() actor: string,
+    @Param('username') username: string,
+  ) {
+    const cleanUsername = username.trim();
+    if (!cleanUsername) {
+      throw new BadRequestException('Administrator username is required.');
+    }
+    if (cleanUsername.toLowerCase() === 'admin') {
+      throw new BadRequestException(
+        "Cannot delete the root 'admin' super-administrator account.",
+      );
+    }
+    if (cleanUsername.toLowerCase() === user.username.toLowerCase()) {
+      throw new BadRequestException('You cannot delete your own administrator account.');
+    }
+
+    const existing = await this.adminsService.findByUsername(cleanUsername);
+    if (!existing) throw new NotFoundException('Administrator account not found.');
+
+    const deleted = await this.adminsService.deleteByUsername(cleanUsername);
+    if (!deleted) throw new NotFoundException('Administrator account not found.');
+
+    await this.sessionsService.destroyAllForUser(existing.username);
+
+    await this.auditLogsService.append({
+      username: actor,
+      action: 'DELETE_ADMIN',
+      target: `Account Revocation: Administrator "${cleanUsername}" permanently removed from the system by "${actor}".`,
+      details: {
+        deletedUsername: cleanUsername,
+        previousRole: existing.role || 'admin',
+        previousLocations: existing.locations || [],
+      },
+    });
+
+    return { success: true, message: `Administrator "${cleanUsername}" deleted successfully.` };
   }
 
   @Get('profile')
