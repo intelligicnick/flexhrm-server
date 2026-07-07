@@ -12,7 +12,9 @@ import {
 import { ContractsService } from './contracts.service';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import {
+  BulkDeleteContractDto,
   BulkImportContractDto,
+  BulkUpdateContractDto,
   ContractDuplicateCheckDto,
   CreateContractDto,
   UpdateContractDto,
@@ -68,6 +70,18 @@ export class ContractsController {
     return this.contractsService
       .findExistingContractKeys(dto.contractKeys || [])
       .then((existing) => ({ existing }));
+  }
+
+  @Post('bulk-update')
+  @RequirePermissions('bids', 'edit')
+  bulkUpdate(@Body() dto: BulkUpdateContractDto) {
+    return this.contractsService.bulkUpdate(dto.ids || [], dto.patch || {});
+  }
+
+  @Post('bulk-delete')
+  @RequirePermissions('bids', 'delete')
+  bulkDelete(@Body() dto: BulkDeleteContractDto) {
+    return this.contractsService.bulkDelete(dto.ids || []);
   }
 
   @Patch(':id')

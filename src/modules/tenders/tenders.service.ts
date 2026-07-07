@@ -117,7 +117,7 @@ export class TendersService {
     }
 
     const outcomeText = String(item.outcome || '').toLowerCase();
-    if (outcomeText.includes('disqualified')) {
+    if (/\bdisqualified\b/i.test(outcomeText)) {
       nextStatus = 'disqualified';
     }
     if (nextStatus === 'not_filed' && doc.status !== 'not_filed') return;

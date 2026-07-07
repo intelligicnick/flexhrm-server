@@ -1,11 +1,14 @@
 import {
+  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { IsNonNegativeAmountString } from '../../../common/validators/is-non-negative-amount-string.decorator';
 import {
   CONTRACT_STATUSES,
@@ -250,4 +253,22 @@ export class ContractDuplicateCheckDto {
   @IsArray()
   @IsString({ each: true })
   contractKeys!: string[];
+}
+
+export class BulkUpdateContractDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids!: string[];
+
+  @ValidateNested()
+  @Type(() => UpdateContractDto)
+  patch!: UpdateContractDto;
+}
+
+export class BulkDeleteContractDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids!: string[];
 }

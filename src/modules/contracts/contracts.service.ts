@@ -378,6 +378,64 @@ export class ContractsService {
     if (!result.deletedCount) throw new NotFoundException('Contract not found.');
   }
 
+  async bulkUpdate(
+    ids: string[],
+    patch: UpdateContractDto,
+  ): Promise<{ updated: number; errors: string[] }> {
+    const contractIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    );
+    if (!contractIds.length) {
+      throw new BadRequestException('Select at least one contract to update.');
+    }
+    if (!patch || Object.keys(patch).length === 0) {
+      throw new BadRequestException('No bulk changes were provided.');
+    }
+
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (const id of contractIds) {
+      try {
+        await this.update(id, patch);
+        updated += 1;
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : 'Bulk update failed.'}`,
+        );
+      }
+    }
+
+    return { updated, errors: errors.slice(0, 20) };
+  }
+
+  async bulkDelete(
+    ids: string[],
+  ): Promise<{ deleted: number; errors: string[] }> {
+    const contractIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    );
+    if (!contractIds.length) {
+      throw new BadRequestException('Select at least one contract to delete.');
+    }
+
+    let deleted = 0;
+    const errors: string[] = [];
+
+    for (const id of contractIds) {
+      try {
+        await this.delete(id);
+        deleted += 1;
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : 'Bulk delete failed.'}`,
+        );
+      }
+    }
+
+    return { deleted, errors: errors.slice(0, 20) };
+  }
+
   async bulkImport(
     items: CreateContractDto[],
   ): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {
