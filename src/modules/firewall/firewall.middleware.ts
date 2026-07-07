@@ -45,10 +45,8 @@ export class FirewallMiddleware implements NestMiddleware {
 
       if (blocked) {
         throw new ForbiddenException({
-          message: blockReason || 'Access denied by security firewall.',
+          message: 'Access restricted.',
           code: 'FIREWALL_BLOCKED',
-          ip,
-          country: geo.country,
         });
       }
 

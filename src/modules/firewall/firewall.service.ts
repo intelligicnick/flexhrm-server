@@ -7,6 +7,8 @@ import {
   extractClientIp,
   isPrivateOrLocalIp,
 } from '../../common/utils/client-ip.util';
+import { readSessionTokenFromRequest } from '../../common/utils/session-cookie.util';
+import { SessionsService } from '../sessions/sessions.service';
 import {
   FirewallLog,
   FirewallLogDocument,
@@ -31,28 +33,42 @@ import {
 
 const MAX_FIREWALL_LOGS = 2000;
 
+/** Match path segments only — avoids false positives like /api/backup-restore. */
+function scanPathSegment(segment: string): RegExp {
+  const escaped = segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escaped}(?:/|\\?|$)`, 'i');
+}
+
 const SCAN_PATTERNS = [
-  /\.env/i,
-  /wp-admin/i,
-  /wp-login/i,
-  /phpmyadmin/i,
-  /\.php$/i,
-  /xmlrpc/i,
-  /\/admin\.php/i,
-  /\/shell/i,
-  /\/cgi-bin/i,
-  /\/\.git/i,
-  /\/actuator/i,
-  /\/solr/i,
-  /\/vendor\/phpunit/i,
-  /\/\.aws/i,
-  /\/config\.json/i,
-  /\/backup/i,
-  /\/sql/i,
-  /\/database/i,
-  /\/telescope/i,
-  /\/debug/i,
-  /\/\.well-known\/security/i,
+  scanPathSegment('/.env'),
+  scanPathSegment('/wp-admin'),
+  scanPathSegment('/wp-login'),
+  scanPathSegment('/phpmyadmin'),
+  /\.php(?:\/|\?|$)/i,
+  scanPathSegment('/xmlrpc'),
+  scanPathSegment('/admin.php'),
+  scanPathSegment('/shell'),
+  scanPathSegment('/cgi-bin'),
+  scanPathSegment('/.git'),
+  scanPathSegment('/actuator'),
+  scanPathSegment('/solr'),
+  scanPathSegment('/vendor/phpunit'),
+  scanPathSegment('/.aws'),
+  scanPathSegment('/config.json'),
+  scanPathSegment('/backup'),
+  scanPathSegment('/sql'),
+  scanPathSegment('/database'),
+  scanPathSegment('/telescope'),
+  scanPathSegment('/debug'),
+  scanPathSegment('/.well-known/security'),
+];
+
+/** Legitimate first-party API routes that must never be treated as external scans. */
+const TRUSTED_API_PREFIXES = [
+  '/api/data-archive',
+  '/api/backup-restore',
+  '/api/health',
+  '/api/firewall',
 ];
 
 /** Fake paths — any hit is an instant permanent block (honeypot). */
@@ -84,11 +100,6 @@ export interface GeoInfo {
 
 export interface FirewallCheckResult {
   allowed: boolean;
-  ip: string;
-  country: string;
-  countryCode: string;
-  city: string;
-  reason: string;
 }
 
 @Injectable()
@@ -108,7 +119,29 @@ export class FirewallService {
     private readonly whitelistModel: Model<FirewallWhitelistDocument>,
     @InjectModel(FirewallLoginAttempt.name)
     private readonly loginAttemptModel: Model<FirewallLoginAttemptDocument>,
+    private readonly sessionsService: SessionsService,
   ) {}
+
+  private normalizeRequestPath(path: string): string {
+    return path.split('?')[0].toLowerCase();
+  }
+
+  private isTrustedApiPath(path: string): boolean {
+    const normalized = this.normalizeRequestPath(path);
+    return TRUSTED_API_PREFIXES.some(
+      (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
+    );
+  }
+
+  private async hasValidSession(req: Request): Promise<boolean> {
+    const token = readSessionTokenFromRequest(
+      req.cookies as Record<string, string> | undefined,
+      req.headers.authorization as string | undefined,
+    );
+    if (!token) return false;
+    const session = await this.sessionsService.validateToken(token);
+    return !!session;
+  }
 
   async getSettings(): Promise<FirewallSettings> {
     const existing = await this.settingsModel.findOne({ id: 'global' }).lean().exec();
@@ -151,8 +184,12 @@ export class FirewallService {
   }
 
   classifyIntent(path: string, method: string, userAgent: string): FirewallIntent {
-    const lower = path.toLowerCase();
+    const lower = this.normalizeRequestPath(path);
     const ua = (userAgent || '').toLowerCase();
+
+    if (this.isTrustedApiPath(path)) {
+      return 'api_access';
+    }
 
     if (HONEYPOT_PATHS.some((p) => lower.startsWith(p) || lower.includes(p))) {
       return 'malicious_scan';
@@ -196,7 +233,7 @@ export class FirewallService {
   }
 
   isHoneypotHit(path: string): boolean {
-    const lower = path.toLowerCase();
+    const lower = this.normalizeRequestPath(path);
     return HONEYPOT_PATHS.some((p) => lower.startsWith(p) || lower.includes(p));
   }
 
@@ -427,6 +464,8 @@ export class FirewallService {
     let blockReason = '';
 
     const whitelisted = await this.isIpWhitelisted(ip);
+    const isIndiaIp =
+      isPrivateOrLocalIp(ip) || geo.countryCode === 'IN';
 
     if (whitelisted) {
       return { ip, geo, intent, blocked: false, blockReason: '' };
@@ -434,8 +473,12 @@ export class FirewallService {
 
     const existingBlock = await this.isIpBlocked(ip);
     if (existingBlock) {
-      blocked = true;
-      blockReason = existingBlock.reason || 'IP is on block list';
+      if (isIndiaIp && existingBlock.source === 'auto_scan') {
+        await this.unblockIp(ip);
+      } else {
+        blocked = true;
+        blockReason = existingBlock.reason || 'IP is on block list';
+      }
     } else if (this.isHoneypotHit(path)) {
       blocked = true;
       blockReason = 'Honeypot trap triggered — permanent block';
@@ -461,10 +504,13 @@ export class FirewallService {
     ) {
       blocked = true;
       blockReason = `Access restricted to India only. Detected: ${geo.country || 'Unknown'}`;
-    } else if (settings.autoBlockScans && intent === 'malicious_scan') {
-      blocked = true;
-      blockReason = 'Suspicious scan or probe detected';
-      await this.blockIp(ip, blockReason, 'auto_scan', 'system');
+    } else if (settings.autoBlockScans && intent === 'malicious_scan' && !isIndiaIp) {
+      const hasValidSession = await this.hasValidSession(req);
+      if (!hasValidSession) {
+        blocked = true;
+        blockReason = 'Suspicious scan or probe detected';
+        await this.blockIp(ip, blockReason, 'auto_scan', 'system');
+      }
     }
 
     return { ip, geo, intent, blocked, blockReason };
@@ -520,15 +566,8 @@ export class FirewallService {
   }
 
   async checkAccess(req: Request): Promise<FirewallCheckResult> {
-    const { ip, geo, blocked, blockReason } = await this.evaluateRequest(req);
-    return {
-      allowed: !blocked,
-      ip,
-      country: geo.country,
-      countryCode: geo.countryCode,
-      city: geo.city,
-      reason: blocked ? blockReason : '',
-    };
+    const { blocked } = await this.evaluateRequest(req);
+    return { allowed: !blocked };
   }
 
   getClientIp(req: Request): string {
