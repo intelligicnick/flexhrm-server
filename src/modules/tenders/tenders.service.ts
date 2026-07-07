@@ -430,6 +430,44 @@ export class TendersService {
     await doc.save();
   }
 
+  async permanentDelete(id: string): Promise<void> {
+    const doc = await this.tenderModel.findOne({ id }).exec();
+    if (!doc) throw new NotFoundException('Tender not found.');
+    if (!doc.deletedAt?.trim()) {
+      throw new BadRequestException(
+        'Only soft-deleted tenders can be permanently removed.',
+      );
+    }
+    await this.tenderModel.deleteOne({ id }).exec();
+  }
+
+  async bulkPermanentDelete(
+    ids: string[],
+  ): Promise<{ deleted: number; errors: string[] }> {
+    const tenderIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    );
+    if (!tenderIds.length) {
+      throw new BadRequestException('Select at least one tender to delete.');
+    }
+
+    let deleted = 0;
+    const errors: string[] = [];
+
+    for (const id of tenderIds) {
+      try {
+        await this.permanentDelete(id);
+        deleted += 1;
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : 'Permanent delete failed.'}`,
+        );
+      }
+    }
+
+    return { deleted, errors: errors.slice(0, 20) };
+  }
+
   async bulkUpdate(
     ids: string[],
     patch: UpdateTenderDto,

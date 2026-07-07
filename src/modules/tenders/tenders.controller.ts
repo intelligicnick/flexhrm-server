@@ -9,7 +9,10 @@ import {
   Query,
 } from '@nestjs/common';
 import { TendersService } from './tenders.service';
-import { RequirePermissions } from '../../common/decorators/auth.decorators';
+import {
+  RequirePermissions,
+  SuperAdminOnly,
+} from '../../common/decorators/auth.decorators';
 import {
   BulkDeleteTenderDto,
   BulkImportTenderDto,
@@ -71,6 +74,13 @@ export class TendersController {
     return this.tendersService.bulkDelete(dto.ids || []);
   }
 
+  @Post('bulk-permanent-delete')
+  @SuperAdminOnly()
+  @RequirePermissions('bids', 'delete')
+  bulkPermanentDelete(@Body() dto: BulkDeleteTenderDto) {
+    return this.tendersService.bulkPermanentDelete(dto.ids || []);
+  }
+
   @Post('duplicate-check')
   @RequirePermissions('bids', 'view')
   duplicateCheck(@Body() dto: TenderDuplicateCheckDto) {
@@ -89,6 +99,14 @@ export class TendersController {
   @RequirePermissions('bids', 'edit')
   update(@Param('id') id: string, @Body() dto: UpdateTenderDto) {
     return this.tendersService.update(id, dto);
+  }
+
+  @Delete(':id/permanent')
+  @SuperAdminOnly()
+  @RequirePermissions('bids', 'delete')
+  async permanentRemove(@Param('id') id: string) {
+    await this.tendersService.permanentDelete(id);
+    return { success: true };
   }
 
   @Delete(':id')
