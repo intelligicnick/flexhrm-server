@@ -22,4 +22,11 @@ export class SchoolBlock {
 }
 
 export const SchoolBlockSchema = SchemaFactory.createForClass(SchoolBlock);
-SchoolBlockSchema.index({ districtId: 1, name: 1 }, { unique: true });
+SchoolBlockSchema.index(
+  { tenantId: 1, districtId: 1, name: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { deleted: false },
+    collation: { locale: 'en', strength: 2 },
+  },
+);

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'crypto';
+import { MongoServerError } from 'mongodb';
 import { Model } from 'mongoose';
 import {
   SchoolBlock,
@@ -40,6 +41,30 @@ export class SchoolGeographyService {
         : { ...doc };
     const { _id, __v, createdAt, updatedAt, ...rest } = obj as Record<string, unknown>;
     return rest;
+  }
+
+  private caseInsensitiveNameRegex(name: string) {
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${escaped}$`, 'i');
+  }
+
+  /** Soft-deleted rows still occupy the legacy unique index; remove tombstones before save. */
+  private async removeSoftDeletedBlockConflicts(
+    districtId: string,
+    name: string,
+    excludeId: string,
+  ): Promise<void> {
+    const conflicts = await this.blockModel
+      .find({
+        id: { $ne: excludeId },
+        districtId,
+        name: this.caseInsensitiveNameRegex(name),
+        deleted: true,
+      })
+      .exec();
+    for (const tombstone of conflicts) {
+      await this.blockModel.deleteOne({ id: tombstone.id });
+    }
   }
 
   async findAllDistricts(includeDeleted = false) {
@@ -160,17 +185,25 @@ export class SchoolGeographyService {
       .findOne({
         id: { $ne: id },
         districtId,
-        name: { $regex: new RegExp(`^${trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        name: this.caseInsensitiveNameRegex(trimmed),
         deleted: false,
       })
       .exec();
     if (duplicate) {
       throw new BadRequestException(`Block "${trimmed}" already exists in this district.`);
     }
+    await this.removeSoftDeletedBlockConflicts(districtId, trimmed, id);
     block.name = trimmed;
     block.districtId = districtId;
     block.districtName = district.name;
-    await block.save();
+    try {
+      await block.save();
+    } catch (err) {
+      if (err instanceof MongoServerError && err.code === 11000) {
+        throw new BadRequestException(`Block "${trimmed}" already exists in this district.`);
+      }
+      throw err;
+    }
     return this.toBlockPlain(block);
   }
 

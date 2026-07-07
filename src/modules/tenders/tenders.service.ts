@@ -115,6 +115,11 @@ export class TendersService {
     } else if (nextStatus === undefined) {
       return;
     }
+
+    const outcomeText = String(item.outcome || '').toLowerCase();
+    if (outcomeText.includes('disqualified')) {
+      nextStatus = 'disqualified';
+    }
     if (nextStatus === 'not_filed' && doc.status !== 'not_filed') return;
 
     const missed = this.isMissedParticipation(doc);

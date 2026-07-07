@@ -38,7 +38,7 @@ export function stageStateFromLines(
 
 export function extractProcessStatus(cardText: string): string {
   const block = cardText.match(
-    /Status\s*:\s*([^\n]+?)(?=\s*Bid\/RA\s*Status|\s*Items|\s*Quantity|$)/i,
+    /(?<!Technical\s)Status\s*:\s*([^\n]+?)(?=\s*Bid\/RA\s*Status|\s*Items|\s*Quantity|$)/i,
   );
   if (block?.[1]) {
     const value = block[1].trim();
@@ -46,19 +46,43 @@ export function extractProcessStatus(cardText: string): string {
   }
 
   const multiline = cardText.match(
-    /Status\s*:\s*\n\s*(Technical Evaluation|Financial Evaluation|Bid\s*\/?\s*RA\s*Award|Bid Award|Evaluation)/i,
+    /(?<!Technical\s)Status\s*:\s*\n\s*(Technical Evaluation|Financial Evaluation|Bid\s*\/?\s*RA\s*Award|Bid Award|Evaluation)/i,
   );
   if (multiline?.[1]) return multiline[1].trim();
 
   const inline = cardText.match(
-    /Status\s+(Technical Evaluation|Financial Evaluation|Bid\s*\/?\s*RA\s*Award|Bid Award|Evaluation)/i,
+    /(?<!Technical\s)Status\s+(Technical Evaluation|Financial Evaluation|Bid\s*\/?\s*RA\s*Award|Bid Award|Evaluation)/i,
   );
   return inline?.[1]?.trim() ?? '';
 }
 
+function normalizeTechnicalStatusValue(value: string): string {
+  return value.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function extractTechnicalStatus(cardText: string): string {
+  const colonMatch = cardText.match(/Technical\s+Status\s*:\s*([^\n]+)/i);
+  if (colonMatch?.[1]) return normalizeTechnicalStatusValue(colonMatch[1]);
+
   const match = cardText.match(/Technical\s+Status\s*[: ]+\s*([^\n]+)/i);
-  return match?.[1]?.trim() ?? '';
+  if (match?.[1]) return normalizeTechnicalStatusValue(match[1]);
+
+  const multiline = cardText.match(/Technical\s+Status\s*\n\s*([^\n]+)/i);
+  if (multiline?.[1]) return normalizeTechnicalStatusValue(multiline[1]);
+
+  const inline = cardText.match(/Technical\s+Status\s+([A-Za-z][^\n]*)/i);
+  return inline?.[1] ? normalizeTechnicalStatusValue(inline[1]) : '';
+}
+
+function isTechnicallyDisqualified(technicalStatus: string, cardText = ''): boolean {
+  const tech = technicalStatus.toLowerCase().trim();
+  if (tech.includes('disqualified')) return true;
+
+  const text = cardText.toLowerCase();
+  if (/technical\s+status\s*[:\s\n]*disqualified/i.test(text)) return true;
+  if (/\bdisqualified\b/.test(text) && /technical\s+status/i.test(text)) return true;
+  if (/\boutcome\s*[:\s]*disqualified/i.test(text)) return true;
+  return false;
 }
 
 export function detectSelfBidAward(cardText: string): boolean {
@@ -93,9 +117,9 @@ export function deriveStatusFromGemProgress(
   participated: boolean,
   cardText = '',
 ): TenderStatus {
-  const techResult = technicalStatus.toLowerCase().trim();
-  if (techResult.includes('disqualified')) return 'disqualified';
+  if (isTechnicallyDisqualified(technicalStatus, cardText)) return 'disqualified';
 
+  const techResult = technicalStatus.toLowerCase().trim();
   const tech = stageStateFromLines(stageLines, 'technical');
   const financial = stageStateFromLines(stageLines, 'financial');
   const bidAward = stageStateFromLines(stageLines, 'bid award');
@@ -117,8 +141,8 @@ export function deriveStatusFromGemProgress(
   }
   if (
     techResult.includes('qualified') ||
-    tech === 'completed' ||
-    (financial === 'completed' && hasFinancialStage)
+    (tech === 'completed' && !isTechnicallyDisqualified(technicalStatus, cardText)) ||
+    (financial === 'completed' && hasFinancialStage && !isTechnicallyDisqualified(technicalStatus, cardText))
   ) {
     return 'technical_qualified';
   }
@@ -141,7 +165,7 @@ export function deriveOutcomeFromGemProgress(input: {
   const selfAwarded = detectSelfBidAward(cardText);
   const bidAward = stageStateFromLines(stageLines, 'bid award');
 
-  if (technicalStatus.toLowerCase().includes('disqualified')) return 'Disqualified';
+  if (isTechnicallyDisqualified(technicalStatus, cardText)) return 'Disqualified';
   if (status === 'won_bid' || selfAwarded) return 'Won the Bid';
   if (
     bidAward === 'completed' ||
