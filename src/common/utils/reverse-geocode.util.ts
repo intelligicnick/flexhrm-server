@@ -223,6 +223,7 @@ async function fetchNominatim(
     url.searchParams.set('lat', String(lat));
     url.searchParams.set('lon', String(lng));
     url.searchParams.set('format', 'json');
+    url.searchParams.set('addressdetails', '1');
     url.searchParams.set('accept-language', options?.language ?? 'en');
     url.searchParams.set('zoom', '18');
     if (options?.layer) {
