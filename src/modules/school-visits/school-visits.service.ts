@@ -26,6 +26,8 @@ import {
 } from './supervisor-visit-cooldown.util';
 import { filterSchoolsForSupervisor } from './supervisor-school-access.util';
 import type { SupervisorAccessProfile } from './supervisor-school-access.util';
+import { resolveReverseGeocodePlaceName, stripCoordsFromLocationLabel } from '../../common/utils/reverse-geocode.util';
+import { distanceMeters } from '../../common/utils/geo.util';
 
 export interface EffectiveLastVisitInfo {
   lastVisitDate: string | null;
@@ -476,51 +478,170 @@ export class SchoolVisitsService {
     return this.normalizePhone(phone);
   }
 
-  async reverseGeocodePlaceName(lat: number, lng: number): Promise<string> {
-    try {
-      const url = new URL('https://nominatim.openstreetmap.org/reverse');
-      url.searchParams.set('lat', String(lat));
-      url.searchParams.set('lon', String(lng));
-      url.searchParams.set('format', 'json');
-      url.searchParams.set('accept-language', 'en');
-      url.searchParams.set('zoom', '16');
+  private static readonly SCHOOL_MATCH_RADIUS_M = 250;
+  private static readonly BLOCK_MATCH_RADIUS_M = 150;
+  private static readonly VISIT_MATCH_LIMIT = 20;
 
-      const res = await fetch(url.toString(), {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'FlexHRM-Supervisor/1.0',
-        },
-      });
-      if (!res.ok) return '';
+  private isValidVisitCoord(lat: number, lng: number): boolean {
+    return (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      !(lat === 0 && lng === 0) &&
+      Math.abs(lat) <= 90 &&
+      Math.abs(lng) <= 180
+    );
+  }
 
-      const data = (await res.json()) as {
-        display_name?: string;
-        address?: Record<string, string>;
-      };
-      const address = data.address;
-      if (address) {
-        const parts = [
-          address.village,
-          address.town,
-          address.city,
-          address.suburb,
-          address.neighbourhood,
-          address.locality,
-          address.county,
-          address.state_district,
-          address.state,
-        ]
-          .map((part) => String(part || '').trim())
-          .filter(Boolean);
-        const unique = [...new Set(parts)];
-        if (unique.length) return unique.slice(0, 3).join(', ');
+  private isMeaningfulPlaceLabel(
+    label: string,
+    block?: string,
+    district?: string,
+  ): boolean {
+    const trimmed = stripCoordsFromLocationLabel(label);
+    if (!trimmed) return false;
+    const lower = trimmed.toLowerCase();
+    if (block && lower === block.trim().toLowerCase()) return false;
+    if (district && lower === district.trim().toLowerCase()) return false;
+    return true;
+  }
+
+  private collectVisitLocationPoints(
+    visit: Record<string, unknown>,
+  ): Array<{ lat: number; lng: number; locationLabel: string }> {
+    const points: Array<{ lat: number; lng: number; locationLabel: string }> =
+      [];
+
+    const gps = visit.gpsLocation as
+      | { lat?: number; lng?: number; locationLabel?: string }
+      | undefined;
+    if (gps && this.isValidVisitCoord(Number(gps.lat), Number(gps.lng))) {
+      const label = String(gps.locationLabel || '').trim();
+      if (label) {
+        points.push({
+          lat: Number(gps.lat),
+          lng: Number(gps.lng),
+          locationLabel: label,
+        });
       }
-
-      const display = String(data.display_name || '').trim();
-      if (!display) return '';
-      return display.split(',').slice(0, 3).join(', ').trim();
-    } catch {
-      return '';
     }
+
+    const photos = Array.isArray(visit.photos) ? visit.photos : [];
+    for (const photo of photos) {
+      const entry = photo as {
+        lat?: number;
+        lng?: number;
+        locationLabel?: string;
+      };
+      if (
+        !entry ||
+        !this.isValidVisitCoord(Number(entry.lat), Number(entry.lng))
+      ) {
+        continue;
+      }
+      const label = String(entry.locationLabel || '').trim();
+      if (!label) continue;
+      points.push({
+        lat: Number(entry.lat),
+        lng: Number(entry.lng),
+        locationLabel: label,
+      });
+    }
+
+    return points;
+  }
+
+  async findMatchedPlaceNameFromVisits(
+    lat: number,
+    lng: number,
+    schoolWorkId: string,
+  ): Promise<string> {
+    const school = await this.schoolWorksService.findById(schoolWorkId);
+    const block = String(school?.block || '').trim();
+    const district = String(school?.district || '').trim();
+
+    type Match = { distance: number; placeName: string };
+    let bestSchoolMatch: Match | null = null;
+
+    const schoolVisits = await this.visitModel
+      .find({ schoolWorkId: String(schoolWorkId) })
+      .sort({ visitDate: -1 })
+      .limit(SchoolVisitsService.VISIT_MATCH_LIMIT)
+      .lean();
+
+    for (const visit of schoolVisits) {
+      for (const point of this.collectVisitLocationPoints(
+        visit as Record<string, unknown>,
+      )) {
+        const distance = distanceMeters(lat, lng, point.lat, point.lng);
+        if (distance > SchoolVisitsService.SCHOOL_MATCH_RADIUS_M) continue;
+
+        const placeName = stripCoordsFromLocationLabel(point.locationLabel);
+        if (!this.isMeaningfulPlaceLabel(placeName, block, district)) continue;
+
+        if (!bestSchoolMatch || distance < bestSchoolMatch.distance) {
+          bestSchoolMatch = { distance, placeName };
+        }
+      }
+    }
+
+    if (bestSchoolMatch) return bestSchoolMatch.placeName;
+
+    if (!block) return '';
+
+    let bestBlockMatch: Match | null = null;
+    const escapedBlock = block.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blockVisits = await this.visitModel
+      .find({
+        block: { $regex: new RegExp(`^${escapedBlock}$`, 'i') },
+        schoolWorkId: { $ne: String(schoolWorkId) },
+      })
+      .sort({ visitDate: -1 })
+      .limit(SchoolVisitsService.VISIT_MATCH_LIMIT)
+      .lean();
+
+    for (const visit of blockVisits) {
+      for (const point of this.collectVisitLocationPoints(
+        visit as Record<string, unknown>,
+      )) {
+        const distance = distanceMeters(lat, lng, point.lat, point.lng);
+        if (distance > SchoolVisitsService.BLOCK_MATCH_RADIUS_M) continue;
+
+        const placeName = stripCoordsFromLocationLabel(point.locationLabel);
+        if (!this.isMeaningfulPlaceLabel(placeName, block, district)) continue;
+
+        if (!bestBlockMatch || distance < bestBlockMatch.distance) {
+          bestBlockMatch = { distance, placeName };
+        }
+      }
+    }
+
+    return bestBlockMatch?.placeName ?? '';
+  }
+
+  async reverseGeocodePlaceName(
+    lat: number,
+    lng: number,
+    schoolWorkId?: string,
+  ): Promise<string> {
+    const school = schoolWorkId
+      ? await this.schoolWorksService.findById(schoolWorkId)
+      : null;
+    const historicalMatch = schoolWorkId
+      ? await this.findMatchedPlaceNameFromVisits(lat, lng, schoolWorkId)
+      : '';
+
+    return resolveReverseGeocodePlaceName(lat, lng, {
+      googleApiKey: process.env.GOOGLE_GEOCODING_API_KEY,
+      openCageApiKey: process.env.OPENCAGE_API_KEY,
+      schoolContext: school
+        ? {
+            schoolWorkId: String(schoolWorkId),
+            block: String(school.block || ''),
+            district: String(school.district || ''),
+            schoolName: String(school.schoolName || ''),
+          }
+        : undefined,
+      historicalMatch,
+    });
   }
 }

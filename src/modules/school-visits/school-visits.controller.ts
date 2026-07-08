@@ -130,6 +130,7 @@ export class SchoolVisitsController {
   reverseGeocode(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Query('schoolWorkId') schoolWorkId?: string,
   ) {
     const parsedLat = Number(lat);
     const parsedLng = Number(lng);
@@ -137,7 +138,7 @@ export class SchoolVisitsController {
       return { placeName: '' };
     }
     return this.visitsService
-      .reverseGeocodePlaceName(parsedLat, parsedLng)
+      .reverseGeocodePlaceName(parsedLat, parsedLng, schoolWorkId?.trim() || undefined)
       .then((placeName) => ({ placeName }));
   }
 
