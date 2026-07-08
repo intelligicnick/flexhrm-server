@@ -63,6 +63,7 @@ type PlaceCandidate = {
 export function stripCoordsFromLocationLabel(label: string): string {
   return String(label || '')
     .replace(/\s*\([^)]*\d+\s*°[^)]*\)\s*$/i, '')
+    .replace(/\s*·\s*-?\d+\.\d+,\s*-?\d+\.\d+\s*$/i, '')
     .trim();
 }
 

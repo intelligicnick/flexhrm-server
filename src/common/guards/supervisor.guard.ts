@@ -35,6 +35,13 @@ export class SupervisorGuard implements CanActivate {
 
     const deviceId = String(request.headers['x-supervisor-device-id'] || '').trim();
     await assertSupervisorRegisteredDevice(user, deviceId, this.schoolSupervisorsService);
+
+    const supervisorId = String(user.employeeId || '').trim();
+    if (supervisorId) {
+      user.assignedBlocks =
+        await this.schoolSupervisorsService.getAssignedBlocks(supervisorId);
+    }
+
     return true;
   }
 }

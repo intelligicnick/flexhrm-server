@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -112,6 +113,11 @@ export class SupervisorLoginDto {
   @IsOptional()
   @IsString()
   deviceOtp?: string;
+
+  /** Confirm taking over a device already linked to another supervisor. */
+  @IsOptional()
+  @IsBoolean()
+  confirmDeviceTransfer?: boolean;
 }
 
 export class SupervisorRegisterDeviceDto {
@@ -125,6 +131,10 @@ export class SupervisorRegisterDeviceDto {
   @IsOptional()
   @IsString()
   deviceOtp?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  confirmDeviceTransfer?: boolean;
 }
 
 export class SupervisorProfilePhotoDto {

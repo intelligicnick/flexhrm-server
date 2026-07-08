@@ -94,6 +94,19 @@ export class SchoolSupervisorsService {
     });
   }
 
+  async getAssignedBlocks(id: string): Promise<string[]> {
+    const supervisorId = String(id || '').trim();
+    if (!supervisorId) return [];
+    const doc = await this.supervisorModel
+      .findOne({ id: supervisorId })
+      .select({ assignedBlocks: 1 })
+      .lean()
+      .exec();
+    return Array.isArray(doc?.assignedBlocks)
+      ? doc.assignedBlocks.map((block) => String(block || '').trim()).filter(Boolean)
+      : [];
+  }
+
   async findById(id: string): Promise<Record<string, unknown> | null> {
     const doc = await this.supervisorModel.findOne({ id }).exec();
     return doc ? this.toPlain(doc) : null;
@@ -167,6 +180,12 @@ export class SchoolSupervisorsService {
       .findOneAndUpdate({ id }, { $set: patch }, { new: true })
       .exec();
     if (!doc) throw new Error('School supervisor not found.');
+    if (dto.assignedBlocks !== undefined) {
+      await this.sessionsService.syncSupervisorAssignedBlocks(
+        id,
+        doc.assignedBlocks || [],
+      );
+    }
     return this.toPlain(doc);
   }
 
@@ -175,20 +194,81 @@ export class SchoolSupervisorsService {
     return result.deletedCount ?? 0;
   }
 
+  async findByRegisteredDeviceId(
+    deviceId: string,
+  ): Promise<{ id: string; name: string } | null> {
+    const id = String(deviceId || '').trim();
+    if (!id) return null;
+    const doc = await this.supervisorModel
+      .findOne({ registeredDeviceId: id })
+      .select({ id: 1, name: 1 })
+      .lean()
+      .exec();
+    if (!doc?.id) return null;
+    return {
+      id: String(doc.id),
+      name: String(doc.name || '').trim() || 'Another supervisor',
+    };
+  }
+
+  async clearDeviceRegistration(supervisorId: string): Promise<void> {
+    const id = String(supervisorId || '').trim();
+    if (!id) return;
+    await this.supervisorModel.updateOne(
+      { id },
+      {
+        $set: {
+          registeredDeviceId: '',
+          registeredDeviceName: '',
+          deviceRegisteredAt: null,
+          deviceChangeOtp: { hash: '', expiresAt: null },
+        },
+      },
+    );
+  }
+
+  /**
+   * Registers a device for a supervisor. If the device is already linked to
+   * another account, require confirmDeviceTransfer and clear the previous link.
+   */
   async registerDevice(
     supervisorId: string,
     deviceId: string,
     deviceName?: string,
-  ): Promise<void> {
+    options?: { confirmDeviceTransfer?: boolean },
+  ): Promise<{ transferredFrom?: { id: string; name: string } }> {
+    const targetId = String(supervisorId || '').trim();
+    const id = String(deviceId || '').trim();
+    if (!targetId || !id) {
+      throw new Error('Supervisor and device ID are required.');
+    }
+
+    const existing = await this.findByRegisteredDeviceId(id);
+    if (existing && existing.id !== targetId) {
+      if (!options?.confirmDeviceTransfer) {
+        const err = new Error('DEVICE_ALREADY_REGISTERED') as Error & {
+          code: string;
+          registeredTo: { id: string; name: string };
+        };
+        err.code = 'DEVICE_ALREADY_REGISTERED';
+        err.registeredTo = existing;
+        throw err;
+      }
+      await this.clearDeviceRegistration(existing.id);
+    }
+
     const patch: Record<string, unknown> = {
-      registeredDeviceId: deviceId,
+      registeredDeviceId: id,
       deviceRegisteredAt: new Date(),
       deviceChangeOtp: { hash: '', expiresAt: null },
     };
     const name = String(deviceName || '').trim().slice(0, 200);
     if (name) patch.registeredDeviceName = name;
 
-    await this.supervisorModel.updateOne({ id: supervisorId }, { $set: patch });
+    await this.supervisorModel.updateOne({ id: targetId }, { $set: patch });
+    return existing && existing.id !== targetId
+      ? { transferredFrom: existing }
+      : {};
   }
 
   async updateDeviceName(supervisorId: string, deviceName: string): Promise<void> {
@@ -226,6 +306,7 @@ export class SchoolSupervisorsService {
     deviceId: string,
     otp: string,
     deviceName?: string,
+    options?: { confirmDeviceTransfer?: boolean },
   ): Promise<boolean> {
     const supervisor = await this.supervisorModel.findOne({ id: supervisorId }).exec();
     if (!supervisor) return false;
@@ -235,7 +316,7 @@ export class SchoolSupervisorsService {
     if (new Date() > new Date(otpRecord.expiresAt)) return false;
     if (!verifyPassword(otp.trim(), otpRecord.hash)) return false;
 
-    await this.registerDevice(supervisorId, deviceId, deviceName);
+    await this.registerDevice(supervisorId, deviceId, deviceName, options);
     return true;
   }
 

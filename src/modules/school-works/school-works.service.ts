@@ -154,22 +154,25 @@ export class SchoolWorksService {
   }
 
   async findAllForSupervisorList(): Promise<Record<string, unknown>[]> {
-    const docs = await this.schoolWorkModel
-      .find()
-      .select({
-        id: 1,
-        srNo: 1,
-        schoolName: 1,
-        block: 1,
-        district: 1,
-        udise: 1,
-        noOfToilets: 1,
-        assignedSupervisorId: 1,
-        schoolCategory: 1,
-      })
-      .sort({ srNo: 1 })
-      .lean()
-      .exec();
+    const tenantId = this.resolveTenantId();
+    const docs = await runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .find(this.tenantOrMissingFilter(tenantId))
+        .select({
+          id: 1,
+          srNo: 1,
+          schoolName: 1,
+          block: 1,
+          district: 1,
+          udise: 1,
+          noOfToilets: 1,
+          assignedSupervisorId: 1,
+          schoolCategory: 1,
+        })
+        .sort({ srNo: 1 })
+        .lean()
+        .exec(),
+    );
     return docs.map((d) => this.toPlain(d));
   }
 

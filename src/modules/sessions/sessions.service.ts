@@ -195,6 +195,23 @@ export class SessionsService {
     await this.sessionModel.deleteMany({ username });
   }
 
+  async syncSupervisorAssignedBlocks(
+    employeeId: string,
+    assignedBlocks: string[],
+  ): Promise<void> {
+    const supervisorId = String(employeeId || '').trim();
+    if (!supervisorId) return;
+    const blocks = Array.isArray(assignedBlocks) ? assignedBlocks : [];
+    await this.sessionModel.updateMany(
+      {
+        userType: 'supervisor',
+        employeeId: supervisorId,
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { assignedBlocks: blocks } },
+    );
+  }
+
   async purgeExpired(): Promise<number> {
     const result = await this.sessionModel.deleteMany({
       expiresAt: { $lte: new Date() },

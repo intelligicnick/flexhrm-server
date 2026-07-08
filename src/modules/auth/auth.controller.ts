@@ -407,29 +407,51 @@ export class AuthController {
 
     const supervisorId = String(supervisor.id);
     const registeredDeviceId = String(supervisor.registeredDeviceId || '');
+    const confirmDeviceTransfer = !!dto.confirmDeviceTransfer;
+    const deviceOptions = { confirmDeviceTransfer };
 
-    if (registeredDeviceId && registeredDeviceId !== deviceId) {
-      const otp = String(dto.deviceOtp || '').trim();
-      if (!otp) {
+    try {
+      if (registeredDeviceId && registeredDeviceId !== deviceId) {
+        const otp = String(dto.deviceOtp || '').trim();
+        if (!otp) {
+          throw new ForbiddenException({
+            code: 'DEVICE_MISMATCH',
+            message:
+              'This account is registered on another device. Contact your admin for a device change OTP.',
+          });
+        }
+        const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
+          supervisorId,
+          deviceId,
+          otp,
+          deviceName,
+          deviceOptions,
+        );
+        if (!verified) {
+          throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
+        }
+      } else if (!registeredDeviceId) {
+        await this.schoolSupervisorsService.registerDevice(
+          supervisorId,
+          deviceId,
+          deviceName,
+          deviceOptions,
+        );
+      } else if (deviceName) {
+        await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+      }
+    } catch (err: unknown) {
+      const e = err as { code?: string; registeredTo?: { id: string; name: string }; message?: string };
+      if (e?.code === 'DEVICE_ALREADY_REGISTERED' || e?.message === 'DEVICE_ALREADY_REGISTERED') {
         throw new ForbiddenException({
-          code: 'DEVICE_MISMATCH',
+          code: 'DEVICE_ALREADY_REGISTERED',
           message:
-            'This account is registered on another device. Contact your admin for a device change OTP.',
+            'A user is already registered from this device. Are you sure you want to register?',
+          registeredToName: e.registeredTo?.name || 'Another supervisor',
+          registeredToId: e.registeredTo?.id || '',
         });
       }
-      const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
-        supervisorId,
-        deviceId,
-        otp,
-        deviceName,
-      );
-      if (!verified) {
-        throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
-      }
-    } else if (!registeredDeviceId) {
-      await this.schoolSupervisorsService.registerDevice(supervisorId, deviceId, deviceName);
-    } else if (deviceName) {
-      await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+      throw err;
     }
 
     const assignedBlocks = Array.isArray(supervisor.assignedBlocks)
@@ -481,29 +503,51 @@ export class AuthController {
     }
 
     const registeredDeviceId = String(raw.registeredDeviceId || '');
+    const confirmDeviceTransfer = !!dto.confirmDeviceTransfer;
+    const deviceOptions = { confirmDeviceTransfer };
 
-    if (registeredDeviceId && registeredDeviceId !== deviceId) {
-      const otp = String(dto.deviceOtp || '').trim();
-      if (!otp) {
+    try {
+      if (registeredDeviceId && registeredDeviceId !== deviceId) {
+        const otp = String(dto.deviceOtp || '').trim();
+        if (!otp) {
+          throw new ForbiddenException({
+            code: 'DEVICE_MISMATCH',
+            message:
+              'This account is registered on another device. Contact your admin for a device change OTP.',
+          });
+        }
+        const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
+          supervisorId,
+          deviceId,
+          otp,
+          deviceName,
+          deviceOptions,
+        );
+        if (!verified) {
+          throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
+        }
+      } else if (!registeredDeviceId) {
+        await this.schoolSupervisorsService.registerDevice(
+          supervisorId,
+          deviceId,
+          deviceName,
+          deviceOptions,
+        );
+      } else if (deviceName) {
+        await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+      }
+    } catch (err: unknown) {
+      const e = err as { code?: string; registeredTo?: { id: string; name: string }; message?: string };
+      if (e?.code === 'DEVICE_ALREADY_REGISTERED' || e?.message === 'DEVICE_ALREADY_REGISTERED') {
         throw new ForbiddenException({
-          code: 'DEVICE_MISMATCH',
+          code: 'DEVICE_ALREADY_REGISTERED',
           message:
-            'This account is registered on another device. Contact your admin for a device change OTP.',
+            'A user is already registered from this device. Are you sure you want to register?',
+          registeredToName: e.registeredTo?.name || 'Another supervisor',
+          registeredToId: e.registeredTo?.id || '',
         });
       }
-      const verified = await this.schoolSupervisorsService.verifyAndRegisterDevice(
-        supervisorId,
-        deviceId,
-        otp,
-        deviceName,
-      );
-      if (!verified) {
-        throw new BadRequestException('Invalid or expired device OTP. Ask your admin for a new code.');
-      }
-    } else if (!registeredDeviceId) {
-      await this.schoolSupervisorsService.registerDevice(supervisorId, deviceId, deviceName);
-    } else if (deviceName) {
-      await this.schoolSupervisorsService.updateDeviceName(supervisorId, deviceName);
+      throw err;
     }
 
     const updated = await this.schoolSupervisorsService.getRawById(supervisorId);
@@ -568,11 +612,14 @@ export class AuthController {
     }
     const supervisor = await this.schoolSupervisorsService.findById(user.employeeId || '');
     const raw = await this.schoolSupervisorsService.getRawById(user.employeeId || '');
+    const assignedBlocks = await this.schoolSupervisorsService.getAssignedBlocks(
+      user.employeeId || '',
+    );
     return {
       userType: 'supervisor',
       supervisorId: user.employeeId,
       phone: user.username,
-      assignedBlocks: user.assignedBlocks || [],
+      assignedBlocks,
       name: supervisor?.name || user.username,
       profilePhotoBase64: raw?.profilePhotoBase64 || '',
       profilePhotoUrl: raw?.profilePhotoUrl || '',
