@@ -15,11 +15,24 @@ import {
   CommitmentDiaryDocument,
 } from '../../database/schemas/commitment-diary.schema';
 import { SchoolWorksService } from '../school-works/school-works.service';
+import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DataArchiveService } from '../data-archive/data-archive.service';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { uploadEmbeddedPhoto } from '../../common/storage/photo-upload.util';
 import { CreateSchoolVisitDto } from './dto/school-visit.dto';
+import {
+  assertVisitCooldownAllowed,
+} from './supervisor-visit-cooldown.util';
+import { filterSchoolsForSupervisor } from './supervisor-school-access.util';
+import type { SupervisorAccessProfile } from './supervisor-school-access.util';
+
+export interface EffectiveLastVisitInfo {
+  lastVisitDate: string | null;
+  lastVisitBySupervisorId: string | null;
+  lastVisitBySupervisorName: string | null;
+  blockSharedCooldown: boolean;
+}
 
 function todayIsoInKolkata(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -35,6 +48,7 @@ export class SchoolVisitsService {
     @InjectModel(CommitmentDiary.name)
     private readonly commitmentModel: Model<CommitmentDiaryDocument>,
     private readonly schoolWorksService: SchoolWorksService,
+    private readonly schoolSupervisorsService: SchoolSupervisorsService,
     private readonly notificationsService: NotificationsService,
     private readonly dataArchiveService: DataArchiveService,
     private readonly mediaStorage: MediaStorageService,
@@ -61,13 +75,189 @@ export class SchoolVisitsService {
     supervisorId: string,
     schoolWorkId: string,
   ): Promise<string | null> {
+    const info = await this.getEffectiveLastVisitInfo(supervisorId, schoolWorkId);
+    return info.lastVisitDate;
+  }
+
+  async getEffectiveLastVisitInfo(
+    supervisorId: string,
+    schoolWorkId: string,
+    schoolOrBlock?: Record<string, unknown> | string,
+    supervisorProfiles?: SupervisorAccessProfile[],
+  ): Promise<EffectiveLastVisitInfo> {
+    let school: Record<string, unknown> | null = null;
+    if (schoolOrBlock && typeof schoolOrBlock === 'object') {
+      school = schoolOrBlock;
+    } else {
+      school = await this.schoolWorksService.findById(schoolWorkId);
+    }
+
+    const profiles =
+      supervisorProfiles ||
+      (await this.schoolSupervisorsService.getActiveSupervisorAccessProfiles());
+    const blockSharedCooldown = school
+      ? this.schoolSupervisorsService.isSchoolSharedVisitCooldown(school, profiles)
+      : false;
+
+    const query = blockSharedCooldown
+      ? { schoolWorkId }
+      : { supervisorId, schoolWorkId };
+
     const doc = await this.visitModel
-      .findOne({ supervisorId, schoolWorkId })
+      .findOne(query)
       .sort({ visitDate: -1 })
-      .select({ visitDate: 1, _id: 0 })
+      .select({ visitDate: 1, supervisorId: 1, supervisorName: 1, _id: 0 })
       .lean()
       .exec();
-    return doc?.visitDate ? String(doc.visitDate) : null;
+
+    return {
+      lastVisitDate: doc?.visitDate ? String(doc.visitDate) : null,
+      lastVisitBySupervisorId: doc?.supervisorId
+        ? String(doc.supervisorId)
+        : null,
+      lastVisitBySupervisorName: doc?.supervisorName
+        ? String(doc.supervisorName)
+        : null,
+      blockSharedCooldown,
+    };
+  }
+
+  async getSupervisorSchoolCooldowns(
+    supervisorId: string,
+    assignedBlocks: string[],
+  ): Promise<(EffectiveLastVisitInfo & { schoolWorkId: string })[]> {
+    const allSchools = await this.schoolWorksService.findAllForSupervisorList();
+    const schools = filterSchoolsForSupervisor(
+      allSchools,
+      supervisorId,
+      assignedBlocks,
+    );
+    if (!schools.length) return [];
+
+    const supervisorProfiles =
+      await this.schoolSupervisorsService.getActiveSupervisorAccessProfiles();
+
+    const sharedSchoolIds: string[] = [];
+    const soloSchoolIds: string[] = [];
+    for (const school of schools) {
+      const id = String(school.id || '');
+      if (!id) continue;
+      if (
+        this.schoolSupervisorsService.isSchoolSharedVisitCooldown(
+          school,
+          supervisorProfiles,
+        )
+      ) {
+        sharedSchoolIds.push(id);
+      } else {
+        soloSchoolIds.push(id);
+      }
+    }
+
+    const visitBySchool = new Map<
+      string,
+      {
+        visitDate: string;
+        supervisorId: string;
+        supervisorName: string;
+      }
+    >();
+
+    if (sharedSchoolIds.length) {
+      const rows = await this.visitModel
+        .aggregate<{
+          _id: string;
+          visitDate: string;
+          supervisorId: string;
+          supervisorName: string;
+        }>([
+          { $match: { schoolWorkId: { $in: sharedSchoolIds } } },
+          { $sort: { visitDate: -1 } },
+          {
+            $group: {
+              _id: '$schoolWorkId',
+              visitDate: { $first: '$visitDate' },
+              supervisorId: { $first: '$supervisorId' },
+              supervisorName: { $first: '$supervisorName' },
+            },
+          },
+        ])
+        .exec();
+      for (const row of rows) {
+        visitBySchool.set(String(row._id), {
+          visitDate: String(row.visitDate),
+          supervisorId: String(row.supervisorId || ''),
+          supervisorName: String(row.supervisorName || ''),
+        });
+      }
+    }
+
+    if (soloSchoolIds.length) {
+      const rows = await this.visitModel
+        .aggregate<{
+          _id: string;
+          visitDate: string;
+          supervisorId: string;
+          supervisorName: string;
+        }>([
+          {
+            $match: {
+              supervisorId,
+              schoolWorkId: { $in: soloSchoolIds },
+            },
+          },
+          { $sort: { visitDate: -1 } },
+          {
+            $group: {
+              _id: '$schoolWorkId',
+              visitDate: { $first: '$visitDate' },
+              supervisorId: { $first: '$supervisorId' },
+              supervisorName: { $first: '$supervisorName' },
+            },
+          },
+        ])
+        .exec();
+      for (const row of rows) {
+        visitBySchool.set(String(row._id), {
+          visitDate: String(row.visitDate),
+          supervisorId: String(row.supervisorId || ''),
+          supervisorName: String(row.supervisorName || ''),
+        });
+      }
+    }
+
+    return schools
+      .map((school) => {
+        const schoolWorkId = String(school.id || '');
+        const blockSharedCooldown =
+          this.schoolSupervisorsService.isSchoolSharedVisitCooldown(
+            school,
+            supervisorProfiles,
+          );
+        const visit = visitBySchool.get(schoolWorkId);
+        return {
+          schoolWorkId,
+          lastVisitDate: visit?.visitDate || null,
+          lastVisitBySupervisorId: visit?.supervisorId || null,
+          lastVisitBySupervisorName: visit?.supervisorName || null,
+          blockSharedCooldown,
+        };
+      })
+      .filter((entry) => entry.schoolWorkId);
+  }
+
+  private async assertSchoolVisitAllowed(
+    supervisorId: string,
+    school: Record<string, unknown>,
+    schoolWorkId: string,
+    visitDate: string,
+  ): Promise<void> {
+    const info = await this.getEffectiveLastVisitInfo(
+      supervisorId,
+      schoolWorkId,
+      school,
+    );
+    assertVisitCooldownAllowed(info.lastVisitDate, visitDate, 'visit');
   }
 
   private normalizePhone(phone: string): string {
@@ -164,21 +354,12 @@ export class SchoolVisitsService {
       );
     }
 
-    const lastVisit = await this.visitModel
-      .findOne({ supervisorId, schoolWorkId: dto.schoolWorkId })
-      .sort({ visitDate: -1 })
-      .exec();
-    if (lastVisit?.visitDate) {
-      const last = new Date(`${lastVisit.visitDate}T12:00:00`);
-      const next = new Date(`${visitDate}T12:00:00`);
-      const daysSince = Math.floor((next.getTime() - last.getTime()) / 86_400_000);
-      const minGap = 5;
-      if (daysSince < minGap) {
-        throw new BadRequestException(
-          `Please wait ${minGap - daysSince} more day(s) before visiting this school again.`,
-        );
-      }
-    }
+    await this.assertSchoolVisitAllowed(
+      supervisorId,
+      school,
+      dto.schoolWorkId,
+      visitDate,
+    );
 
     const id = `visit_${crypto.randomBytes(8).toString('hex')}`;
 

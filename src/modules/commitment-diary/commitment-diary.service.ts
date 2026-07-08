@@ -20,6 +20,9 @@ import { SchoolSupervisorsService } from '../school-supervisors/school-superviso
 import { PlannedVisitsService } from '../planned-visits/planned-visits.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  assertVisitCooldownAllowed,
+} from '../school-visits/supervisor-visit-cooldown.util';
+import {
   CreateCommitmentDiaryDto,
   UpdateCommitmentDiaryDto,
 } from './dto/commitment-diary.dto';
@@ -216,21 +219,21 @@ export class CommitmentDiaryService {
     assertNotPastDate(sortedFrom, sortedTo);
 
     const today = todayIsoDate();
+    const supervisorProfiles =
+      await this.schoolSupervisorsService.getActiveSupervisorAccessProfiles();
+    const blockSharedCooldown =
+      this.schoolSupervisorsService.isSchoolSharedVisitCooldown(
+        school,
+        supervisorProfiles,
+      );
+    const lastVisitQuery = blockSharedCooldown
+      ? { schoolWorkId: dto.schoolWorkId }
+      : { supervisorId, schoolWorkId: dto.schoolWorkId };
     const lastVisit = await this.visitModel
-      .findOne({ supervisorId, schoolWorkId: dto.schoolWorkId })
+      .findOne(lastVisitQuery)
       .sort({ visitDate: -1 })
       .exec();
-    if (lastVisit?.visitDate) {
-      const last = new Date(`${lastVisit.visitDate}T12:00:00`);
-      const next = new Date(`${today}T12:00:00`);
-      const daysSince = Math.floor((next.getTime() - last.getTime()) / 86_400_000);
-      const minGap = 5;
-      if (daysSince < minGap) {
-        throw new BadRequestException(
-          `Please wait ${minGap - daysSince} more day(s) before scheduling this school again.`,
-        );
-      }
-    }
+    assertVisitCooldownAllowed(lastVisit?.visitDate, today, 'schedule');
 
     const activeCommitment = await this.commitmentModel
       .findOne({

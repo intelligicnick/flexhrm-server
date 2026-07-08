@@ -35,3 +35,53 @@ export function filterSchoolsForSupervisor(
     supervisorCanAccessSchool(school, supervisorId, assignedBlocks),
   );
 }
+
+export interface SupervisorAccessProfile {
+  id: string;
+  assignedBlocks: string[];
+}
+
+export function countSupervisorsForBlock(
+  blockName: string,
+  supervisors: SupervisorAccessProfile[],
+): number {
+  const schoolBlock = normalizeBlockKey(blockName);
+  if (!schoolBlock) return 0;
+
+  let count = 0;
+  for (const supervisor of supervisors) {
+    const covers = (supervisor.assignedBlocks || []).some(
+      (block) => normalizeBlockKey(block) === schoolBlock,
+    );
+    if (covers) count++;
+  }
+  return count;
+}
+
+export function countSupervisorsForSchool(
+  school: Record<string, unknown>,
+  supervisors: SupervisorAccessProfile[],
+): number {
+  let count = 0;
+  for (const supervisor of supervisors) {
+    if (
+      supervisorCanAccessSchool(
+        school,
+        supervisor.id,
+        supervisor.assignedBlocks,
+      )
+    ) {
+      count++;
+    }
+  }
+  return count;
+}
+
+export function isSchoolSharedVisitCooldown(
+  school: Record<string, unknown>,
+  supervisors: SupervisorAccessProfile[],
+): boolean {
+  const block = String(school.block || '');
+  if (countSupervisorsForBlock(block, supervisors) > 1) return true;
+  return countSupervisorsForSchool(school, supervisors) > 1;
+}

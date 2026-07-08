@@ -78,6 +78,17 @@ export class SchoolVisitsController {
     });
   }
 
+  @Get('supervisor/school-cooldowns')
+  @UseGuards(SupervisorGuard)
+  async supervisorSchoolCooldowns(
+    @Req() req: Request & { user: AdminSessionPayload },
+  ) {
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
+    return this.visitsService.getSupervisorSchoolCooldowns(supervisorId, assignedBlocks);
+  }
+
   @Get('supervisor/schools/:schoolWorkId/last-visit')
   @UseGuards(SupervisorGuard)
   async supervisorLastVisit(
@@ -85,8 +96,7 @@ export class SchoolVisitsController {
     @Param('schoolWorkId') schoolWorkId: string,
   ) {
     const supervisorId = String(req.user.employeeId || req.user.username || '');
-    const lastVisitDate = await this.visitsService.getLastVisitDate(supervisorId, schoolWorkId);
-    return { lastVisitDate };
+    return this.visitsService.getEffectiveLastVisitInfo(supervisorId, schoolWorkId);
   }
 
   @Get('supervisor/schools')
