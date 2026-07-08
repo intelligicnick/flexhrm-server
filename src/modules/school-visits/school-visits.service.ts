@@ -26,7 +26,11 @@ import {
 } from './supervisor-visit-cooldown.util';
 import { filterSchoolsForSupervisor } from './supervisor-school-access.util';
 import type { SupervisorAccessProfile } from './supervisor-school-access.util';
-import { resolveReverseGeocodePlaceName, stripCoordsFromLocationLabel } from '../../common/utils/reverse-geocode.util';
+import {
+  isBlockScaleLabel,
+  resolveReverseGeocodePlaceName,
+  stripCoordsFromLocationLabel,
+} from '../../common/utils/reverse-geocode.util';
 import { distanceMeters } from '../../common/utils/geo.util';
 
 export interface EffectiveLastVisitInfo {
@@ -499,10 +503,7 @@ export class SchoolVisitsService {
   ): boolean {
     const trimmed = stripCoordsFromLocationLabel(label);
     if (!trimmed) return false;
-    const lower = trimmed.toLowerCase();
-    if (block && lower === block.trim().toLowerCase()) return false;
-    if (district && lower === district.trim().toLowerCase()) return false;
-    return true;
+    return !isBlockScaleLabel(trimmed, { block, district });
   }
 
   private collectVisitLocationPoints(

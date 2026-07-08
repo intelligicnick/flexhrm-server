@@ -1,15 +1,32 @@
-/** Fine-grained locality fields for visit photo stamps (village, street, etc.). */
-export const FINE_PLACE_FIELDS = [
+/** Street / house / hamlet — preferred for visit stamps. */
+export const STREET_PLACE_FIELDS = [
   'house_number',
   'road',
+  'pedestrian',
+  'footway',
+  'path',
+] as const;
+
+/** Local settlement fields finer than block / district. */
+export const LOCALITY_PLACE_FIELDS = [
   'hamlet',
   'village',
   'isolated_dwelling',
   'neighbourhood',
+  'quarter',
   'locality',
   'suburb',
-  'town',
-  'city',
+  'city_district',
+] as const;
+
+/** Broader places — often the same as block in rural Bihar OSM data. */
+export const BROAD_PLACE_FIELDS = ['town', 'city', 'municipality'] as const;
+
+/** Fine-grained locality fields for visit photo stamps (village, street, etc.). */
+export const FINE_PLACE_FIELDS = [
+  ...STREET_PLACE_FIELDS,
+  ...LOCALITY_PLACE_FIELDS,
+  ...BROAD_PLACE_FIELDS,
 ] as const;
 
 /** Administrative fields that often map to block/district — excluded from default stamp label. */
@@ -19,6 +36,7 @@ export const ADMIN_PLACE_FIELDS = [
   'state',
   'region',
   'district',
+  'ISO3166-2-lvl4',
 ] as const;
 
 export type SchoolGeocodeContext = {
@@ -31,12 +49,15 @@ export type SchoolGeocodeContext = {
 type NominatimResponse = {
   display_name?: string;
   address?: Record<string, string>;
+  name?: string;
+  addresstype?: string;
 };
 
 type PlaceCandidate = {
   label: string;
   source: string;
   isHistorical?: boolean;
+  isSchoolHint?: boolean;
 };
 
 export function stripCoordsFromLocationLabel(label: string): string {
@@ -45,63 +66,162 @@ export function stripCoordsFromLocationLabel(label: string): string {
     .trim();
 }
 
+function normalizeForCompare(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.\u0902]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** Pull a village / locality hint from the school name (e.g. "N.P.S AOURA DIH" → "AOURA DIH"). */
 export function localityHintFromSchoolName(schoolName: string): string {
   const trimmed = schoolName.trim();
   if (!trimmed) return '';
 
-  const stripped = trimmed
+  const withoutPrefix = trimmed
     .replace(
-      /^(govt\.?|government|ups|ps|ums|u\.?m\.?s\.?|p\.?s\.?|primary|middle|high|ms|es)\s+/i,
+      /^(govt\.?|government|raja|n\.?\s?p\.?\s?s\.?|nps|u\.?\s?p\.?\s?s\.?|ups|u\.?\s?m\.?\s?s\.?|ums|m\.?\s?s\.?|p\.?\s?s\.?|ps|primary|middle|high|senior\s+secondary|secondary|h\.?\s?s\.?|hs|es|ss|kendra|kendriya)\s+/i,
       '',
     )
     .trim();
 
-  if (stripped.length >= 3 && stripped.length <= 60 && stripped !== trimmed) {
-    return stripped;
-  }
-
-  const withoutSchool = trimmed
-    .replace(/\s+(school|vidyalaya|hs|ms|ps)\s*$/i, '')
+  let candidate = withoutPrefix !== trimmed ? withoutPrefix : trimmed;
+  candidate = candidate
+    .replace(
+      /\s+(school|vidyalaya|vidyalay|high\s+school|middle\s+school|primary\s+school|hs|ms|ps|nps)\s*$/i,
+      '',
+    )
     .trim();
-  if (withoutSchool.length >= 3 && withoutSchool.length <= 50) {
-    return withoutSchool;
-  }
 
+  // Drop trailing block / district words sometimes duplicated in the name
+  if (candidate.length >= 3 && candidate.length <= 80) {
+    return candidate;
+  }
   return '';
 }
 
-function normalizeForCompare(value: string): string {
-  return value.trim().toLowerCase();
+function labelParts(label: string): string[] {
+  return stripCoordsFromLocationLabel(label)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * True when the label is only the block / district (e.g. "Alamnagar" or
+ * "Alamnagar, Madhepura, Bihar") — not a useful local village/street.
+ */
+export function isBlockScaleLabel(
+  label: string,
+  context?: SchoolGeocodeContext,
+): boolean {
+  const parts = labelParts(label);
+  if (parts.length === 0) return true;
+
+  const skip = new Set<string>([
+    'india',
+    'भारत',
+    'bihar',
+    'jharkhand',
+    'uttar pradesh',
+    'west bengal',
+    'madhya pradesh',
+  ]);
+  if (context?.block) skip.add(normalizeForCompare(context.block));
+  if (context?.district) {
+    skip.add(normalizeForCompare(context.district));
+    skip.add(normalizeForCompare(`${context.district} district`));
+  }
+
+  const meaningful = parts.filter(
+    (part) =>
+      !skip.has(normalizeForCompare(part)) && !/^\d{6}$/.test(part),
+  );
+
+  if (meaningful.length === 0) return true;
+
+  // Single remaining token that equals the block/"Alamnagar" style admin name
+  if (meaningful.length === 1) {
+    const only = normalizeForCompare(meaningful[0]);
+    if (context?.block && only === normalizeForCompare(context.block)) {
+      return true;
+    }
+    if (context?.district && only === normalizeForCompare(context.district)) {
+      return true;
+    }
+    // OSM often uses village=Alamnagar when Alamnagar is also the block
+    if (context?.block && only.includes(normalizeForCompare(context.block))) {
+      return only === normalizeForCompare(context.block) ||
+        only === normalizeForCompare(`${context.block} block`);
+    }
+  }
+
+  return false;
 }
 
 function isBlockOrDistrictOnly(
   label: string,
   context?: SchoolGeocodeContext,
 ): boolean {
-  const trimmed = label.trim();
-  if (!trimmed) return true;
-  const lower = normalizeForCompare(trimmed);
-  if (context?.block && lower === normalizeForCompare(context.block)) {
-    return true;
+  return isBlockScaleLabel(label, context);
+}
+
+function dropAdminTokens(
+  parts: string[],
+  context?: SchoolGeocodeContext,
+): string[] {
+  const skip = new Set<string>(['india', 'भारत', 'bihar']);
+  if (context?.block) skip.add(normalizeForCompare(context.block));
+  if (context?.district) {
+    skip.add(normalizeForCompare(context.district));
+    skip.add(normalizeForCompare(`${context.district} district`));
   }
-  if (context?.district && lower === normalizeForCompare(context.district)) {
+
+  return parts.filter((part) => {
+    if (!part) return false;
+    const lower = normalizeForCompare(part);
+    if (skip.has(lower)) return false;
+    if (/^\d{6}$/.test(part)) return false;
+    if (/^bihar$/i.test(part)) return false;
     return true;
-  }
-  return false;
+  });
 }
 
 export function buildPlaceNameFromAddress(
   address: Record<string, string> | undefined,
-  options?: { allowAdminFallback?: boolean },
+  options?: {
+    allowAdminFallback?: boolean;
+    context?: SchoolGeocodeContext;
+  },
 ): string {
   if (!address) return '';
+  const context = options?.context;
 
-  const fineParts = FINE_PLACE_FIELDS.map((key) =>
+  const streetParts = STREET_PLACE_FIELDS.map((key) =>
     String(address[key] ?? '').trim(),
   ).filter(Boolean);
-  const uniqueFine = [...new Set(fineParts)];
-  if (uniqueFine.length > 0) {
-    return uniqueFine.slice(0, 3).join(', ');
+
+  const localityParts = LOCALITY_PLACE_FIELDS.map((key) =>
+    String(address[key] ?? '').trim(),
+  ).filter(Boolean);
+
+  // Drop locality that is only the block name (common OSM miss for rural areas)
+  const fineLocality = localityParts.filter(
+    (part) => !isBlockScaleLabel(part, context),
+  );
+
+  const combined = [...new Set([...streetParts, ...fineLocality])];
+  if (combined.length > 0) {
+    return combined.slice(0, 3).join(', ');
+  }
+
+  // Broad town/city — only if it is NOT just the block name
+  const broadParts = BROAD_PLACE_FIELDS.map((key) =>
+    String(address[key] ?? '').trim(),
+  ).filter((part) => part && !isBlockScaleLabel(part, context));
+  if (broadParts.length > 0) {
+    return [...new Set(broadParts)].slice(0, 2).join(', ');
   }
 
   if (options?.allowAdminFallback) {
@@ -121,47 +241,46 @@ export function buildPlaceNameFromDisplayName(
   displayName: string,
   context?: SchoolGeocodeContext,
 ): string {
-  const skip = new Set<string>(['india', 'भारत']);
-  if (context?.block) skip.add(normalizeForCompare(context.block));
-  if (context?.district) skip.add(normalizeForCompare(context.district));
-
-  const parts = displayName
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => {
-      if (!part) return false;
-      const lower = normalizeForCompare(part);
-      if (skip.has(lower)) return false;
-      if (/^\d{6}$/.test(part)) return false;
-      if (/^bihar$/i.test(part)) return false;
-      return true;
-    });
-
+  const parts = dropAdminTokens(
+    displayName.split(',').map((part) => part.trim()),
+    context,
+  );
   const result = parts.slice(0, 3).join(', ');
-  if (isBlockOrDistrictOnly(result, context)) return '';
+  if (!result || isBlockScaleLabel(result, context)) return '';
   return result;
 }
 
 function scorePlaceCandidate(
   label: string,
   context?: SchoolGeocodeContext,
-  isHistorical = false,
+  meta?: { isHistorical?: boolean; isSchoolHint?: boolean },
 ): number {
   const trimmed = label.trim();
   if (!trimmed) return -1;
-  if (isBlockOrDistrictOnly(trimmed, context)) return 0;
+  if (isBlockScaleLabel(trimmed, context)) return 0;
 
   let score = 5;
-  if (isHistorical) score += 25;
+  if (meta?.isHistorical) score += 20;
+  if (meta?.isSchoolHint) score += 35;
 
-  if (/road|rd\.|street|st\.|गली|marg|path/i.test(trimmed)) score += 20;
+  if (/road|rd\.|street|st\.|गली|marg|path|lane|chowk/i.test(trimmed)) {
+    score += 25;
+  }
 
   const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 2) score += 15;
   if (parts.length >= 3) score += 5;
 
-  if (/village|hamlet|गाँव|गांव|locality|neighbourhood/i.test(trimmed)) {
-    score += 10;
+  if (/village|hamlet|गाँव|गांव|locality|neighbourhood|dih|tola|tole/i.test(trimmed)) {
+    score += 12;
+  }
+
+  // Prefer names that look like a local settlement, not the block alone
+  if (
+    context?.block &&
+    normalizeForCompare(parts[0] || '') === normalizeForCompare(context.block)
+  ) {
+    score -= 30;
   }
 
   score += Math.min(parts.length * 3, 12);
@@ -177,11 +296,10 @@ function pickBestCandidate(
 
   for (const candidate of candidates) {
     if (!candidate.label.trim()) continue;
-    const score = scorePlaceCandidate(
-      candidate.label,
-      context,
-      candidate.isHistorical,
-    );
+    const score = scorePlaceCandidate(candidate.label, context, {
+      isHistorical: candidate.isHistorical,
+      isSchoolHint: candidate.isSchoolHint,
+    });
     if (score > bestScore) {
       bestScore = score;
       best = candidate.label.trim();
@@ -199,8 +317,8 @@ function addNominatimCandidates(
 ): void {
   if (!result) return;
 
-  const fromAddress = buildPlaceNameFromAddress(result.address);
-  if (fromAddress) {
+  const fromAddress = buildPlaceNameFromAddress(result.address, { context });
+  if (fromAddress && !isBlockScaleLabel(fromAddress, context)) {
     candidates.push({ label: fromAddress, source: `${sourcePrefix}-address` });
   }
 
@@ -216,7 +334,7 @@ function addNominatimCandidates(
 async function fetchNominatim(
   lat: number,
   lng: number,
-  options?: { layer?: string; language?: string },
+  options?: { layer?: string; language?: string; zoom?: number },
 ): Promise<NominatimResponse | null> {
   try {
     const url = new URL('https://nominatim.openstreetmap.org/reverse');
@@ -225,7 +343,7 @@ async function fetchNominatim(
     url.searchParams.set('format', 'json');
     url.searchParams.set('addressdetails', '1');
     url.searchParams.set('accept-language', options?.language ?? 'en');
-    url.searchParams.set('zoom', '18');
+    url.searchParams.set('zoom', String(options?.zoom ?? 18));
     if (options?.layer) {
       url.searchParams.set('layer', options.layer);
     }
@@ -247,12 +365,14 @@ async function fetchGooglePlaceName(
   lat: number,
   lng: number,
   apiKey: string,
+  context?: SchoolGeocodeContext,
 ): Promise<string> {
   try {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('latlng', `${lat},${lng}`);
     url.searchParams.set('key', apiKey);
     url.searchParams.set('language', 'en');
+    url.searchParams.set('result_type', 'route|sublocality|neighborhood|premise|street_address|colloquial_area');
 
     const res = await fetch(url.toString());
     if (!res.ok) return '';
@@ -285,8 +405,8 @@ async function fetchGooglePlaceName(
         town: byType.postal_town ?? '',
         city: byType.administrative_area_level_2 ?? '',
       };
-      const built = buildPlaceNameFromAddress(pseudoAddress);
-      if (built) return built;
+      const built = buildPlaceNameFromAddress(pseudoAddress, { context });
+      if (built && !isBlockScaleLabel(built, context)) return built;
     }
 
     return '';
@@ -299,6 +419,7 @@ async function fetchOpenCagePlaceName(
   lat: number,
   lng: number,
   apiKey: string,
+  context?: SchoolGeocodeContext,
 ): Promise<string> {
   try {
     const url = new URL('https://api.opencagedata.com/geocode/v1/json');
@@ -327,7 +448,9 @@ async function fetchOpenCagePlaceName(
       town: components.town ?? '',
       city: components.city ?? components.city_district ?? '',
     };
-    return buildPlaceNameFromAddress(pseudoAddress);
+    const built = buildPlaceNameFromAddress(pseudoAddress, { context });
+    if (built && !isBlockScaleLabel(built, context)) return built;
+    return '';
   } catch {
     return '';
   }
@@ -346,8 +469,23 @@ export async function resolveReverseGeocodePlaceName(
   const context = options?.schoolContext;
   const candidates: PlaceCandidate[] = [];
 
-  const historical = String(options?.historicalMatch || '').trim();
-  if (historical) {
+  // School-derived village always competes — OSM often has no street/hamlet in rural India
+  const schoolName = String(context?.schoolName || '').trim();
+  if (schoolName) {
+    const hint = localityHintFromSchoolName(schoolName);
+    if (hint && !isBlockScaleLabel(hint, context)) {
+      candidates.push({
+        label: hint,
+        source: 'school-name-hint',
+        isSchoolHint: true,
+      });
+    }
+  }
+
+  const historical = stripCoordsFromLocationLabel(
+    String(options?.historicalMatch || ''),
+  );
+  if (historical && !isBlockScaleLabel(historical, context)) {
     candidates.push({
       label: historical,
       source: 'historical-gps',
@@ -355,30 +493,34 @@ export async function resolveReverseGeocodePlaceName(
     });
   }
 
-  const [nominatimEn, nominatimHi, addressLayerEn, addressLayerHi] =
+  const [nominatimEn, nominatimHi, addressLayerEn, addressLayerHi, zoomStreet] =
     await Promise.all([
-      fetchNominatim(lat, lng, { language: 'en' }),
-      fetchNominatim(lat, lng, { language: 'hi' }),
-      fetchNominatim(lat, lng, { layer: 'address', language: 'en' }),
-      fetchNominatim(lat, lng, { layer: 'address', language: 'hi' }),
+      fetchNominatim(lat, lng, { language: 'en', zoom: 18 }),
+      fetchNominatim(lat, lng, { language: 'hi', zoom: 18 }),
+      fetchNominatim(lat, lng, { layer: 'address', language: 'en', zoom: 18 }),
+      fetchNominatim(lat, lng, { layer: 'address', language: 'hi', zoom: 18 }),
+      fetchNominatim(lat, lng, { language: 'en', zoom: 19 }),
     ]);
 
   addNominatimCandidates(candidates, nominatimEn, 'nominatim-en', context);
   addNominatimCandidates(candidates, nominatimHi, 'nominatim-hi', context);
-  addNominatimCandidates(candidates, addressLayerEn, 'nominatim-address-en', context);
-  addNominatimCandidates(candidates, addressLayerHi, 'nominatim-address-hi', context);
-
-  const schoolName = String(context?.schoolName || '').trim();
-  if (schoolName) {
-    const hint = localityHintFromSchoolName(schoolName);
-    if (hint) {
-      candidates.push({ label: hint, source: 'school-name-hint' });
-    }
-  }
+  addNominatimCandidates(
+    candidates,
+    addressLayerEn,
+    'nominatim-address-en',
+    context,
+  );
+  addNominatimCandidates(
+    candidates,
+    addressLayerHi,
+    'nominatim-address-hi',
+    context,
+  );
+  addNominatimCandidates(candidates, zoomStreet, 'nominatim-street-zoom', context);
 
   const googleKey = options?.googleApiKey?.trim();
   if (googleKey) {
-    const googlePlace = await fetchGooglePlaceName(lat, lng, googleKey);
+    const googlePlace = await fetchGooglePlaceName(lat, lng, googleKey, context);
     if (googlePlace) {
       candidates.push({ label: googlePlace, source: 'google' });
     }
@@ -386,11 +528,25 @@ export async function resolveReverseGeocodePlaceName(
 
   const openCageKey = options?.openCageApiKey?.trim();
   if (openCageKey) {
-    const openCagePlace = await fetchOpenCagePlaceName(lat, lng, openCageKey);
+    const openCagePlace = await fetchOpenCagePlaceName(
+      lat,
+      lng,
+      openCageKey,
+      context,
+    );
     if (openCagePlace) {
       candidates.push({ label: openCagePlace, source: 'opencage' });
     }
   }
 
-  return pickBestCandidate(candidates, context);
+  const best = pickBestCandidate(candidates, context);
+  if (best) return best;
+
+  // Absolute last resort: school hint even if empty candidates from OSM
+  if (schoolName) {
+    const hint = localityHintFromSchoolName(schoolName);
+    if (hint) return hint;
+  }
+
+  return '';
 }
