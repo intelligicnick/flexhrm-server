@@ -22,6 +22,10 @@ import {
 import { SessionsService } from '../sessions/sessions.service';
 import { SUPERVISOR_ONLINE_THRESHOLD_MS } from '../../common/constants/permissions.constants';
 import { SupervisorActivityService } from '../supervisor-activity/supervisor-activity.service';
+import {
+  isSchoolSharedVisitCooldown as checkSchoolSharedVisitCooldown,
+  type SupervisorAccessProfile,
+} from '../school-visits/supervisor-school-access.util';
 
 const BLOCKED_APPS_META_KEY = 'supervisor_blocked_apps';
 
@@ -381,5 +385,27 @@ export class SchoolSupervisorsService {
     });
 
     return { accepted: points.length, serverTime: now.toISOString() };
+  }
+
+  async getActiveSupervisorAccessProfiles(): Promise<SupervisorAccessProfile[]> {
+    const docs = await this.supervisorModel
+      .find({ status: { $ne: 'inactive' } })
+      .select({ id: 1, assignedBlocks: 1, _id: 0 })
+      .lean()
+      .exec();
+
+    return docs.map((doc) => ({
+      id: String(doc.id || ''),
+      assignedBlocks: Array.isArray(doc.assignedBlocks)
+        ? doc.assignedBlocks.map((block) => String(block))
+        : [],
+    }));
+  }
+
+  isSchoolSharedVisitCooldown(
+    school: Record<string, unknown>,
+    supervisors: SupervisorAccessProfile[],
+  ): boolean {
+    return checkSchoolSharedVisitCooldown(school, supervisors);
   }
 }
