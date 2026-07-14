@@ -322,6 +322,8 @@ export class SchoolWorksController {
       district: dto.district,
       saveVerified: dto.saveVerified === true,
       skipExisting: dto.skipExisting !== false,
+      limit: dto.limit,
+      offset: dto.offset,
     });
     await this.auditLogsService.append({
       username,

@@ -800,12 +800,17 @@ export class SchoolWorksService {
     district?: string;
     saveVerified?: boolean;
     skipExisting?: boolean;
+    limit?: number;
+    offset?: number;
   }): Promise<{
     total: number;
     resolved: number;
     skipped: number;
     failed: number;
     results: Array<Record<string, unknown>>;
+    hasMore: boolean;
+    nextOffset: number;
+    batchProcessed: number;
   }> {
     const { resolveSchoolPlace } = await import(
       '../../common/utils/google-school-place.util'
@@ -816,7 +821,11 @@ export class SchoolWorksService {
       throw new BadRequestException('Block is required.');
     }
 
-    const schools = await this.findSchoolsInBlock(block, district || undefined);
+    const allSchools = await this.findSchoolsInBlock(block, district || undefined);
+    const total = allSchools.length;
+    const offset = Math.max(0, Number(params.offset) || 0);
+    const limit = Math.min(Math.max(Number(params.limit) || 3, 1), 20);
+    const schools = allSchools.slice(offset, offset + limit);
     const results: Array<Record<string, unknown>> = [];
     let resolved = 0;
     let skipped = 0;
@@ -912,12 +921,16 @@ export class SchoolWorksService {
       await new Promise((r) => setTimeout(r, 350));
     }
 
+    const nextOffset = offset + schools.length;
     return {
-      total: schools.length,
+      total,
       resolved,
       skipped,
       failed,
       results,
+      hasMore: nextOffset < total,
+      nextOffset,
+      batchProcessed: schools.length,
     };
   }
 

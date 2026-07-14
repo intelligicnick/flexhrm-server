@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class BulkResolveSchoolLocationsDto {
   @IsString()
@@ -15,6 +15,18 @@ export class BulkResolveSchoolLocationsDto {
   @IsOptional()
   @IsBoolean()
   skipExisting?: boolean;
+
+  /** Process at most this many schools per request (Hostinger proxy ~20s limit). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  limit?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  offset?: number;
 }
 
 export class VerifySchoolLocationDto {
