@@ -29,6 +29,9 @@ export class VisitGpsLocation {
   @Prop({ default: 0 }) lat!: number;
   @Prop({ default: 0 }) lng!: number;
   @Prop({ default: '' }) locationLabel!: string;
+  @Prop({ default: 0 }) accuracyMeters!: number;
+  @Prop({ default: false }) isMock!: boolean;
+  @Prop({ default: '' }) capturedAt!: string;
 }
 
 @Schema({ timestamps: true, collection: 'school_visits' })
@@ -77,6 +80,21 @@ export class SchoolVisit {
 
   @Prop({ default: '' })
   commitmentId!: string;
+
+  @Prop({ default: 0 })
+  distanceToSchoolM!: number;
+
+  @Prop({ default: 0 })
+  gpsAccuracyM!: number;
+
+  @Prop({ default: '' })
+  locationMatchStatus!: string;
+
+  @Prop({ default: 0 })
+  schoolLat!: number;
+
+  @Prop({ default: 0 })
+  schoolLng!: number;
 }
 
 export const SchoolVisitSchema = SchemaFactory.createForClass(SchoolVisit);

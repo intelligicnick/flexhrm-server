@@ -8,9 +8,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { SchoolVisitsService } from './school-visits.service';
 import { SchoolWorksService } from '../school-works/school-works.service';
 import { SchoolSupervisorsService } from '../school-supervisors/school-supervisors.service';
@@ -149,9 +150,27 @@ export class SchoolVisitsController {
     @Body() dto: CreateSchoolVisitDto,
   ) {
     const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
     const supervisor = await this.schoolSupervisorsService.findById(supervisorId);
     const supervisorName = String(supervisor?.name || req.user.username || supervisorId);
-    return this.visitsService.createVisit(supervisorId, supervisorName, dto);
+    return this.visitsService.createVisit(supervisorId, supervisorName, dto, {
+      assignedBlocks,
+    });
+  }
+
+  @Get(':visitId/photos/:photoId/file')
+  @RequireAnyPermissions(['schoolWork'], 'view')
+  async getVisitPhotoFile(
+    @Param('visitId') visitId: string,
+    @Param('photoId') photoId: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, contentType } =
+      await this.visitsService.getVisitPhotoContent(visitId, photoId);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
   }
 
   @Patch(':id/status')

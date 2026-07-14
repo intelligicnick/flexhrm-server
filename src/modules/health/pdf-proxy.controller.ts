@@ -8,7 +8,7 @@ const ALLOWED_HOSTS = [
   'ik.imagekit.io',
 ];
 
-function isAllowedPdfUrl(raw: string): boolean {
+function isAllowedProxyUrl(raw: string): boolean {
   try {
     const parsed = new URL(raw);
     if (!/^https?:$/i.test(parsed.protocol)) return false;
@@ -26,7 +26,7 @@ export class PdfProxyController {
   @RequireAnyPermissions(['bids', 'renewals'], 'view')
   async proxyPdf(@Query('url') url: string, @Res() res: Response) {
     const trimmed = url?.trim() ?? '';
-    if (!trimmed || !isAllowedPdfUrl(trimmed)) {
+    if (!trimmed || !isAllowedProxyUrl(trimmed)) {
       throw new BadRequestException('Invalid or disallowed PDF URL');
     }
 
@@ -46,6 +46,34 @@ export class PdfProxyController {
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
+  }
+
+  @Get('image')
+  @RequireAnyPermissions(['schoolWork'], 'view')
+  async proxyImage(@Query('url') url: string, @Res() res: Response) {
+    const trimmed = url?.trim() ?? '';
+    if (!trimmed || !isAllowedProxyUrl(trimmed)) {
+      throw new BadRequestException('Invalid or disallowed image URL');
+    }
+
+    const upstream = await fetch(trimmed, {
+      headers: { Accept: 'image/*,*/*' },
+      redirect: 'follow',
+    });
+
+    if (!upstream.ok) {
+      throw new BadRequestException(`Upstream image request failed (${upstream.status})`);
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const upstreamType = upstream.headers.get('content-type')?.trim() ?? '';
+    const contentType = upstreamType.startsWith('image/')
+      ? upstreamType
+      : 'image/jpeg';
+
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(buffer);
   }

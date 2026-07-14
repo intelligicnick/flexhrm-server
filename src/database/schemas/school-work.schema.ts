@@ -103,6 +103,37 @@ export class SchoolWork {
   @Prop({ default: '' })
   remarks!: string;
 
+  /** Verified school pin for visit geofencing */
+  @Prop({ default: 0 })
+  lat!: number;
+
+  @Prop({ default: 0 })
+  lng!: number;
+
+  @Prop({ default: false, index: true })
+  locationVerified!: boolean;
+
+  @Prop({ default: '' })
+  locationVerifiedAt!: string;
+
+  @Prop({ default: '' })
+  locationSource!: string;
+
+  @Prop({ default: '' })
+  locationConfidence!: string;
+
+  @Prop({ default: 0 })
+  geofenceRadiusM!: number;
+
+  @Prop({ default: '' })
+  googlePlaceId!: string;
+
+  @Prop({ default: '' })
+  googleMapsUrl!: string;
+
+  @Prop({ default: '' })
+  matchedPlaceName!: string;
+
   @Prop({ type: Object, default: {} })
   monthlyExpenseLedger!: Record<string, SchoolMonthlyExpenseEntry>;
 

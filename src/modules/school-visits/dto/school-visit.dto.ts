@@ -47,6 +47,14 @@ export class VisitPhotoDto {
   @IsOptional()
   @IsString()
   locationLabel?: string;
+
+  @IsOptional()
+  @IsNumber()
+  accuracyMeters?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isMock?: boolean;
 }
 
 export class VisitGpsDto {
@@ -59,6 +67,18 @@ export class VisitGpsDto {
   @IsOptional()
   @IsString()
   locationLabel?: string;
+
+  @IsOptional()
+  @IsNumber()
+  accuracyMeters?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isMock?: boolean;
+
+  @IsOptional()
+  @IsString()
+  capturedAt?: string;
 }
 
 export class CreateSchoolVisitDto {

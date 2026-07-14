@@ -168,6 +168,11 @@ export class SchoolWorksService {
           noOfToilets: 1,
           assignedSupervisorId: 1,
           schoolCategory: 1,
+          lat: 1,
+          lng: 1,
+          locationVerified: 1,
+          geofenceRadiusM: 1,
+          locationConfidence: 1,
         })
         .sort({ srNo: 1 })
         .lean()
@@ -343,6 +348,16 @@ export class SchoolWorksService {
       assignedSupervisorId: String(raw.assignedSupervisorId || ''),
       materialCost: Number(raw.materialCost) || 0,
       remarks: String(raw.remarks || ''),
+      lat: Number(raw.lat) || 0,
+      lng: Number(raw.lng) || 0,
+      locationVerified: !!raw.locationVerified,
+      locationVerifiedAt: String(raw.locationVerifiedAt || ''),
+      locationSource: String(raw.locationSource || ''),
+      locationConfidence: String(raw.locationConfidence || ''),
+      geofenceRadiusM: Number(raw.geofenceRadiusM) || 0,
+      googlePlaceId: String(raw.googlePlaceId || ''),
+      googleMapsUrl: String(raw.googleMapsUrl || ''),
+      matchedPlaceName: String(raw.matchedPlaceName || ''),
       monthlyExpenseLedger: this.normalizeMonthlyLedger(raw.monthlyExpenseLedger),
       monthlyWorkdaysLedger: this.normalizeMonthlyWorkdaysLedger(
         raw.monthlyWorkdaysLedger,
@@ -778,5 +793,192 @@ export class SchoolWorksService {
       if (updated) records.push(updated);
     }
     return { updated: records.length, records };
+  }
+
+  async bulkResolveLocations(params: {
+    block: string;
+    district?: string;
+    saveVerified?: boolean;
+    skipExisting?: boolean;
+  }): Promise<{
+    total: number;
+    resolved: number;
+    skipped: number;
+    failed: number;
+    results: Array<Record<string, unknown>>;
+  }> {
+    const { resolveSchoolPlace } = await import(
+      '../../common/utils/google-school-place.util'
+    );
+    const block = String(params.block || '').trim();
+    const district = String(params.district || '').trim();
+    if (!block) {
+      throw new BadRequestException('Block is required.');
+    }
+
+    const schools = await this.findSchoolsInBlock(block, district || undefined);
+    const results: Array<Record<string, unknown>> = [];
+    let resolved = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const school of schools) {
+      const schoolId = String(school.id || '');
+      const schoolName = String(school.schoolName || '');
+      const udise = String(school.udise || '');
+
+      if (
+        params.skipExisting !== false &&
+        school.locationVerified &&
+        Number(school.lat) !== 0 &&
+        Number(school.lng) !== 0
+      ) {
+        skipped++;
+        results.push({
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          block: String(school.block || ''),
+          district: String(school.district || ''),
+          status: 'skipped',
+          lat: Number(school.lat),
+          lng: Number(school.lng),
+          locationVerified: true,
+          googleMapsUrl: String(school.googleMapsUrl || ''),
+        });
+        continue;
+      }
+
+      const match = await resolveSchoolPlace({
+        schoolName,
+        block: String(school.block || block),
+        district: String(school.district || district),
+        udise,
+      });
+
+      if (!match) {
+        failed++;
+        results.push({
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          block: String(school.block || ''),
+          district: String(school.district || ''),
+          status: 'not_found',
+        });
+        await new Promise((r) => setTimeout(r, 350));
+        continue;
+      }
+
+      resolved++;
+      const row: Record<string, unknown> = {
+        schoolWorkId: schoolId,
+        schoolName,
+        udise,
+        block: String(school.block || ''),
+        district: String(school.district || ''),
+        status: 'resolved',
+        lat: match.lat,
+        lng: match.lng,
+        matchedPlaceName: match.placeName,
+        formattedAddress: match.formattedAddress,
+        googlePlaceId: match.googlePlaceId,
+        googleMapsUrl: match.googleMapsUrl,
+        locationSource: match.locationSource,
+        locationConfidence: match.locationConfidence,
+        geofenceRadiusM: match.geofenceRadiusM,
+        queryUsed: match.queryUsed,
+      };
+
+      if (params.saveVerified) {
+        const verifiedAt = new Date().toISOString();
+        await this.update(schoolId, {
+          lat: match.lat,
+          lng: match.lng,
+          locationVerified: true,
+          locationVerifiedAt: verifiedAt,
+          locationSource: match.locationSource,
+          locationConfidence: match.locationConfidence,
+          geofenceRadiusM: match.geofenceRadiusM,
+          googlePlaceId: match.googlePlaceId,
+          googleMapsUrl: match.googleMapsUrl,
+          matchedPlaceName: match.placeName,
+        });
+        row.locationVerified = true;
+        row.locationVerifiedAt = verifiedAt;
+      }
+
+      results.push(row);
+      await new Promise((r) => setTimeout(r, 350));
+    }
+
+    return {
+      total: schools.length,
+      resolved,
+      skipped,
+      failed,
+      results,
+    };
+  }
+
+  async verifySchoolLocation(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const school = await this.findById(id);
+    if (!school) {
+      throw new BadRequestException('School record not found.');
+    }
+
+    const lat = Number(patch.lat ?? school.lat);
+    const lng = Number(patch.lng ?? school.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      throw new BadRequestException('Valid latitude and longitude are required.');
+    }
+
+    const updated = await this.update(id, {
+      lat,
+      lng,
+      locationVerified: true,
+      locationVerifiedAt: new Date().toISOString(),
+      locationSource: String(patch.locationSource || school.locationSource || 'manual'),
+      locationConfidence: String(
+        patch.locationConfidence || school.locationConfidence || 'exact',
+      ),
+      geofenceRadiusM:
+        Number(patch.geofenceRadiusM) ||
+        Number(school.geofenceRadiusM) ||
+        100,
+      googlePlaceId: String(patch.googlePlaceId || school.googlePlaceId || ''),
+      googleMapsUrl: String(patch.googleMapsUrl || school.googleMapsUrl || ''),
+      matchedPlaceName: String(
+        patch.matchedPlaceName || school.matchedPlaceName || school.schoolName || '',
+      ),
+    });
+    if (!updated) {
+      throw new BadRequestException('Failed to verify school location.');
+    }
+    return updated;
+  }
+
+  getVerifiedSchoolPin(school: Record<string, unknown>): {
+    lat: number;
+    lng: number;
+    radiusM: number;
+    verified: boolean;
+  } | null {
+    const lat = Number(school.lat);
+    const lng = Number(school.lng);
+    if (!school.locationVerified || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+    if (lat === 0 && lng === 0) return null;
+    const radiusM =
+      Number(school.geofenceRadiusM) > 0
+        ? Number(school.geofenceRadiusM)
+        : school.locationConfidence === 'exact'
+          ? 100
+          : 400;
+    return { lat, lng, radiusM, verified: true };
   }
 }

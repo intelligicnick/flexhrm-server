@@ -31,7 +31,8 @@ import {
   resolveReverseGeocodePlaceName,
   stripCoordsFromLocationLabel,
 } from '../../common/utils/reverse-geocode.util';
-import { distanceMeters } from '../../common/utils/geo.util';
+import { distanceMeters, isWithinGeofence } from '../../common/utils/geo.util';
+import { VISIT_MAX_GPS_ACCURACY_M } from '../../common/utils/google-school-place.util';
 
 export interface EffectiveLastVisitInfo {
   lastVisitDate: string | null;
@@ -341,15 +342,42 @@ export class SchoolVisitsService {
     supervisorId: string,
     supervisorName: string,
     dto: CreateSchoolVisitDto,
+    options?: {
+      assignedBlocks?: string[];
+    },
   ): Promise<Record<string, unknown>> {
     const school = await this.schoolWorksService.findById(dto.schoolWorkId);
     if (!school) {
       throw new NotFoundException('School record not found.');
     }
 
+    if (options?.assignedBlocks) {
+      const { supervisorCanAccessSchool } = await import(
+        './supervisor-school-access.util'
+      );
+      if (
+        !supervisorCanAccessSchool(
+          school,
+          supervisorId,
+          options.assignedBlocks,
+        )
+      ) {
+        throw new BadRequestException(
+          'You are not assigned to this school.',
+        );
+      }
+    }
+
     if (!dto.photos?.length) {
       throw new BadRequestException(
         'At least one geo-tagged field photo is required to submit a visit.',
+      );
+    }
+
+    const schoolPin = this.schoolWorksService.getVerifiedSchoolPin(school);
+    if (!schoolPin) {
+      throw new BadRequestException(
+        'This school location is not verified yet. Ask admin to verify the school pin before submitting visits.',
       );
     }
 
@@ -366,6 +394,73 @@ export class SchoolVisitsService {
       dto.schoolWorkId,
       visitDate,
     );
+
+    const gpsPoints: Array<{
+      lat: number;
+      lng: number;
+      accuracyMeters?: number;
+      isMock?: boolean;
+      source: string;
+    }> = [];
+
+    if (dto.gpsLocation && this.isValidVisitCoord(Number(dto.gpsLocation.lat), Number(dto.gpsLocation.lng))) {
+      gpsPoints.push({
+        lat: Number(dto.gpsLocation.lat),
+        lng: Number(dto.gpsLocation.lng),
+        accuracyMeters: dto.gpsLocation.accuracyMeters,
+        isMock: dto.gpsLocation.isMock,
+        source: 'visit_gps',
+      });
+    }
+
+    for (const photo of dto.photos || []) {
+      if (!this.isValidVisitCoord(Number(photo.lat), Number(photo.lng))) {
+        throw new BadRequestException(
+          'Every visit photo must include valid GPS coordinates.',
+        );
+      }
+      gpsPoints.push({
+        lat: Number(photo.lat),
+        lng: Number(photo.lng),
+        accuracyMeters: photo.accuracyMeters,
+        isMock: photo.isMock,
+        source: 'photo',
+      });
+    }
+
+    for (const point of gpsPoints) {
+      if (point.isMock) {
+        throw new BadRequestException(
+          'Mock GPS detected. Disable fake location apps and try again at the school.',
+        );
+      }
+      if (
+        point.accuracyMeters != null &&
+        Number.isFinite(point.accuracyMeters) &&
+        point.accuracyMeters > VISIT_MAX_GPS_ACCURACY_M
+      ) {
+        throw new BadRequestException(
+          `GPS accuracy is too poor (${Math.round(point.accuracyMeters)} m). Move outdoors near the school and retry.`,
+        );
+      }
+      const distance = distanceMeters(
+        point.lat,
+        point.lng,
+        schoolPin.lat,
+        schoolPin.lng,
+      );
+      if (!isWithinGeofence(point.lat, point.lng, schoolPin.lat, schoolPin.lng, schoolPin.radiusM)) {
+        throw new BadRequestException(
+          `You are ${Math.round(distance)} m from the school. Move within ${schoolPin.radiusM} m of the school to submit this visit.`,
+        );
+      }
+    }
+
+    const primaryGps = gpsPoints[0];
+    const distanceToSchoolM = primaryGps
+      ? distanceMeters(primaryGps.lat, primaryGps.lng, schoolPin.lat, schoolPin.lng)
+      : 0;
+    const gpsAccuracyM = primaryGps?.accuracyMeters ?? 0;
 
     const id = `visit_${crypto.randomBytes(8).toString('hex')}`;
 
@@ -426,11 +521,28 @@ export class SchoolVisitsService {
             lat: dto.gpsLocation.lat,
             lng: dto.gpsLocation.lng,
             locationLabel: dto.gpsLocation.locationLabel || '',
+            accuracyMeters: Number(dto.gpsLocation.accuracyMeters) || 0,
+            isMock: !!dto.gpsLocation.isMock,
+            capturedAt: dto.gpsLocation.capturedAt || new Date().toISOString(),
           }
-        : undefined,
+        : primaryGps
+          ? {
+              lat: primaryGps.lat,
+              lng: primaryGps.lng,
+              locationLabel: dto.photos?.[0]?.locationLabel || '',
+              accuracyMeters: Number(primaryGps.accuracyMeters) || 0,
+              isMock: !!primaryGps.isMock,
+              capturedAt: dto.photos?.[0]?.takenAt || new Date().toISOString(),
+            }
+          : undefined,
       status: 'submitted',
       visitType,
       commitmentId,
+      distanceToSchoolM: Math.round(distanceToSchoolM),
+      gpsAccuracyM: Math.round(gpsAccuracyM),
+      locationMatchStatus: 'matched',
+      schoolLat: schoolPin.lat,
+      schoolLng: schoolPin.lng,
     });
 
     await this.notificationsService.notifyVisitSubmitted({
@@ -456,6 +568,36 @@ export class SchoolVisitsService {
     }
 
     return this.toPlain(doc);
+  }
+
+  async getVisitPhotoContent(
+    visitId: string,
+    photoId: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const visit = await this.visitModel.findOne({ id: visitId }).exec();
+    if (!visit) {
+      throw new NotFoundException('Visit not found.');
+    }
+
+    const photos = Array.isArray(visit.photos) ? visit.photos : [];
+    const photo = photos.find((entry) => entry.id === photoId);
+    if (!photo) {
+      throw new NotFoundException('Photo not found.');
+    }
+
+    const buffer = await this.mediaStorage.readBuffer({
+      imagekitUrl: photo.imagekitUrl,
+      fileDataBase64: photo.photoDataBase64,
+    });
+    if (!buffer?.length) {
+      throw new NotFoundException('Photo file not available.');
+    }
+
+    const mimeType = String(photo.mimeType || '').trim();
+    return {
+      buffer,
+      contentType: mimeType.startsWith('image/') ? mimeType : 'image/jpeg',
+    };
   }
 
   async updateStatus(

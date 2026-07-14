@@ -16,6 +16,7 @@ import { CurrentUsername } from '../../common/decorators/current-user.decorator'
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SchoolPartnersService } from '../school-partners/school-partners.service';
 import { BulkDeleteSchoolWorksDto, BulkUpdateSchoolWorksDto, BulkUpdateWorkdaysDto, DeleteBlockExpenseDto, DistributeBlockExpenseDto } from './dto/school-work-ops.dto';
+import { BulkResolveSchoolLocationsDto, VerifySchoolLocationDto } from './dto/school-location.dto';
 
 @Controller('school-works')
 export class SchoolWorksController {
@@ -308,5 +309,50 @@ export class SchoolWorksController {
         err instanceof Error ? err.message : 'School deletion failed.';
       throw new BadRequestException(message);
     }
+  }
+
+  @Post('bulk-resolve-locations')
+  @RequirePermissions('schoolWork', 'edit')
+  async bulkResolveLocations(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkResolveSchoolLocationsDto,
+  ) {
+    const result = await this.schoolWorksService.bulkResolveLocations({
+      block: dto.block,
+      district: dto.district,
+      saveVerified: dto.saveVerified === true,
+      skipExisting: dto.skipExisting !== false,
+    });
+    await this.auditLogsService.append({
+      username,
+      action: 'BULK_RESOLVE_SCHOOL_LOCATIONS',
+      target: `Resolved ${result.resolved}/${result.total} school location(s) for block "${dto.block}"${dto.district ? ` (${dto.district})` : ''}.`,
+      details: {
+        block: dto.block,
+        district: dto.district || '',
+        ...result,
+        results: undefined,
+      },
+    });
+    return result;
+  }
+
+  @Post(':id/verify-location')
+  @RequirePermissions('schoolWork', 'edit')
+  async verifySchoolLocation(
+    @CurrentUsername() username: string,
+    @Param('id') id: string,
+    @Body() dto: VerifySchoolLocationDto,
+  ) {
+    const updated = await this.schoolWorksService.verifySchoolLocation(id, {
+      ...dto,
+    } as Record<string, unknown>);
+    await this.auditLogsService.append({
+      username,
+      action: 'VERIFY_SCHOOL_LOCATION',
+      target: `Verified location for "${updated.schoolName}" (UDISE: ${updated.udise}).`,
+      details: updated,
+    });
+    return updated;
   }
 }

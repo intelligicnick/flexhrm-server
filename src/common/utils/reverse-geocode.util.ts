@@ -262,7 +262,7 @@ function scorePlaceCandidate(
 
   let score = 5;
   if (meta?.isHistorical) score += 20;
-  if (meta?.isSchoolHint) score += 35;
+  if (meta?.isSchoolHint) score += 4;
 
   if (/road|rd\.|street|st\.|गली|marg|path|lane|chowk/i.test(trimmed)) {
     score += 25;
@@ -542,12 +542,6 @@ export async function resolveReverseGeocodePlaceName(
 
   const best = pickBestCandidate(candidates, context);
   if (best) return best;
-
-  // Absolute last resort: school hint even if empty candidates from OSM
-  if (schoolName) {
-    const hint = localityHintFromSchoolName(schoolName);
-    if (hint) return hint;
-  }
 
   return '';
 }
