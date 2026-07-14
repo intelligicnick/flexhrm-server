@@ -80,6 +80,25 @@ export function localityHintFromSchoolName(schoolName: string): string {
   const trimmed = schoolName.trim();
   if (!trimmed) return '';
 
+  const schoolTypeToken =
+    '(?:u\\.?\\s?h\\.?\\s?s\\.?|u\\.?\\s?m\\.?\\s?s\\.?|u\\.?\\s?p\\.?\\s?s\\.?|n\\.?\\s?p\\.?\\s?s\\.?|h\\.?\\s?s\\.?|m\\.?\\s?s\\.?|p\\.?\\s?s\\.?)';
+
+  // "GUNANAND M S BISHNUPUR" → "BISHNUPUR", "KANYA P S BELGACHHI" → "BELGACHHI"
+  const afterEmbeddedType = trimmed.match(
+    new RegExp(`^.+\\s+${schoolTypeToken}\\s+(.+)$`, 'i'),
+  );
+  if (afterEmbeddedType?.[1]) {
+    const locality = afterEmbeddedType[1]
+      .replace(
+        /\s+(school|vidyalaya|vidyalay|high\s+school|middle\s+school|primary\s+school)\s*$/i,
+        '',
+      )
+      .trim();
+    if (locality.length >= 3 && locality.length <= 80) {
+      return locality;
+    }
+  }
+
   const withoutPrefix = trimmed
     .replace(
       /^(govt\.?|government|raja|n\.?\s?p\.?\s?s\.?|nps|u\.?\s?p\.?\s?s\.?|ups|u\.?\s?m\.?\s?s\.?|ums|m\.?\s?s\.?|p\.?\s?s\.?|ps|primary|middle|high|senior\s+secondary|secondary|h\.?\s?s\.?|hs|es|ss|kendra|kendriya)\s+/i,

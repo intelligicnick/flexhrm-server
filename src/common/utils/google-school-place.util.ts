@@ -143,6 +143,67 @@ async function geocodeAddress(
   }
 }
 
+function buildVillageQueries(
+  village: string,
+  block: string,
+  district: string,
+): string[] {
+  const queries = [
+    [village, block, district, 'Bihar', 'India'],
+    [village, district, 'Bihar', 'India'],
+    [village, block, 'Bihar', 'India'],
+  ]
+    .map((parts) => parts.filter(Boolean).join(', '))
+    .filter(Boolean);
+  return [...new Set(queries)];
+}
+
+async function resolveVillagePlace(
+  village: string,
+  block: string,
+  district: string,
+  apiKey: string,
+): Promise<ResolvedSchoolPlace | null> {
+  for (const villageQuery of buildVillageQueries(village, block, district)) {
+    const villagePlaces = await searchGooglePlaces(villageQuery, apiKey);
+    if (villagePlaces) {
+      return {
+        lat: villagePlaces.lat,
+        lng: villagePlaces.lng,
+        placeName: villagePlaces.placeName || village,
+        formattedAddress: villagePlaces.formattedAddress,
+        googlePlaceId: villagePlaces.placeId,
+        googleMapsUrl: buildGoogleMapsUrl(
+          villagePlaces.lat,
+          villagePlaces.lng,
+          villagePlaces.placeId,
+        ),
+        locationSource: 'google_places',
+        locationConfidence: 'village',
+        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
+        queryUsed: villageQuery,
+      };
+    }
+
+    const geocoded = await geocodeAddress(villageQuery, apiKey);
+    if (geocoded) {
+      return {
+        lat: geocoded.lat,
+        lng: geocoded.lng,
+        placeName: village,
+        formattedAddress: geocoded.formattedAddress,
+        googlePlaceId: '',
+        googleMapsUrl: buildGoogleMapsUrl(geocoded.lat, geocoded.lng),
+        locationSource: 'village_fallback',
+        locationConfidence: 'village',
+        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
+        queryUsed: villageQuery,
+      };
+    }
+  }
+  return null;
+}
+
 export async function resolveSchoolPlace(
   school: {
     schoolName?: string;
@@ -193,44 +254,8 @@ export async function resolveSchoolPlace(
 
   const village = localityHintFromSchoolName(schoolName);
   if (village && village.toLowerCase() !== block.toLowerCase()) {
-    const villageQuery = [village, block, district, 'Bihar', 'India']
-      .filter(Boolean)
-      .join(', ');
-    const villagePlaces = await searchGooglePlaces(villageQuery, key);
-    if (villagePlaces) {
-      return {
-        lat: villagePlaces.lat,
-        lng: villagePlaces.lng,
-        placeName: villagePlaces.placeName || village,
-        formattedAddress: villagePlaces.formattedAddress,
-        googlePlaceId: villagePlaces.placeId,
-        googleMapsUrl: buildGoogleMapsUrl(
-          villagePlaces.lat,
-          villagePlaces.lng,
-          villagePlaces.placeId,
-        ),
-        locationSource: 'google_places',
-        locationConfidence: 'village',
-        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
-        queryUsed: villageQuery,
-      };
-    }
-
-    const geocoded = await geocodeAddress(villageQuery, key);
-    if (geocoded) {
-      return {
-        lat: geocoded.lat,
-        lng: geocoded.lng,
-        placeName: village,
-        formattedAddress: geocoded.formattedAddress,
-        googlePlaceId: '',
-        googleMapsUrl: buildGoogleMapsUrl(geocoded.lat, geocoded.lng),
-        locationSource: 'village_fallback',
-        locationConfidence: 'village',
-        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
-        queryUsed: villageQuery,
-      };
-    }
+    const villageMatch = await resolveVillagePlace(village, block, district, key);
+    if (villageMatch) return villageMatch;
   }
 
   const geocodedSchool = await geocodeAddress(primaryQuery, key);
