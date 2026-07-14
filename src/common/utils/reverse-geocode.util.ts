@@ -80,6 +80,13 @@ export function localityHintFromSchoolName(schoolName: string): string {
   const trimmed = schoolName.trim();
   if (!trimmed) return '';
 
+  // "BASIC SCHOOL DHIMA" → "DHIMA"
+  const afterBasicSchool = trimmed.match(/^basic\s+school\s+(.+)$/i);
+  if (afterBasicSchool?.[1]) {
+    const locality = afterBasicSchool[1].trim();
+    if (locality.length >= 3 && locality.length <= 80) return locality;
+  }
+
   const schoolTypeToken =
     '(?:u\\.?\\s?h\\.?\\s?s\\.?|u\\.?\\s?m\\.?\\s?s\\.?|u\\.?\\s?p\\.?\\s?s\\.?|n\\.?\\s?p\\.?\\s?s\\.?|h\\.?\\s?s\\.?|m\\.?\\s?s\\.?|p\\.?\\s?s\\.?)';
 
@@ -100,8 +107,9 @@ export function localityHintFromSchoolName(schoolName: string): string {
   }
 
   const withoutPrefix = trimmed
+    .replace(/^basic\s+school\s+/i, '')
     .replace(
-      /^(govt\.?|government|raja|n\.?\s?p\.?\s?s\.?|nps|u\.?\s?p\.?\s?s\.?|ups|u\.?\s?m\.?\s?s\.?|ums|m\.?\s?s\.?|p\.?\s?s\.?|ps|primary|middle|high|senior\s+secondary|secondary|h\.?\s?s\.?|hs|es|ss|kendra|kendriya)\s+/i,
+      /^(govt\.?|government|raja|adarsh|janta|kanya|n\.?\s?p\.?\s?s\.?|nps|u\.?\s?p\.?\s?s\.?|ups|u\.?\s?m\.?\s?s\.?|ums|m\.?\s?s\.?|p\.?\s?s\.?|ps|primary|middle|high|senior\s+secondary|secondary|h\.?\s?s\.?|hs|es|ss|kendra|kendriya)\s+/i,
       '',
     )
     .trim();

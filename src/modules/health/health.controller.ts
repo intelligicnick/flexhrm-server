@@ -6,6 +6,7 @@ import * as path from 'path';
 import { Public } from '../../common/decorators/auth.decorators';
 import { EmployeesService } from '../employees/employees.service';
 import { EmailService } from '../email/email.service';
+import { isGooglePlacesConfigured } from '../../common/utils/google-school-place.util';
 
 @Controller('health')
 export class HealthController {
@@ -44,6 +45,7 @@ export class HealthController {
       employeesDefaultTenant,
       employeesTotal,
       smtpConfigured: this.emailService.isConfigured(),
+      googlePlacesConfigured: isGooglePlacesConfigured(),
     };
   }
 

@@ -19,6 +19,14 @@ export const SCHOOL_GEOFENCE_EXACT_M = 100;
 export const SCHOOL_GEOFENCE_VILLAGE_M = 400;
 export const VISIT_MAX_GPS_ACCURACY_M = 50;
 
+export function isGooglePlacesConfigured(): boolean {
+  return Boolean(
+    String(
+      process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_GEOCODING_API_KEY || '',
+    ).trim(),
+  );
+}
+
 function buildGoogleMapsUrl(lat: number, lng: number, placeId?: string): string {
   if (placeId) {
     return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${encodeURIComponent(placeId)}`;

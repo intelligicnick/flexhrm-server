@@ -812,13 +812,18 @@ export class SchoolWorksService {
     nextOffset: number;
     batchProcessed: number;
   }> {
-    const { resolveSchoolPlace } = await import(
+    const { resolveSchoolPlace, isGooglePlacesConfigured } = await import(
       '../../common/utils/google-school-place.util'
     );
     const block = String(params.block || '').trim();
     const district = String(params.district || '').trim();
     if (!block) {
       throw new BadRequestException('Block is required.');
+    }
+    if (!isGooglePlacesConfigured()) {
+      throw new BadRequestException(
+        'GOOGLE_PLACES_API_KEY is not set on the backend. Add it in Hostinger hPanel → Environment variables, enable Places API (New) and Geocoding API in Google Cloud, then redeploy the backend.',
+      );
     }
 
     const allSchools = await this.findSchoolsInBlock(block, district || undefined);
