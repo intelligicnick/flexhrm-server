@@ -44,6 +44,19 @@ function normalizeSchoolQuery(
   return code ? `${base} UDISE ${code}` : base;
 }
 
+function buildSchoolQueries(
+  schoolName: string,
+  block: string,
+  district: string,
+  udise?: string,
+): string[] {
+  const base = normalizeSchoolQuery(schoolName, block, district);
+  const withUdise = udise
+    ? normalizeSchoolQuery(schoolName, block, district, udise)
+    : '';
+  return [...new Set([base, withUdise].filter(Boolean))];
+}
+
 function looksLikeSchool(types: string[] | undefined): boolean {
   if (!types?.length) return false;
   const schoolish = new Set([
@@ -143,6 +156,83 @@ async function geocodeAddress(
   }
 }
 
+function toResolvedPlace(
+  lat: number,
+  lng: number,
+  placeName: string,
+  formattedAddress: string,
+  googlePlaceId: string,
+  locationSource: ResolvedSchoolPlace['locationSource'],
+  locationConfidence: SchoolPlaceConfidence,
+  queryUsed: string,
+): ResolvedSchoolPlace {
+  return {
+    lat,
+    lng,
+    placeName,
+    formattedAddress,
+    googlePlaceId,
+    googleMapsUrl: buildGoogleMapsUrl(lat, lng, googlePlaceId || undefined),
+    locationSource,
+    locationConfidence,
+    geofenceRadiusM:
+      locationConfidence === 'exact'
+        ? SCHOOL_GEOFENCE_EXACT_M
+        : SCHOOL_GEOFENCE_VILLAGE_M,
+    queryUsed,
+  };
+}
+
+/** Step 1: try the full school name on Google Places (exact school pin → 100 m geofence). */
+async function searchSchoolPlace(
+  schoolName: string,
+  block: string,
+  district: string,
+  udise: string,
+  apiKey: string,
+): Promise<{
+  exact: ResolvedSchoolPlace | null;
+  weak: ResolvedSchoolPlace | null;
+}> {
+  let weak: ResolvedSchoolPlace | null = null;
+
+  for (const query of buildSchoolQueries(schoolName, block, district, udise)) {
+    const placesMatch = await searchGooglePlaces(query, apiKey);
+    if (!placesMatch) continue;
+
+    if (looksLikeSchool(placesMatch.types)) {
+      return {
+        exact: toResolvedPlace(
+          placesMatch.lat,
+          placesMatch.lng,
+          placesMatch.placeName || schoolName,
+          placesMatch.formattedAddress,
+          placesMatch.placeId,
+          'google_places',
+          'exact',
+          query,
+        ),
+        weak: null,
+      };
+    }
+
+    if (!weak) {
+      weak = toResolvedPlace(
+        placesMatch.lat,
+        placesMatch.lng,
+        placesMatch.placeName || schoolName,
+        placesMatch.formattedAddress,
+        placesMatch.placeId,
+        'google_places',
+        'partial',
+        query,
+      );
+    }
+  }
+
+  return { exact: null, weak };
+}
+
 function buildVillageQueries(
   village: string,
   block: string,
@@ -158,6 +248,7 @@ function buildVillageQueries(
   return [...new Set(queries)];
 }
 
+/** Step 2: try the village name extracted from the school title (village pin → 400 m geofence). */
 async function resolveVillagePlace(
   village: string,
   block: string,
@@ -167,38 +258,30 @@ async function resolveVillagePlace(
   for (const villageQuery of buildVillageQueries(village, block, district)) {
     const villagePlaces = await searchGooglePlaces(villageQuery, apiKey);
     if (villagePlaces) {
-      return {
-        lat: villagePlaces.lat,
-        lng: villagePlaces.lng,
-        placeName: villagePlaces.placeName || village,
-        formattedAddress: villagePlaces.formattedAddress,
-        googlePlaceId: villagePlaces.placeId,
-        googleMapsUrl: buildGoogleMapsUrl(
-          villagePlaces.lat,
-          villagePlaces.lng,
-          villagePlaces.placeId,
-        ),
-        locationSource: 'google_places',
-        locationConfidence: 'village',
-        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
-        queryUsed: villageQuery,
-      };
+      return toResolvedPlace(
+        villagePlaces.lat,
+        villagePlaces.lng,
+        villagePlaces.placeName || village,
+        villagePlaces.formattedAddress,
+        villagePlaces.placeId,
+        'google_places',
+        'village',
+        villageQuery,
+      );
     }
 
     const geocoded = await geocodeAddress(villageQuery, apiKey);
     if (geocoded) {
-      return {
-        lat: geocoded.lat,
-        lng: geocoded.lng,
-        placeName: village,
-        formattedAddress: geocoded.formattedAddress,
-        googlePlaceId: '',
-        googleMapsUrl: buildGoogleMapsUrl(geocoded.lat, geocoded.lng),
-        locationSource: 'village_fallback',
-        locationConfidence: 'village',
-        geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
-        queryUsed: villageQuery,
-      };
+      return toResolvedPlace(
+        geocoded.lat,
+        geocoded.lng,
+        village,
+        geocoded.formattedAddress,
+        '',
+        'village_fallback',
+        'village',
+        villageQuery,
+      );
     }
   }
   return null;
@@ -227,54 +310,49 @@ export async function resolveSchoolPlace(
   const udise = String(school.udise || '').trim();
   if (!schoolName) return null;
 
-  const primaryQuery = normalizeSchoolQuery(schoolName, block, district, udise);
-  const placesMatch = await searchGooglePlaces(primaryQuery, key);
-  if (placesMatch) {
-    const confidence: SchoolPlaceConfidence = looksLikeSchool(placesMatch.types)
-      ? 'exact'
-      : 'partial';
-    return {
-      lat: placesMatch.lat,
-      lng: placesMatch.lng,
-      placeName: placesMatch.placeName || schoolName,
-      formattedAddress: placesMatch.formattedAddress,
-      googlePlaceId: placesMatch.placeId,
-      googleMapsUrl: buildGoogleMapsUrl(
-        placesMatch.lat,
-        placesMatch.lng,
-        placesMatch.placeId,
-      ),
-      locationSource: 'google_places',
-      locationConfidence: confidence,
-      geofenceRadiusM:
-        confidence === 'exact' ? SCHOOL_GEOFENCE_EXACT_M : SCHOOL_GEOFENCE_VILLAGE_M,
-      queryUsed: primaryQuery,
-    };
-  }
+  // 1) School name first — exact Google school listing (100 m).
+  const schoolSearch = await searchSchoolPlace(
+    schoolName,
+    block,
+    district,
+    udise,
+    key,
+  );
+  if (schoolSearch.exact) return schoolSearch.exact;
 
+  // 2) Village name from school title — e.g. BISHNUPUR from "GUNANAND M S BISHNUPUR" (400 m).
   const village = localityHintFromSchoolName(schoolName);
   if (village && village.toLowerCase() !== block.toLowerCase()) {
     const villageMatch = await resolveVillagePlace(village, block, district, key);
     if (villageMatch) return villageMatch;
   }
 
-  const geocodedSchool = await geocodeAddress(primaryQuery, key);
-  if (geocodedSchool) {
-    return {
-      lat: geocodedSchool.lat,
-      lng: geocodedSchool.lng,
-      placeName: schoolName,
-      formattedAddress: geocodedSchool.formattedAddress,
-      googlePlaceId: '',
-      googleMapsUrl: buildGoogleMapsUrl(geocodedSchool.lat, geocodedSchool.lng),
-      locationSource: 'google_geocode',
-      locationConfidence: 'partial',
-      geofenceRadiusM: SCHOOL_GEOFENCE_VILLAGE_M,
-      queryUsed: primaryQuery,
-    };
+  // 3) Weak school Places hit or geocoded school name (400 m).
+  if (schoolSearch.weak) return schoolSearch.weak;
+
+  for (const query of buildSchoolQueries(schoolName, block, district, udise)) {
+    const geocodedSchool = await geocodeAddress(query, key);
+    if (geocodedSchool) {
+      return toResolvedPlace(
+        geocodedSchool.lat,
+        geocodedSchool.lng,
+        schoolName,
+        geocodedSchool.formattedAddress,
+        '',
+        'google_geocode',
+        'partial',
+        query,
+      );
+    }
   }
 
   return null;
+}
+
+export function geofenceAreaLabel(confidence: string): string {
+  if (confidence === 'exact') return 'school';
+  if (confidence === 'village') return 'village';
+  return 'school or village area';
 }
 
 export function defaultGeofenceRadiusM(confidence: string, explicit?: number): number {

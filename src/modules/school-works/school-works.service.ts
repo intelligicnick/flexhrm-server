@@ -979,6 +979,8 @@ export class SchoolWorksService {
     lng: number;
     radiusM: number;
     verified: boolean;
+    locationConfidence: string;
+    matchedPlaceName: string;
   } | null {
     const lat = Number(school.lat);
     const lng = Number(school.lng);
@@ -986,12 +988,20 @@ export class SchoolWorksService {
       return null;
     }
     if (lat === 0 && lng === 0) return null;
+    const locationConfidence = String(school.locationConfidence || '');
     const radiusM =
       Number(school.geofenceRadiusM) > 0
         ? Number(school.geofenceRadiusM)
-        : school.locationConfidence === 'exact'
+        : locationConfidence === 'exact'
           ? 100
           : 400;
-    return { lat, lng, radiusM, verified: true };
+    return {
+      lat,
+      lng,
+      radiusM,
+      verified: true,
+      locationConfidence,
+      matchedPlaceName: String(school.matchedPlaceName || school.schoolName || ''),
+    };
   }
 }

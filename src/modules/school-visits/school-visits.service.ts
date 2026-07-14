@@ -32,7 +32,7 @@ import {
   stripCoordsFromLocationLabel,
 } from '../../common/utils/reverse-geocode.util';
 import { distanceMeters, isWithinGeofence } from '../../common/utils/geo.util';
-import { VISIT_MAX_GPS_ACCURACY_M } from '../../common/utils/google-school-place.util';
+import { VISIT_MAX_GPS_ACCURACY_M, geofenceAreaLabel } from '../../common/utils/google-school-place.util';
 
 export interface EffectiveLastVisitInfo {
   lastVisitDate: string | null;
@@ -450,8 +450,9 @@ export class SchoolVisitsService {
         schoolPin.lng,
       );
       if (!isWithinGeofence(point.lat, point.lng, schoolPin.lat, schoolPin.lng, schoolPin.radiusM)) {
+        const area = geofenceAreaLabel(schoolPin.locationConfidence);
         throw new BadRequestException(
-          `You are ${Math.round(distance)} m from the school. Move within ${schoolPin.radiusM} m of the school to submit this visit.`,
+          `You are ${Math.round(distance)} m from the ${area} pin. Move within ${schoolPin.radiusM} m of the ${area} to submit this visit.`,
         );
       }
     }
