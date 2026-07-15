@@ -95,6 +95,28 @@ export class SchoolVisit {
 
   @Prop({ default: 0 })
   schoolLng!: number;
+
+  /** APK ping-trail cross-check: verified | no_ping_trail | ping_mock | ping_far_from_school | visit_ping_mismatch */
+  @Prop({ default: '' })
+  pingVerificationNotes!: string;
+
+  @Prop({ default: 0 })
+  pingTrailNearSchoolCount!: number;
+
+  @Prop({ default: 0 })
+  pingTrailNearestSchoolM!: number;
+
+  @Prop({ default: 0 })
+  pingTrailNearestVisitM!: number;
+
+  @Prop({ default: 0 })
+  pingTrailPointCount!: number;
+
+  @Prop({ default: 0 })
+  pingTrailWindowMinutes!: number;
+
+  @Prop({ default: false })
+  needsReview!: boolean;
 }
 
 export const SchoolVisitSchema = SchemaFactory.createForClass(SchoolVisit);

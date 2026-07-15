@@ -468,6 +468,55 @@ export class SchoolSupervisorsService {
     return { accepted: points.length, serverTime: now.toISOString() };
   }
 
+  async getLocationPingsInWindow(
+    supervisorId: string,
+    from: Date,
+    to: Date,
+  ): Promise<
+    Array<{
+      latitude: number;
+      longitude: number;
+      timestamp: Date;
+      accuracy: number;
+      isMock: boolean;
+    }>
+  > {
+    const docs = await this.locationPingModel
+      .find({
+        supervisorId,
+        'points.timestamp': { $gte: from, $lte: to },
+      })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean()
+      .exec();
+
+    const results: Array<{
+      latitude: number;
+      longitude: number;
+      timestamp: Date;
+      accuracy: number;
+      isMock: boolean;
+    }> = [];
+
+    for (const doc of docs) {
+      for (const point of doc.points || []) {
+        const ts = point.timestamp ? new Date(point.timestamp) : null;
+        if (!ts || ts < from || ts > to) continue;
+        results.push({
+          latitude: Number(point.latitude),
+          longitude: Number(point.longitude),
+          timestamp: ts,
+          accuracy: Number(point.accuracy) || 0,
+          isMock: !!point.isMock,
+        });
+      }
+    }
+
+    results.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    return results;
+  }
+
   async getActiveSupervisorAccessProfiles(): Promise<SupervisorAccessProfile[]> {
     const docs = await this.supervisorModel
       .find({ status: { $ne: 'inactive' } })

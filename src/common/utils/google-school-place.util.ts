@@ -195,18 +195,28 @@ function isAdminPlaceText(text: string, block?: string): boolean {
 export function isUnsafeSchoolPin(school: {
   schoolName?: string;
   matchedPlaceName?: string;
+  formattedAddress?: string;
   block?: string;
   district?: string;
   locationConfidence?: string;
+  siblingBlocks?: string[];
 }): boolean {
   const matchedPlaceName = String(school.matchedPlaceName || '').trim();
+  const formattedAddress = String(school.formattedAddress || '').trim();
   const schoolName = String(school.schoolName || '').trim();
   const block = String(school.block || '').trim();
   const district = String(school.district || '').trim();
   const confidence = String(school.locationConfidence || '').trim();
+  const siblingBlocks = school.siblingBlocks ?? [];
 
   if (matchedPlaceName && isAdminPlaceText(matchedPlaceName, block)) {
     return true;
+  }
+
+  if (formattedAddress && block && district) {
+    if (!placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+      return true;
+    }
   }
 
   if (!matchedPlaceName || !schoolName) return false;
@@ -231,13 +241,85 @@ function placeText(placeName: string, formattedAddress: string): string {
   return normalizeToken(`${placeName} ${formattedAddress}`);
 }
 
+function wrongBlockMentionedInAddress(
+  haystack: string,
+  expectedBlock: string,
+  siblingBlocks: string[],
+): string | null {
+  const expectedNorm = normalizeToken(expectedBlock);
+  for (const sibling of siblingBlocks) {
+    const siblingNorm = normalizeToken(sibling);
+    if (!siblingNorm || siblingNorm.length < 4) continue;
+    if (siblingNorm === expectedNorm) continue;
+    if (tokenInHaystack(siblingNorm, haystack)) {
+      return sibling;
+    }
+  }
+  return null;
+}
+
+/** Google/OSM address must name this block & district — rejects Kumarkhand hits for Alamnagar schools. */
+export function placeInExpectedAdminArea(
+  formattedAddress: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): boolean {
+  const haystack = placeText('', formattedAddress);
+  if (!haystack) return false;
+
+  const districtNorm = normalizeToken(district);
+  if (districtNorm && districtNorm.length >= 3) {
+    if (!tokenInHaystack(districtNorm, haystack)) return false;
+  }
+
+  const blockNorm = normalizeToken(block);
+  if (blockNorm && blockNorm.length >= 3) {
+    if (!tokenInHaystack(blockNorm, haystack)) return false;
+  }
+
+  if (wrongBlockMentionedInAddress(haystack, block, siblingBlocks)) return false;
+
+  return true;
+}
+
+export function adminAreaMismatchReason(
+  formattedAddress: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): string | null {
+  const haystack = placeText('', formattedAddress);
+  if (!haystack) return 'No address on Google match';
+
+  const districtNorm = normalizeToken(district);
+  if (districtNorm && districtNorm.length >= 3 && !tokenInHaystack(districtNorm, haystack)) {
+    return `District "${district}" not in Google address — likely wrong area`;
+  }
+
+  const blockNorm = normalizeToken(block);
+  if (blockNorm && blockNorm.length >= 3 && !tokenInHaystack(blockNorm, haystack)) {
+    return `Block "${block}" not in Google address — likely outside this block`;
+  }
+
+  const wrongBlock = wrongBlockMentionedInAddress(haystack, block, siblingBlocks);
+  if (wrongBlock) {
+    return `Address mentions block "${wrongBlock}", not "${block}"`;
+  }
+
+  return null;
+}
+
 function isBlockedPlaceCandidate(
   placeName: string,
   formattedAddress: string,
   block: string,
+  district: string,
+  siblingBlocks: string[] = [],
 ): boolean {
   if (isAdminPlaceName(placeName, block)) return true;
   if (isAdminPlaceText(formattedAddress, block)) return true;
+  if (!placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) return true;
   return false;
 }
 
@@ -269,8 +351,17 @@ function scoreSchoolCandidate(
   schoolName: string,
   block: string,
   district: string,
+  siblingBlocks: string[] = [],
 ): number {
-  if (isBlockedPlaceCandidate(candidate.placeName, candidate.formattedAddress, block)) {
+  if (
+    isBlockedPlaceCandidate(
+      candidate.placeName,
+      candidate.formattedAddress,
+      block,
+      district,
+      siblingBlocks,
+    )
+  ) {
     return -1;
   }
 
@@ -303,8 +394,18 @@ function scoreVillageCandidate(
   candidate: { placeName: string; formattedAddress: string },
   village: string,
   block: string,
+  district: string,
+  siblingBlocks: string[] = [],
 ): number {
-  if (isBlockedPlaceCandidate(candidate.placeName, candidate.formattedAddress, block)) {
+  if (
+    isBlockedPlaceCandidate(
+      candidate.placeName,
+      candidate.formattedAddress,
+      block,
+      district,
+      siblingBlocks,
+    )
+  ) {
     return -1;
   }
 
@@ -390,11 +491,18 @@ function pickBestSchoolPlace(
   schoolName: string,
   block: string,
   district: string,
+  siblingBlocks: string[] = [],
 ): { match: (typeof candidates)[number]; score: number } | null {
   let best: { match: (typeof candidates)[number]; score: number } | null = null;
 
   for (const candidate of candidates) {
-    const score = scoreSchoolCandidate(candidate, schoolName, block, district);
+    const score = scoreSchoolCandidate(
+      candidate,
+      schoolName,
+      block,
+      district,
+      siblingBlocks,
+    );
     if (score < 50) continue;
     if (!isExactSchoolType(candidate.types)) continue;
     if (!best || score > best.score) {
@@ -416,11 +524,19 @@ function pickVillagePlace(
   }>,
   village: string,
   block: string,
+  district: string,
+  siblingBlocks: string[] = [],
 ): { match: (typeof candidates)[number]; score: number } | null {
   let best: { match: (typeof candidates)[number]; score: number } | null = null;
 
   for (const candidate of candidates) {
-    const score = scoreVillageCandidate(candidate, village, block);
+    const score = scoreVillageCandidate(
+      candidate,
+      village,
+      block,
+      district,
+      siblingBlocks,
+    );
     if (score < 0) continue;
     if (!best || score > best.score) {
       best = { match: candidate, score };
@@ -537,12 +653,19 @@ async function searchSchoolPlace(
   district: string,
   udise: string,
   apiKey: string,
+  siblingBlocks: string[] = [],
 ): Promise<ResolvedSchoolPlace | null> {
   for (const query of buildSchoolQueries(schoolName, block, district, udise)) {
     const candidates = await collectGooglePlacesCandidates(query, apiKey);
     if (!candidates.length) continue;
 
-    const picked = pickBestSchoolPlace(candidates, schoolName, block, district);
+    const picked = pickBestSchoolPlace(
+      candidates,
+      schoolName,
+      block,
+      district,
+      siblingBlocks,
+    );
     if (!picked) continue;
 
     return toResolvedPlace(
@@ -618,6 +741,7 @@ async function resolveVillageOsm(
   village: string,
   block: string,
   district: string,
+  siblingBlocks: string[] = [],
 ): Promise<ResolvedSchoolPlace | null> {
   for (const villageQuery of buildVillageQueries(village, block, district)) {
     const results = await searchNominatimForward(villageQuery);
@@ -628,6 +752,8 @@ async function resolveVillageOsm(
         { placeName: result.displayName, formattedAddress: result.displayName },
         village,
         block,
+        district,
+        siblingBlocks,
       );
       if (score < 0) continue;
       if (!best || score > best.score) {
@@ -660,10 +786,17 @@ async function resolveVillagePlace(
   block: string,
   district: string,
   apiKey: string,
+  siblingBlocks: string[] = [],
 ): Promise<ResolvedSchoolPlace | null> {
   for (const villageQuery of buildVillageQueries(village, block, district)) {
     const candidates = await collectGooglePlacesCandidates(villageQuery, apiKey);
-    const picked = pickVillagePlace(candidates, village, block);
+    const picked = pickVillagePlace(
+      candidates,
+      village,
+      block,
+      district,
+      siblingBlocks,
+    );
     if (picked) {
       return toResolvedPlace(
         picked.match.lat,
@@ -680,13 +813,23 @@ async function resolveVillagePlace(
 
     const geocoded = await geocodeAddress(villageQuery, apiKey);
     if (geocoded) {
-      if (isBlockedPlaceCandidate(village, geocoded.formattedAddress, block)) {
+      if (
+        isBlockedPlaceCandidate(
+          village,
+          geocoded.formattedAddress,
+          block,
+          district,
+          siblingBlocks,
+        )
+      ) {
         continue;
       }
       const score = scoreVillageCandidate(
         { placeName: village, formattedAddress: geocoded.formattedAddress },
         village,
         block,
+        district,
+        siblingBlocks,
       );
       if (score >= 0) {
         return toResolvedPlace(
@@ -714,6 +857,7 @@ export async function resolveSchoolPlace(
     udise?: string;
   },
   apiKey?: string,
+  siblingBlocks: string[] = [],
 ): Promise<ResolvedSchoolPlace | null> {
   const key = String(
     apiKey ||
@@ -736,16 +880,23 @@ export async function resolveSchoolPlace(
     district,
     udise,
     key,
+    siblingBlocks,
   );
   if (schoolMatch) return schoolMatch;
 
   // 2) Village from school title (400 m) — supervisor in that village, not at block HQ.
   const village = localityHintFromSchoolName(schoolName);
   if (village && village.toLowerCase() !== block.toLowerCase()) {
-    const villageMatch = await resolveVillagePlace(village, block, district, key);
+    const villageMatch = await resolveVillagePlace(
+      village,
+      block,
+      district,
+      key,
+      siblingBlocks,
+    );
     if (villageMatch) return villageMatch;
 
-    const osmMatch = await resolveVillageOsm(village, block, district);
+    const osmMatch = await resolveVillageOsm(village, block, district, siblingBlocks);
     if (osmMatch) return osmMatch;
   }
 

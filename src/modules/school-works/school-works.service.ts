@@ -82,6 +82,21 @@ export class SchoolWorksService {
     };
   }
 
+  private async listBlocksInDistrict(district: string): Promise<string[]> {
+    const tenantId = this.resolveTenantId();
+    const rows = await runWithoutTenantScope(() =>
+      this.schoolWorkModel
+        .distinct('block', {
+          district: {
+            $regex: new RegExp(`^${this.escapeRegex(district)}$`, 'i'),
+          },
+          ...this.tenantOrMissingFilter(tenantId),
+        })
+        .exec(),
+    );
+    return (rows as string[]).filter(Boolean).sort();
+  }
+
   private async findSchoolsInBlock(
     block: string,
     district?: string,
@@ -829,6 +844,9 @@ export class SchoolWorksService {
     }
 
     const allSchools = await this.findSchoolsInBlock(block, district || undefined);
+    const siblingBlocks = district
+      ? await this.listBlocksInDistrict(district)
+      : [block];
     const total = allSchools.length;
     const offset = Math.max(0, Number(params.offset) || 0);
     const limit = Math.min(Math.max(Number(params.limit) || 3, 1), 20);
@@ -869,12 +887,16 @@ export class SchoolWorksService {
         continue;
       }
 
-      const match = await resolveSchoolPlace({
-        schoolName,
-        block: String(school.block || block),
-        district: String(school.district || district),
-        udise,
-      });
+      const match = await resolveSchoolPlace(
+        {
+          schoolName,
+          block: String(school.block || block),
+          district: String(school.district || district),
+          udise,
+        },
+        undefined,
+        siblingBlocks,
+      );
 
       if (!match) {
         failed++;

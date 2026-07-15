@@ -33,6 +33,7 @@ import {
 } from '../../common/utils/reverse-geocode.util';
 import { distanceMeters, isWithinGeofence } from '../../common/utils/geo.util';
 import { VISIT_MAX_GPS_ACCURACY_M, geofenceAreaLabel } from '../../common/utils/google-school-place.util';
+import { buildPingWindow, verifyVisitAgainstPingTrail } from './visit-ping-verification.util';
 
 export interface EffectiveLastVisitInfo {
   lastVisitDate: string | null;
@@ -502,6 +503,43 @@ export class SchoolVisitsService {
     const visitType = linkedCommitment ? 'commitment' : 'adhoc';
     const commitmentId = linkedCommitment?.id || '';
 
+    const visitCapturedAt =
+      dto.gpsLocation?.capturedAt ||
+      dto.photos?.[0]?.takenAt ||
+      new Date().toISOString();
+    const visitLat = primaryGps?.lat ?? 0;
+    const visitLng = primaryGps?.lng ?? 0;
+
+    let pingVerification = verifyVisitAgainstPingTrail({
+      visitLat,
+      visitLng,
+      schoolLat: schoolPin.lat,
+      schoolLng: schoolPin.lng,
+      geofenceRadiusM: schoolPin.radiusM,
+      visitCapturedAt,
+      pings: [],
+    });
+
+    try {
+      const { from, to } = buildPingWindow(visitCapturedAt);
+      const pings = await this.schoolSupervisorsService.getLocationPingsInWindow(
+        supervisorId,
+        from,
+        to,
+      );
+      pingVerification = verifyVisitAgainstPingTrail({
+        visitLat,
+        visitLng,
+        schoolLat: schoolPin.lat,
+        schoolLng: schoolPin.lng,
+        geofenceRadiusM: schoolPin.radiusM,
+        visitCapturedAt,
+        pings,
+      });
+    } catch {
+      /* keep default no_ping_trail if ping lookup fails */
+    }
+
     const doc = await this.visitModel.create({
       id,
       supervisorId,
@@ -541,7 +579,14 @@ export class SchoolVisitsService {
       commitmentId,
       distanceToSchoolM: Math.round(distanceToSchoolM),
       gpsAccuracyM: Math.round(gpsAccuracyM),
-      locationMatchStatus: 'matched',
+      locationMatchStatus: pingVerification.locationMatchStatus,
+      pingVerificationNotes: pingVerification.pingVerificationNotes,
+      pingTrailNearSchoolCount: pingVerification.pingTrailNearSchoolCount,
+      pingTrailNearestSchoolM: pingVerification.pingTrailNearestSchoolM ?? 0,
+      pingTrailNearestVisitM: pingVerification.pingTrailNearestVisitM ?? 0,
+      pingTrailPointCount: pingVerification.pingTrailPointCount,
+      pingTrailWindowMinutes: pingVerification.pingTrailWindowMinutes,
+      needsReview: pingVerification.needsReview,
       schoolLat: schoolPin.lat,
       schoolLng: schoolPin.lng,
     });
