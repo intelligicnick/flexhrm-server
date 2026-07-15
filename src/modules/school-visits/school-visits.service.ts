@@ -377,7 +377,7 @@ export class SchoolVisitsService {
     const schoolPin = this.schoolWorksService.getVerifiedSchoolPin(school);
     if (!schoolPin) {
       throw new BadRequestException(
-        'This school location is not verified yet. Ask admin to verify the school pin before submitting visits.',
+        'This school location is not verified yet, or the saved pin is invalid (e.g. block office). Ask admin to re-resolve the school or village pin before submitting visits.',
       );
     }
 

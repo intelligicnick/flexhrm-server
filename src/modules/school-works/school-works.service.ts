@@ -10,6 +10,8 @@ import {
   getCurrentTenantId,
   runWithoutTenantScope,
 } from '../../platform/common/tenant-context.store';
+import { isUnsafeSchoolPin } from '../../common/utils/google-school-place.util';
+import { localityHintFromSchoolName } from '../../common/utils/reverse-geocode.util';
 
 
 export function isSecondarySchoolCategory(category: string): boolean {
@@ -840,6 +842,7 @@ export class SchoolWorksService {
       const schoolId = String(school.id || '');
       const schoolName = String(school.schoolName || '');
       const udise = String(school.udise || '');
+      const villageHint = localityHintFromSchoolName(schoolName);
 
       if (
         params.skipExisting !== false &&
@@ -852,11 +855,14 @@ export class SchoolWorksService {
           schoolWorkId: schoolId,
           schoolName,
           udise,
+          villageHint,
           block: String(school.block || ''),
           district: String(school.district || ''),
           status: 'skipped',
           lat: Number(school.lat),
           lng: Number(school.lng),
+          matchedPlaceName: String(school.matchedPlaceName || ''),
+          locationConfidence: String(school.locationConfidence || ''),
           locationVerified: true,
           googleMapsUrl: String(school.googleMapsUrl || ''),
         });
@@ -876,6 +882,7 @@ export class SchoolWorksService {
           schoolWorkId: schoolId,
           schoolName,
           udise,
+          villageHint,
           block: String(school.block || ''),
           district: String(school.district || ''),
           status: 'not_found',
@@ -889,6 +896,7 @@ export class SchoolWorksService {
         schoolWorkId: schoolId,
         schoolName,
         udise,
+        villageHint,
         block: String(school.block || ''),
         district: String(school.district || ''),
         status: 'resolved',
@@ -902,6 +910,8 @@ export class SchoolWorksService {
         locationConfidence: match.locationConfidence,
         geofenceRadiusM: match.geofenceRadiusM,
         queryUsed: match.queryUsed,
+        matchScore: match.matchScore,
+        resolutionStep: match.resolutionStep,
       };
 
       if (params.saveVerified) {
@@ -993,6 +1003,19 @@ export class SchoolWorksService {
       return null;
     }
     if (lat === 0 && lng === 0) return null;
+
+    if (
+      isUnsafeSchoolPin({
+        schoolName: String(school.schoolName || ''),
+        matchedPlaceName: String(school.matchedPlaceName || ''),
+        block: String(school.block || ''),
+        district: String(school.district || ''),
+        locationConfidence: String(school.locationConfidence || ''),
+      })
+    ) {
+      return null;
+    }
+
     const locationConfidence = String(school.locationConfidence || '');
     const radiusM =
       Number(school.geofenceRadiusM) > 0
