@@ -1,3 +1,4 @@
+import { coordinatesInBihar } from './bihar-geography.util';
 import { localityHintFromSchoolName } from './reverse-geocode.util';
 import { placeInExpectedDistrict } from './village-location.util';
 
@@ -201,7 +202,15 @@ export function isUnsafeSchoolPin(school: {
   district?: string;
   locationConfidence?: string;
   siblingBlocks?: string[];
+  lat?: number | string;
+  lng?: number | string;
 }): boolean {
+  const lat = Number(school.lat);
+  const lng = Number(school.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
+    return true;
+  }
+
   const matchedPlaceName = String(school.matchedPlaceName || '').trim();
   const formattedAddress = String(school.formattedAddress || '').trim();
   const schoolName = String(school.schoolName || '').trim();

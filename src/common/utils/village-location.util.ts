@@ -1,4 +1,13 @@
 import { localityHintFromSchoolName } from './reverse-geocode.util';
+import {
+  addressMentionsWrongState,
+  coordinatesInBihar,
+  nominatimBiharViewbox,
+  placeInExpectedAdminArea,
+  tokenInHaystack,
+  villageNameInResult,
+  villageTokensFromHint,
+} from './bihar-geography.util';
 
 export const SCHOOL_GEOFENCE_VILLAGE_M = 400;
 
@@ -54,13 +63,8 @@ function editDistance(a: string, b: string): number {
   return matrix[a.length][b.length];
 }
 
-function tokenInHaystack(token: string, haystack: string): boolean {
-  if (!token || !haystack) return false;
-  if (haystack.includes(token)) return true;
-  if (token.length < 5) return false;
-  return haystack
-    .split(' ')
-    .some((word) => word.length >= 4 && editDistance(token, word) <= 1);
+function tokenInHaystackLocal(token: string, haystack: string): boolean {
+  return tokenInHaystack(token, haystack);
 }
 
 function isAdminPlaceName(placeName: string, block?: string): boolean {
@@ -88,19 +92,13 @@ function isAdminPlaceName(placeName: string, block?: string): boolean {
   return false;
 }
 
-/** Relaxed: district or Bihar in address — block name not required for village pins. */
+/** Strict: Bihar + district (+ block when known). Rejects Rajasthan etc. */
 export function placeInExpectedDistrict(
   formattedAddress: string,
   district: string,
+  block = '',
 ): boolean {
-  const haystack = normalizeToken(formattedAddress);
-  if (!haystack) return false;
-  if (haystack.includes('bihar')) return true;
-  const districtNorm = normalizeToken(district);
-  if (districtNorm && districtNorm.length >= 3) {
-    return tokenInHaystack(districtNorm, haystack);
-  }
-  return true;
+  return placeInExpectedAdminArea(formattedAddress, district, block);
 }
 
 function scoreRelaxedVillageCandidate(
@@ -109,29 +107,38 @@ function scoreRelaxedVillageCandidate(
   village: string,
   block: string,
   district: string,
+  lat: number,
+  lng: number,
 ): number {
   if (isAdminPlaceName(placeName, block)) return -1;
   if (isAdminPlaceName(formattedAddress, block)) return -1;
-  if (!placeInExpectedDistrict(formattedAddress, district)) return -1;
+  if (addressMentionsWrongState(formattedAddress)) return -1;
+  if (!placeInExpectedAdminArea(formattedAddress, district, block)) return -1;
+  if (!coordinatesInBihar(lat, lng)) return -1;
 
   const villageNorm = normalizeToken(village);
   if (!villageNorm) return -1;
 
-  const haystack = normalizeToken(`${placeName} ${formattedAddress}`);
-  if (!tokenInHaystack(villageNorm, haystack)) return -1;
+  if (!villageNameInResult(villageNorm, placeName, formattedAddress)) return -1;
 
+  const haystack = normalizeToken(`${placeName} ${formattedAddress}`);
   let score = 50;
   if (normalizeToken(placeName) === villageNorm) score += 20;
   if (haystack.includes(`${villageNorm} village`)) score += 15;
   if (haystack.includes('bihar')) score += 5;
+  const blockNorm = normalizeToken(block);
+  if (blockNorm && tokenInHaystackLocal(blockNorm, haystack)) score += 10;
   return score;
 }
 
 function buildVillageQueries(village: string, block: string, district: string): string[] {
+  const primaryToken = villageTokensFromHint(village)[0] || village;
   const queries = [
     [village, 'village', block, district, 'Bihar', 'India'],
+    [primaryToken, 'village', block, district, 'Bihar', 'India'],
+    [village, block, district, 'Bihar', 'India'],
+    [primaryToken, block, district, 'Bihar', 'India'],
     [village, district, 'Bihar', 'India'],
-    [village, block, 'Bihar', 'India'],
   ]
     .map((parts) => parts.filter(Boolean).join(', '))
     .filter(Boolean);
@@ -147,6 +154,8 @@ async function searchNominatimForward(
     url.searchParams.set('format', 'json');
     url.searchParams.set('limit', '5');
     url.searchParams.set('countrycodes', 'in');
+    url.searchParams.set('viewbox', nominatimBiharViewbox());
+    url.searchParams.set('bounded', '1');
 
     const res = await fetch(url.toString(), {
       headers: {
@@ -182,6 +191,8 @@ async function geocodeAddress(
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('address', address);
     url.searchParams.set('key', apiKey);
+    url.searchParams.set('region', 'in');
+    url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
     const res = await fetch(url.toString());
     if (!res.ok) return null;
     const data = (await res.json()) as {
@@ -261,6 +272,8 @@ export async function resolveVillagePin(
         villageNorm,
         block,
         district,
+        result.lat,
+        result.lng,
       );
       if (score < 0) continue;
       if (!bestOsm || score > bestOsm.score) {
@@ -288,11 +301,13 @@ export async function resolveVillagePin(
       const geocoded = await geocodeAddress(query, key);
       if (geocoded) {
         const score = scoreRelaxedVillageCandidate(
-          villageNorm,
+          geocoded.formattedAddress,
           geocoded.formattedAddress,
           villageNorm,
           block,
           district,
+          geocoded.lat,
+          geocoded.lng,
         );
         if (score >= 0) {
           return {

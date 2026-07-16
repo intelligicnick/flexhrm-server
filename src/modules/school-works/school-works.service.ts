@@ -1474,6 +1474,8 @@ export class SchoolWorksService {
         block: String(school.block || ''),
         district: String(school.district || ''),
         locationConfidence: String(school.locationConfidence || ''),
+        lat,
+        lng,
       })
     ) {
       return null;
