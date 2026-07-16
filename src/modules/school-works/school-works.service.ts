@@ -11,7 +11,10 @@ import {
   runWithoutTenantScope,
 } from '../../platform/common/tenant-context.store';
 import { isUnsafeSchoolPin } from '../../common/utils/google-school-place.util';
-import { localityHintFromSchoolName } from '../../common/utils/reverse-geocode.util';
+import {
+  localityHintFromSchoolName,
+  resolveVillagePin,
+} from '../../common/utils/village-location.util';
 
 
 export function isSecondarySchoolCategory(category: string): boolean {
@@ -969,6 +972,444 @@ export class SchoolWorksService {
       nextOffset,
       batchProcessed: schools.length,
     };
+  }
+
+  async bulkAssignVillageLocations(params: {
+    block: string;
+    district?: string;
+    saveDraft?: boolean;
+    skipExisting?: boolean;
+    tryExactSchoolUpgrade?: boolean;
+    villageLimit?: number;
+    villageOffset?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    total: number;
+    totalVillages: number;
+    resolved: number;
+    skipped: number;
+    failed: number;
+    villagesResolved: number;
+    results: Array<Record<string, unknown>>;
+    hasMore: boolean;
+    nextVillageOffset: number;
+    nextOffset: number;
+    batchProcessed: number;
+  }> {
+    const { tryExactSchoolUpgrade: tryExactUpgrade } = await import(
+      '../../common/utils/google-school-place.util'
+    );
+    const block = String(params.block || '').trim();
+    const district = String(params.district || '').trim();
+    if (!block) {
+      throw new BadRequestException('Block is required.');
+    }
+
+    const allSchools = await this.findSchoolsInBlock(block, district || undefined);
+    const siblingBlocks = district
+      ? await this.listBlocksInDistrict(district)
+      : [block];
+
+    type VillageBucket = {
+      villageHint: string;
+      block: string;
+      district: string;
+      schools: Record<string, unknown>[];
+    };
+
+    const villageMap = new Map<string, VillageBucket>();
+    for (const school of allSchools) {
+      const schoolName = String(school.schoolName || '');
+      const villageHint = localityHintFromSchoolName(schoolName) || '';
+      const schoolBlock = String(school.block || block);
+      const schoolDistrict = String(school.district || district);
+      const key = `${schoolBlock}::${schoolDistrict}::${villageHint.toLowerCase()}`;
+      const bucket = villageMap.get(key) ?? {
+        villageHint,
+        block: schoolBlock,
+        district: schoolDistrict,
+        schools: [],
+      };
+      bucket.schools.push(school);
+      villageMap.set(key, bucket);
+    }
+
+    const villageKeys = [...villageMap.keys()].sort((a, b) => a.localeCompare(b));
+    const totalVillages = villageKeys.length;
+    const total = allSchools.length;
+    const villageOffset = Math.max(
+      0,
+      Number(params.villageOffset ?? params.offset) || 0,
+    );
+    const villageLimit = Math.min(
+      Math.max(Number(params.villageLimit ?? params.limit) || 2, 1),
+      5,
+    );
+    const batchKeys = villageKeys.slice(villageOffset, villageOffset + villageLimit);
+
+    const results: Array<Record<string, unknown>> = [];
+    let resolved = 0;
+    let skipped = 0;
+    let failed = 0;
+    let villagesResolved = 0;
+
+    for (const villageKey of batchKeys) {
+      const bucket = villageMap.get(villageKey)!;
+      const { villageHint, block: schoolBlock, district: schoolDistrict, schools } =
+        bucket;
+
+      if (!villageHint) {
+        for (const school of schools) {
+          failed++;
+          results.push({
+            schoolWorkId: String(school.id || ''),
+            schoolName: String(school.schoolName || ''),
+            udise: String(school.udise || ''),
+            villageHint: '',
+            block: schoolBlock,
+            district: schoolDistrict,
+            status: 'not_found',
+            failureReason: 'empty_village_hint',
+          });
+        }
+        continue;
+      }
+
+      const schoolsToPin = schools.filter((school) => {
+        const hasPin =
+          Number.isFinite(Number(school.lat)) &&
+          Number.isFinite(Number(school.lng)) &&
+          !(Number(school.lat) === 0 && Number(school.lng) === 0);
+        if (params.skipExisting !== false && hasPin) {
+          skipped++;
+          results.push({
+            schoolWorkId: String(school.id || ''),
+            schoolName: String(school.schoolName || ''),
+            udise: String(school.udise || ''),
+            villageHint,
+            block: schoolBlock,
+            district: schoolDistrict,
+            status: 'skipped',
+            lat: Number(school.lat),
+            lng: Number(school.lng),
+            matchedPlaceName: String(school.matchedPlaceName || ''),
+            locationConfidence: String(school.locationConfidence || ''),
+            locationVerified: !!school.locationVerified,
+            googleMapsUrl: String(school.googleMapsUrl || ''),
+          });
+          return false;
+        }
+        return true;
+      });
+
+      if (!schoolsToPin.length) continue;
+
+      const { pin, failureReason } = await resolveVillagePin(
+        villageHint,
+        schoolBlock,
+        schoolDistrict,
+      );
+
+      if (!pin) {
+        villagesResolved += 0;
+        for (const school of schoolsToPin) {
+          failed++;
+          results.push({
+            schoolWorkId: String(school.id || ''),
+            schoolName: String(school.schoolName || ''),
+            udise: String(school.udise || ''),
+            villageHint,
+            block: schoolBlock,
+            district: schoolDistrict,
+            status: 'not_found',
+            failureReason: failureReason || 'osm_and_google_miss',
+          });
+        }
+        continue;
+      }
+
+      villagesResolved += 1;
+
+      for (const school of schoolsToPin) {
+        const schoolId = String(school.id || '');
+        const schoolName = String(school.schoolName || '');
+        const udise = String(school.udise || '');
+
+        let pinLat = pin.lat;
+        let pinLng = pin.lng;
+        let formattedAddress = pin.formattedAddress;
+        let queryUsed = pin.queryUsed;
+        let locationConfidence = 'village';
+        let geofenceRadiusM = pin.geofenceRadiusM;
+        let locationSource: string = pin.locationSource;
+        let matchedPlaceName = pin.placeName;
+        let googlePlaceId = '';
+        let googleMapsUrl = pin.googleMapsUrl;
+        let resolutionStep: string = pin.resolutionStep;
+        let matchScore = pin.matchScore;
+
+        if (params.tryExactSchoolUpgrade) {
+          const exact = await tryExactUpgrade(
+            {
+              schoolName,
+              block: schoolBlock,
+              district: schoolDistrict,
+              udise,
+            },
+            undefined,
+            siblingBlocks,
+          );
+          if (exact) {
+            pinLat = exact.lat;
+            pinLng = exact.lng;
+            formattedAddress = exact.formattedAddress;
+            queryUsed = exact.queryUsed;
+            locationConfidence = 'exact';
+            geofenceRadiusM = exact.geofenceRadiusM;
+            locationSource = exact.locationSource;
+            matchedPlaceName = exact.placeName;
+            googlePlaceId = exact.googlePlaceId;
+            googleMapsUrl = exact.googleMapsUrl;
+            resolutionStep = 'school';
+            matchScore = exact.matchScore ?? pin.matchScore;
+          }
+        }
+
+        resolved++;
+        const row: Record<string, unknown> = {
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          villageHint,
+          block: schoolBlock,
+          district: schoolDistrict,
+          status: 'draft',
+          lat: pinLat,
+          lng: pinLng,
+          matchedPlaceName,
+          formattedAddress,
+          googlePlaceId,
+          googleMapsUrl,
+          locationSource,
+          locationConfidence,
+          geofenceRadiusM,
+          queryUsed,
+          matchScore,
+          resolutionStep,
+          locationVerified: false,
+        };
+
+        if (params.saveDraft !== false) {
+          await this.update(schoolId, {
+            lat: pinLat,
+            lng: pinLng,
+            locationVerified: false,
+            locationVerifiedAt: '',
+            locationSource,
+            locationConfidence,
+            geofenceRadiusM,
+            googlePlaceId,
+            googleMapsUrl,
+            matchedPlaceName,
+          });
+        }
+
+        results.push(row);
+      }
+    }
+
+    const nextVillageOffset = villageOffset + batchKeys.length;
+    return {
+      total,
+      totalVillages,
+      resolved,
+      skipped,
+      failed,
+      villagesResolved,
+      results,
+      hasMore: nextVillageOffset < totalVillages,
+      nextVillageOffset,
+      nextOffset: nextVillageOffset,
+      batchProcessed: batchKeys.length,
+    };
+  }
+
+  async patchSchoolLocation(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const school = await this.findById(id);
+    if (!school) {
+      throw new BadRequestException('School record not found.');
+    }
+
+    const lat = Number(patch.lat);
+    const lng = Number(patch.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      throw new BadRequestException('Valid latitude and longitude are required.');
+    }
+
+    const locationConfidence = String(
+      patch.locationConfidence || school.locationConfidence || 'village',
+    );
+    const geofenceRadiusM =
+      Number(patch.geofenceRadiusM) ||
+      (locationConfidence === 'exact' ? 100 : 400);
+
+    const updated = await this.update(id, {
+      lat,
+      lng,
+      locationVerified: false,
+      locationVerifiedAt: '',
+      locationSource: 'manual',
+      locationConfidence,
+      geofenceRadiusM,
+      googleMapsUrl: `https://www.google.com/maps?q=${lat},${lng}`,
+      matchedPlaceName: String(
+        patch.matchedPlaceName || school.matchedPlaceName || school.schoolName || '',
+      ),
+    });
+    if (!updated) {
+      throw new BadRequestException('Failed to update school location.');
+    }
+    return updated;
+  }
+
+  async verifyVillageLocations(params: {
+    block: string;
+    village: string;
+    district?: string;
+  }): Promise<{ updated: number; schools: Record<string, unknown>[] }> {
+    const block = String(params.block || '').trim();
+    const village = String(params.village || '').trim();
+    const district = String(params.district || '').trim();
+    if (!block || !village) {
+      throw new BadRequestException('Block and village are required.');
+    }
+
+    const schools = await this.findSchoolsInBlock(block, district || undefined);
+    const verifiedAt = new Date().toISOString();
+    const updated: Record<string, unknown>[] = [];
+
+    for (const school of schools) {
+      const villageHint = localityHintFromSchoolName(String(school.schoolName || ''));
+      if (villageHint.toLowerCase() !== village.toLowerCase()) continue;
+
+      const lat = Number(school.lat);
+      const lng = Number(school.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+        continue;
+      }
+
+      const row = await this.update(String(school.id), {
+        locationVerified: true,
+        locationVerifiedAt: verifiedAt,
+      });
+      if (row) updated.push(row);
+    }
+
+    return { updated: updated.length, schools: updated };
+  }
+
+  async upgradeSchoolToExact(
+    id: string,
+    siblingBlocks: string[] = [],
+  ): Promise<Record<string, unknown>> {
+    const { tryExactSchoolUpgrade } = await import(
+      '../../common/utils/google-school-place.util'
+    );
+    const school = await this.findById(id);
+    if (!school) {
+      throw new BadRequestException('School record not found.');
+    }
+
+    const exact = await tryExactSchoolUpgrade(
+      {
+        schoolName: String(school.schoolName || ''),
+        block: String(school.block || ''),
+        district: String(school.district || ''),
+        udise: String(school.udise || ''),
+      },
+      undefined,
+      siblingBlocks,
+    );
+
+    if (!exact) {
+      throw new BadRequestException(
+        'Google does not have an exact school listing for this school.',
+      );
+    }
+
+    const updated = await this.update(id, {
+      lat: exact.lat,
+      lng: exact.lng,
+      locationSource: exact.locationSource,
+      locationConfidence: 'exact',
+      geofenceRadiusM: exact.geofenceRadiusM,
+      googlePlaceId: exact.googlePlaceId,
+      googleMapsUrl: exact.googleMapsUrl,
+      matchedPlaceName: exact.placeName,
+      locationVerified: false,
+      locationVerifiedAt: '',
+    });
+    if (!updated) {
+      throw new BadRequestException('Failed to upgrade school location.');
+    }
+    return updated;
+  }
+
+  async searchLocation(query: string): Promise<
+    Array<{ lat: number; lng: number; displayName: string; source: string }>
+  > {
+    const q = String(query || '').trim();
+    if (!q) return [];
+
+    const coordMatch = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (coordMatch) {
+      const lat = Number(coordMatch[1]);
+      const lng = Number(coordMatch[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return [
+          {
+            lat,
+            lng,
+            displayName: `${lat}, ${lng}`,
+            source: 'coordinates',
+          },
+        ];
+      }
+    }
+
+    try {
+      const url = new URL('https://nominatim.openstreetmap.org/search');
+      url.searchParams.set('q', q);
+      url.searchParams.set('format', 'json');
+      url.searchParams.set('limit', '8');
+      url.searchParams.set('countrycodes', 'in');
+      const res = await fetch(url.toString(), {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'FlexHRM-LocationSearch/1.0',
+        },
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as Array<{
+        lat?: string;
+        lon?: string;
+        display_name?: string;
+      }>;
+      return data
+        .map((row) => ({
+          lat: Number(row.lat),
+          lng: Number(row.lon),
+          displayName: String(row.display_name || '').trim(),
+          source: 'osm_nominatim',
+        }))
+        .filter((row) => Number.isFinite(row.lat) && Number.isFinite(row.lng));
+    } catch {
+      return [];
+    }
   }
 
   async verifySchoolLocation(

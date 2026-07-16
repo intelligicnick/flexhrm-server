@@ -5,6 +5,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
 } from '@nestjs/common';
@@ -16,7 +17,14 @@ import { CurrentUsername } from '../../common/decorators/current-user.decorator'
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SchoolPartnersService } from '../school-partners/school-partners.service';
 import { BulkDeleteSchoolWorksDto, BulkUpdateSchoolWorksDto, BulkUpdateWorkdaysDto, DeleteBlockExpenseDto, DistributeBlockExpenseDto } from './dto/school-work-ops.dto';
-import { BulkResolveSchoolLocationsDto, VerifySchoolLocationDto } from './dto/school-location.dto';
+import {
+  BulkAssignVillageLocationsDto,
+  BulkResolveSchoolLocationsDto,
+  LocationSearchDto,
+  PatchSchoolLocationDto,
+  VerifySchoolLocationDto,
+  VerifyVillageLocationsDto,
+} from './dto/school-location.dto';
 
 @Controller('school-works')
 export class SchoolWorksController {
@@ -337,6 +345,96 @@ export class SchoolWorksController {
       },
     });
     return result;
+  }
+
+  @Post('bulk-assign-village-locations')
+  @RequirePermissions('schoolWork', 'edit')
+  async bulkAssignVillageLocations(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkAssignVillageLocationsDto,
+  ) {
+    const result = await this.schoolWorksService.bulkAssignVillageLocations({
+      block: dto.block,
+      district: dto.district,
+      saveDraft: dto.saveDraft !== false,
+      skipExisting: dto.skipExisting !== false,
+      tryExactSchoolUpgrade: dto.tryExactSchoolUpgrade === true,
+      villageLimit: dto.villageLimit,
+      villageOffset: dto.villageOffset ?? dto.offset,
+    });
+    await this.auditLogsService.append({
+      username,
+      action: 'BULK_ASSIGN_VILLAGE_LOCATIONS',
+      target: `Draft-pinned ${result.resolved}/${result.total} school(s) across ${result.villagesResolved} village(s) for block "${dto.block}"${dto.district ? ` (${dto.district})` : ''}.`,
+      details: {
+        block: dto.block,
+        district: dto.district || '',
+        ...result,
+        results: undefined,
+      },
+    });
+    return result;
+  }
+
+  @Post('location-search')
+  @RequirePermissions('schoolWork', 'view')
+  async searchLocation(@Body() dto: LocationSearchDto) {
+    return this.schoolWorksService.searchLocation(dto.query);
+  }
+
+  @Post('verify-village')
+  @RequirePermissions('schoolWork', 'edit')
+  async verifyVillageLocations(
+    @CurrentUsername() username: string,
+    @Body() dto: VerifyVillageLocationsDto,
+  ) {
+    const result = await this.schoolWorksService.verifyVillageLocations({
+      block: dto.block,
+      village: dto.village,
+      district: dto.district,
+    });
+    await this.auditLogsService.append({
+      username,
+      action: 'VERIFY_VILLAGE_LOCATIONS',
+      target: `Verified ${result.updated} school(s) in village "${dto.village}", block "${dto.block}".`,
+      details: { ...dto, ...result, schools: undefined },
+    });
+    return result;
+  }
+
+  @Patch(':id/location')
+  @RequirePermissions('schoolWork', 'edit')
+  async patchSchoolLocation(
+    @CurrentUsername() username: string,
+    @Param('id') id: string,
+    @Body() dto: PatchSchoolLocationDto,
+  ) {
+    const updated = await this.schoolWorksService.patchSchoolLocation(id, {
+      ...dto,
+    } as Record<string, unknown>);
+    await this.auditLogsService.append({
+      username,
+      action: 'PATCH_SCHOOL_LOCATION',
+      target: `Updated draft pin for "${updated.schoolName}" (UDISE: ${updated.udise}).`,
+      details: updated,
+    });
+    return updated;
+  }
+
+  @Post(':id/upgrade-exact-school')
+  @RequirePermissions('schoolWork', 'edit')
+  async upgradeExactSchool(
+    @CurrentUsername() username: string,
+    @Param('id') id: string,
+  ) {
+    const updated = await this.schoolWorksService.upgradeSchoolToExact(id);
+    await this.auditLogsService.append({
+      username,
+      action: 'UPGRADE_EXACT_SCHOOL_LOCATION',
+      target: `Upgraded to exact school pin for "${updated.schoolName}" (UDISE: ${updated.udise}).`,
+      details: updated,
+    });
+    return updated;
   }
 
   @Post(':id/verify-location')

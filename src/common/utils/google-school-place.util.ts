@@ -1,4 +1,5 @@
 import { localityHintFromSchoolName } from './reverse-geocode.util';
+import { placeInExpectedDistrict } from './village-location.util';
 
 export type SchoolPlaceConfidence = 'exact' | 'partial' | 'village' | 'not_found';
 
@@ -213,8 +214,12 @@ export function isUnsafeSchoolPin(school: {
     return true;
   }
 
-  if (formattedAddress && block && district) {
-    if (!placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+  if (formattedAddress && district) {
+    if (confidence === 'village') {
+      if (!placeInExpectedDistrict(formattedAddress, district)) {
+        return true;
+      }
+    } else if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
       return true;
     }
   }
@@ -847,6 +852,34 @@ async function resolveVillagePlace(
     }
   }
   return null;
+}
+
+/** Optional hybrid upgrade: exact Google school (100 m) when listed. */
+export async function tryExactSchoolUpgrade(
+  school: {
+    schoolName?: string;
+    block?: string;
+    district?: string;
+    udise?: string;
+  },
+  apiKey?: string,
+  siblingBlocks: string[] = [],
+): Promise<ResolvedSchoolPlace | null> {
+  const key = String(
+    apiKey ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      process.env.GOOGLE_GEOCODING_API_KEY ||
+      '',
+  ).trim();
+  if (!key) return null;
+
+  const schoolName = String(school.schoolName || '').trim();
+  const block = String(school.block || '').trim();
+  const district = String(school.district || '').trim();
+  const udise = String(school.udise || '').trim();
+  if (!schoolName) return null;
+
+  return searchSchoolPlace(schoolName, block, district, udise, key, siblingBlocks);
 }
 
 export async function resolveSchoolPlace(
