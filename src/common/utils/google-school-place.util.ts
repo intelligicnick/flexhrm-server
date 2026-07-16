@@ -221,7 +221,10 @@ export function isUnsafeSchoolPin(school: {
   const confidence = String(school.locationConfidence || '').trim();
   const siblingBlocks = school.siblingBlocks ?? [];
 
-  if (matchedPlaceName && isAdminPlaceText(matchedPlaceName, block)) {
+  if (isAdminPlaceName(matchedPlaceName, block)) {
+    return true;
+  }
+  if (isAdminPlaceName(formattedAddress, block)) {
     return true;
   }
 
