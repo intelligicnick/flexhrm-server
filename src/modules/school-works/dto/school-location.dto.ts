@@ -51,13 +51,26 @@ export class BulkAssignVillageLocationsDto {
   @IsBoolean()
   tryExactSchoolUpgrade?: boolean;
 
-  /** Villages per request (Hostinger ~20s proxy). Default 2. */
+  /** Schools per request (Hostinger ~20s proxy). Default 2. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  schoolLimit?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  schoolOffset?: number;
+
+  /** @deprecated Use schoolLimit */
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(5)
   villageLimit?: number;
 
+  /** @deprecated Use schoolOffset */
   @IsOptional()
   @IsInt()
   @Min(0)

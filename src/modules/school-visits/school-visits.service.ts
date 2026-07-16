@@ -20,6 +20,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { DataArchiveService } from '../data-archive/data-archive.service';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { uploadEmbeddedPhoto } from '../../common/storage/photo-upload.util';
+import { localityHintFromSchoolName } from '../../common/utils/village-location.util';
 import { CreateSchoolVisitDto } from './dto/school-visit.dto';
 import {
   assertVisitCooldownAllowed,
@@ -377,8 +378,12 @@ export class SchoolVisitsService {
 
     const schoolPin = this.schoolWorksService.getVerifiedSchoolPin(school);
     if (!schoolPin) {
+      const village = localityHintFromSchoolName(String(school.schoolName || ''));
+      const schoolLabel = String(school.schoolName || 'School');
+      const udise = String(school.udise || '').trim();
+      const blockName = String(school.block || '').trim();
       throw new BadRequestException(
-        'This school location is not verified yet, or the saved pin is invalid (e.g. block office). Ask admin to re-resolve the school or village pin before submitting visits.',
+        `${schoolLabel}${village ? ` (village: ${village})` : ''}${udise ? `, UDISE ${udise}` : ''}: school location is not set up yet. Admin must run Pin & Resolve for block ${blockName || 'this block'} in Field Team.`,
       );
     }
 
@@ -452,8 +457,10 @@ export class SchoolVisitsService {
       );
       if (!isWithinGeofence(point.lat, point.lng, schoolPin.lat, schoolPin.lng, schoolPin.radiusM)) {
         const area = geofenceAreaLabel(schoolPin.locationConfidence);
+        const village = localityHintFromSchoolName(String(school.schoolName || ''));
+        const placeLabel = village ? `${village} village` : area;
         throw new BadRequestException(
-          `You are ${Math.round(distance)} m from the ${area} pin. Move within ${schoolPin.radiusM} m of the ${area} to submit this visit.`,
+          `You are ${Math.round(distance)} m from ${placeLabel} (UDISE ${String(school.udise || '')}). Move within ${schoolPin.radiusM} m of the required pin to submit this visit.`,
         );
       }
     }

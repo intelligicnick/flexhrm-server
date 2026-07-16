@@ -359,8 +359,8 @@ export class SchoolWorksController {
       saveDraft: dto.saveDraft !== false,
       skipExisting: dto.skipExisting !== false,
       tryExactSchoolUpgrade: dto.tryExactSchoolUpgrade === true,
-      villageLimit: dto.villageLimit,
-      villageOffset: dto.villageOffset ?? dto.offset,
+      schoolLimit: dto.schoolLimit ?? dto.villageLimit,
+      schoolOffset: dto.schoolOffset ?? dto.villageOffset ?? dto.offset,
     });
     await this.auditLogsService.append({
       username,

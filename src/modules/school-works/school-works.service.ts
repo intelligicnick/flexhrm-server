@@ -10,10 +10,10 @@ import {
   getCurrentTenantId,
   runWithoutTenantScope,
 } from '../../platform/common/tenant-context.store';
+import { coordinatesInBihar } from '../../common/utils/bihar-geography.util';
 import { isUnsafeSchoolPin } from '../../common/utils/google-school-place.util';
 import {
   localityHintFromSchoolName,
-  resolveVillagePin,
 } from '../../common/utils/village-location.util';
 
 
@@ -974,12 +974,35 @@ export class SchoolWorksService {
     };
   }
 
+  private pinSafeForAutoVerify(
+    school: Record<string, unknown>,
+    lat: number,
+    lng: number,
+    matchedPlaceName: string,
+    formattedAddress: string,
+    locationConfidence: string,
+  ): boolean {
+    if (!coordinatesInBihar(lat, lng)) return false;
+    return !isUnsafeSchoolPin({
+      schoolName: String(school.schoolName || ''),
+      matchedPlaceName,
+      formattedAddress,
+      block: String(school.block || ''),
+      district: String(school.district || ''),
+      locationConfidence,
+      lat,
+      lng,
+    });
+  }
+
   async bulkAssignVillageLocations(params: {
     block: string;
     district?: string;
     saveDraft?: boolean;
     skipExisting?: boolean;
     tryExactSchoolUpgrade?: boolean;
+    schoolLimit?: number;
+    schoolOffset?: number;
     villageLimit?: number;
     villageOffset?: number;
     limit?: number;
@@ -997,7 +1020,7 @@ export class SchoolWorksService {
     nextOffset: number;
     batchProcessed: number;
   }> {
-    const { tryExactSchoolUpgrade: tryExactUpgrade } = await import(
+    const { resolveSchoolPlace } = await import(
       '../../common/utils/google-school-place.util'
     );
     const block = String(params.block || '').trim();
@@ -1011,215 +1034,171 @@ export class SchoolWorksService {
       ? await this.listBlocksInDistrict(district)
       : [block];
 
-    type VillageBucket = {
-      villageHint: string;
-      block: string;
-      district: string;
-      schools: Record<string, unknown>[];
-    };
-
-    const villageMap = new Map<string, VillageBucket>();
-    for (const school of allSchools) {
-      const schoolName = String(school.schoolName || '');
-      const villageHint = localityHintFromSchoolName(schoolName) || '';
-      const schoolBlock = String(school.block || block);
-      const schoolDistrict = String(school.district || district);
-      const key = `${schoolBlock}::${schoolDistrict}::${villageHint.toLowerCase()}`;
-      const bucket = villageMap.get(key) ?? {
-        villageHint,
-        block: schoolBlock,
-        district: schoolDistrict,
-        schools: [],
-      };
-      bucket.schools.push(school);
-      villageMap.set(key, bucket);
-    }
-
-    const villageKeys = [...villageMap.keys()].sort((a, b) => a.localeCompare(b));
-    const totalVillages = villageKeys.length;
-    const total = allSchools.length;
-    const villageOffset = Math.max(
-      0,
-      Number(params.villageOffset ?? params.offset) || 0,
+    const villageKeys = new Set(
+      allSchools.map((school) =>
+        localityHintFromSchoolName(String(school.schoolName || '')).toLowerCase(),
+      ),
     );
-    const villageLimit = Math.min(
-      Math.max(Number(params.villageLimit ?? params.limit) || 2, 1),
+    const totalVillages = [...villageKeys].filter(Boolean).length;
+    const total = allSchools.length;
+    const schoolOffset = Math.max(
+      0,
+      Number(params.schoolOffset ?? params.villageOffset ?? params.offset) || 0,
+    );
+    const schoolLimit = Math.min(
+      Math.max(
+        Number(params.schoolLimit ?? params.villageLimit ?? params.limit) || 2,
+        1,
+      ),
       5,
     );
-    const batchKeys = villageKeys.slice(villageOffset, villageOffset + villageLimit);
+    const batchSchools = allSchools.slice(schoolOffset, schoolOffset + schoolLimit);
 
     const results: Array<Record<string, unknown>> = [];
     let resolved = 0;
     let skipped = 0;
     let failed = 0;
     let villagesResolved = 0;
+    const villagesSeen = new Set<string>();
 
-    for (const villageKey of batchKeys) {
-      const bucket = villageMap.get(villageKey)!;
-      const { villageHint, block: schoolBlock, district: schoolDistrict, schools } =
-        bucket;
+    for (const school of batchSchools) {
+      const schoolId = String(school.id || '');
+      const schoolName = String(school.schoolName || '');
+      const udise = String(school.udise || '');
+      const schoolBlock = String(school.block || block);
+      const schoolDistrict = String(school.district || district);
+      const villageHint = localityHintFromSchoolName(schoolName);
 
-      if (!villageHint) {
-        for (const school of schools) {
-          failed++;
-          results.push({
-            schoolWorkId: String(school.id || ''),
-            schoolName: String(school.schoolName || ''),
-            udise: String(school.udise || ''),
-            villageHint: '',
-            block: schoolBlock,
-            district: schoolDistrict,
-            status: 'not_found',
-            failureReason: 'empty_village_hint',
-          });
-        }
-        continue;
-      }
+      const hasPin =
+        Number.isFinite(Number(school.lat)) &&
+        Number.isFinite(Number(school.lng)) &&
+        !(Number(school.lat) === 0 && Number(school.lng) === 0);
 
-      const schoolsToPin = schools.filter((school) => {
-        const hasPin =
-          Number.isFinite(Number(school.lat)) &&
-          Number.isFinite(Number(school.lng)) &&
-          !(Number(school.lat) === 0 && Number(school.lng) === 0);
-        if (params.skipExisting !== false && hasPin) {
-          skipped++;
-          results.push({
-            schoolWorkId: String(school.id || ''),
-            schoolName: String(school.schoolName || ''),
-            udise: String(school.udise || ''),
-            villageHint,
-            block: schoolBlock,
-            district: schoolDistrict,
-            status: 'skipped',
-            lat: Number(school.lat),
-            lng: Number(school.lng),
-            matchedPlaceName: String(school.matchedPlaceName || ''),
-            locationConfidence: String(school.locationConfidence || ''),
-            locationVerified: !!school.locationVerified,
-            googleMapsUrl: String(school.googleMapsUrl || ''),
-          });
-          return false;
-        }
-        return true;
-      });
-
-      if (!schoolsToPin.length) continue;
-
-      const { pin, failureReason } = await resolveVillagePin(
-        villageHint,
-        schoolBlock,
-        schoolDistrict,
-      );
-
-      if (!pin) {
-        villagesResolved += 0;
-        for (const school of schoolsToPin) {
-          failed++;
-          results.push({
-            schoolWorkId: String(school.id || ''),
-            schoolName: String(school.schoolName || ''),
-            udise: String(school.udise || ''),
-            villageHint,
-            block: schoolBlock,
-            district: schoolDistrict,
-            status: 'not_found',
-            failureReason: failureReason || 'osm_and_google_miss',
-          });
-        }
-        continue;
-      }
-
-      villagesResolved += 1;
-
-      for (const school of schoolsToPin) {
-        const schoolId = String(school.id || '');
-        const schoolName = String(school.schoolName || '');
-        const udise = String(school.udise || '');
-
-        let pinLat = pin.lat;
-        let pinLng = pin.lng;
-        let formattedAddress = pin.formattedAddress;
-        let queryUsed = pin.queryUsed;
-        let locationConfidence = 'village';
-        let geofenceRadiusM = pin.geofenceRadiusM;
-        let locationSource: string = pin.locationSource;
-        let matchedPlaceName = pin.placeName;
-        let googlePlaceId = '';
-        let googleMapsUrl = pin.googleMapsUrl;
-        let resolutionStep: string = pin.resolutionStep;
-        let matchScore = pin.matchScore;
-
-        if (params.tryExactSchoolUpgrade) {
-          const exact = await tryExactUpgrade(
-            {
-              schoolName,
-              block: schoolBlock,
-              district: schoolDistrict,
-              udise,
-            },
-            undefined,
-            siblingBlocks,
-          );
-          if (exact) {
-            pinLat = exact.lat;
-            pinLng = exact.lng;
-            formattedAddress = exact.formattedAddress;
-            queryUsed = exact.queryUsed;
-            locationConfidence = 'exact';
-            geofenceRadiusM = exact.geofenceRadiusM;
-            locationSource = exact.locationSource;
-            matchedPlaceName = exact.placeName;
-            googlePlaceId = exact.googlePlaceId;
-            googleMapsUrl = exact.googleMapsUrl;
-            resolutionStep = 'school';
-            matchScore = exact.matchScore ?? pin.matchScore;
-          }
-        }
-
-        resolved++;
-        const row: Record<string, unknown> = {
+      if (params.skipExisting !== false && hasPin && school.locationVerified) {
+        skipped++;
+        results.push({
           schoolWorkId: schoolId,
           schoolName,
           udise,
           villageHint,
           block: schoolBlock,
           district: schoolDistrict,
-          status: 'draft',
-          lat: pinLat,
-          lng: pinLng,
-          matchedPlaceName,
-          formattedAddress,
-          googlePlaceId,
-          googleMapsUrl,
-          locationSource,
-          locationConfidence,
-          geofenceRadiusM,
-          queryUsed,
-          matchScore,
-          resolutionStep,
-          locationVerified: false,
-        };
-
-        if (params.saveDraft !== false) {
-          await this.update(schoolId, {
-            lat: pinLat,
-            lng: pinLng,
-            locationVerified: false,
-            locationVerifiedAt: '',
-            locationSource,
-            locationConfidence,
-            geofenceRadiusM,
-            googlePlaceId,
-            googleMapsUrl,
-            matchedPlaceName,
-          });
-        }
-
-        results.push(row);
+          status: 'skipped',
+          lat: Number(school.lat),
+          lng: Number(school.lng),
+          matchedPlaceName: String(school.matchedPlaceName || ''),
+          locationConfidence: String(school.locationConfidence || ''),
+          locationVerified: true,
+          googleMapsUrl: String(school.googleMapsUrl || ''),
+        });
+        continue;
       }
+
+      const match = await resolveSchoolPlace(
+        {
+          schoolName,
+          block: schoolBlock,
+          district: schoolDistrict,
+          udise,
+        },
+        undefined,
+        siblingBlocks,
+      );
+
+      if (!match) {
+        failed++;
+        results.push({
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          villageHint,
+          block: schoolBlock,
+          district: schoolDistrict,
+          status: 'not_found',
+          failureReason: 'school_and_village_miss',
+        });
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
+
+      const safe = this.pinSafeForAutoVerify(
+        school,
+        match.lat,
+        match.lng,
+        match.placeName,
+        match.formattedAddress,
+        match.locationConfidence,
+      );
+
+      if (!safe) {
+        failed++;
+        results.push({
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          villageHint,
+          block: schoolBlock,
+          district: schoolDistrict,
+          status: 'unsafe_pin',
+          lat: match.lat,
+          lng: match.lng,
+          matchedPlaceName: match.placeName,
+          formattedAddress: match.formattedAddress,
+          failureReason: 'outside_bihar_or_wrong_area',
+        });
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
+
+      resolved++;
+      if (villageHint) villagesSeen.add(villageHint.toLowerCase());
+
+      const verifiedAt = new Date().toISOString();
+      const row: Record<string, unknown> = {
+        schoolWorkId: schoolId,
+        schoolName,
+        udise,
+        villageHint,
+        block: schoolBlock,
+        district: schoolDistrict,
+        status: 'verified',
+        lat: match.lat,
+        lng: match.lng,
+        matchedPlaceName: match.placeName,
+        formattedAddress: match.formattedAddress,
+        googlePlaceId: match.googlePlaceId,
+        googleMapsUrl: match.googleMapsUrl,
+        locationSource: match.locationSource,
+        locationConfidence: match.locationConfidence,
+        geofenceRadiusM: match.geofenceRadiusM,
+        queryUsed: match.queryUsed,
+        matchScore: match.matchScore,
+        resolutionStep: match.resolutionStep,
+        locationVerified: true,
+        locationVerifiedAt: verifiedAt,
+      };
+
+      if (params.saveDraft !== false) {
+        await this.update(schoolId, {
+          lat: match.lat,
+          lng: match.lng,
+          locationVerified: true,
+          locationVerifiedAt: verifiedAt,
+          locationSource: match.locationSource,
+          locationConfidence: match.locationConfidence,
+          geofenceRadiusM: match.geofenceRadiusM,
+          googlePlaceId: match.googlePlaceId,
+          googleMapsUrl: match.googleMapsUrl,
+          matchedPlaceName: match.placeName,
+        });
+      }
+
+      results.push(row);
+      await new Promise((r) => setTimeout(r, 400));
     }
 
-    const nextVillageOffset = villageOffset + batchKeys.length;
+    villagesResolved = villagesSeen.size;
+    const nextSchoolOffset = schoolOffset + batchSchools.length;
     return {
       total,
       totalVillages,
@@ -1228,10 +1207,10 @@ export class SchoolWorksService {
       failed,
       villagesResolved,
       results,
-      hasMore: nextVillageOffset < totalVillages,
-      nextVillageOffset,
-      nextOffset: nextVillageOffset,
-      batchProcessed: batchKeys.length,
+      hasMore: nextSchoolOffset < total,
+      nextVillageOffset: nextSchoolOffset,
+      nextOffset: nextSchoolOffset,
+      batchProcessed: batchSchools.length,
     };
   }
 
