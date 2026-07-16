@@ -1360,35 +1360,15 @@ export class SchoolWorksService {
       }
     }
 
-    try {
-      const url = new URL('https://nominatim.openstreetmap.org/search');
-      url.searchParams.set('q', q);
-      url.searchParams.set('format', 'json');
-      url.searchParams.set('limit', '8');
-      url.searchParams.set('countrycodes', 'in');
-      const res = await fetch(url.toString(), {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'FlexHRM-LocationSearch/1.0',
-        },
-      });
-      if (!res.ok) return [];
-      const data = (await res.json()) as Array<{
-        lat?: string;
-        lon?: string;
-        display_name?: string;
-      }>;
-      return data
-        .map((row) => ({
-          lat: Number(row.lat),
-          lng: Number(row.lon),
-          displayName: String(row.display_name || '').trim(),
-          source: 'osm_nominatim',
-        }))
-        .filter((row) => Number.isFinite(row.lat) && Number.isFinite(row.lng));
-    } catch {
-      return [];
+    const { searchGoogleMapLocations, isGooglePlacesConfigured } = await import(
+      '../../common/utils/google-school-place.util'
+    );
+    if (!isGooglePlacesConfigured()) {
+      throw new BadRequestException(
+        'GOOGLE_PLACES_API_KEY is not set on the backend. Add it in Hostinger hPanel and enable Places API + Geocoding API + Maps JavaScript API.',
+      );
     }
+    return searchGoogleMapLocations(q);
   }
 
   async verifySchoolLocation(

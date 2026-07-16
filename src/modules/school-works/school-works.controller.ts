@@ -16,6 +16,10 @@ import {
 import { CurrentUsername } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SchoolPartnersService } from '../school-partners/school-partners.service';
+import {
+  getGoogleMapsApiKey,
+  isGooglePlacesConfigured,
+} from '../../common/utils/google-school-place.util';
 import { BulkDeleteSchoolWorksDto, BulkUpdateSchoolWorksDto, BulkUpdateWorkdaysDto, DeleteBlockExpenseDto, DistributeBlockExpenseDto } from './dto/school-work-ops.dto';
 import {
   BulkAssignVillageLocationsDto,
@@ -380,6 +384,15 @@ export class SchoolWorksController {
   @RequirePermissions('schoolWork', 'view')
   async searchLocation(@Body() dto: LocationSearchDto) {
     return this.schoolWorksService.searchLocation(dto.query);
+  }
+
+  @Get('maps-config')
+  @RequirePermissions('schoolWork', 'view')
+  getMapsConfig() {
+    return {
+      configured: isGooglePlacesConfigured(),
+      mapsApiKey: getGoogleMapsApiKey(),
+    };
   }
 
   @Post('verify-village')

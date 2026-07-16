@@ -24,11 +24,13 @@ export const SCHOOL_GEOFENCE_VILLAGE_M = 400;
 export const VISIT_MAX_GPS_ACCURACY_M = 50;
 
 export function isGooglePlacesConfigured(): boolean {
-  return Boolean(
-    String(
-      process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_GEOCODING_API_KEY || '',
-    ).trim(),
-  );
+  return Boolean(getGoogleMapsApiKey());
+}
+
+export function getGoogleMapsApiKey(): string {
+  return String(
+    process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_GEOCODING_API_KEY || '',
+  ).trim();
 }
 
 function buildGoogleMapsUrl(lat: number, lng: number, placeId?: string): string {
@@ -603,6 +605,8 @@ async function geocodeAddress(
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('address', address);
     url.searchParams.set('key', apiKey);
+    url.searchParams.set('region', 'in');
+    url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
     const res = await fetch(url.toString());
     if (!res.ok) return null;
     const data = (await res.json()) as {
@@ -937,12 +941,71 @@ export async function resolveSchoolPlace(
       siblingBlocks,
     );
     if (villageMatch) return villageMatch;
-
-    const osmMatch = await resolveVillageOsm(village, block, district, siblingBlocks);
-    if (osmMatch) return osmMatch;
   }
 
   return null;
+}
+
+/** Google-only location search for admin map (Places + Geocode, Bihar). */
+export async function searchGoogleMapLocations(
+  query: string,
+  apiKey?: string,
+): Promise<Array<{ lat: number; lng: number; displayName: string; source: string }>> {
+  const key = String(apiKey || getGoogleMapsApiKey()).trim();
+  if (!key) return [];
+
+  const q = String(query || '').trim();
+  if (!q) return [];
+
+  const seen = new Set<string>();
+  const results: Array<{ lat: number; lng: number; displayName: string; source: string }> = [];
+
+  const push = (
+    lat: number,
+    lng: number,
+    displayName: string,
+    source: string,
+  ) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (!coordinatesInBihar(lat, lng)) return;
+    const dedupeKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    results.push({
+      lat,
+      lng,
+      displayName: displayName.trim() || `${lat}, ${lng}`,
+      source,
+    });
+  };
+
+  const textQuery = q.toLowerCase().includes('bihar')
+    ? q
+    : `${q}, Bihar, India`;
+
+  for await (const place of searchGooglePlacesCandidates(textQuery, key)) {
+    push(
+      place.lat,
+      place.lng,
+      place.formattedAddress || place.placeName,
+      'google_places',
+    );
+    if (results.length >= 8) break;
+  }
+
+  if (results.length < 8) {
+    const geocoded = await geocodeAddress(textQuery, key);
+    if (geocoded) {
+      push(
+        geocoded.lat,
+        geocoded.lng,
+        geocoded.formattedAddress,
+        'google_geocode',
+      );
+    }
+  }
+
+  return results.slice(0, 8);
 }
 
 /** Many schools at one pin usually means block office — flag for admin review. */
