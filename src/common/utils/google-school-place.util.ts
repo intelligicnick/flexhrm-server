@@ -914,7 +914,6 @@ export async function resolveSchoolPlace(
       process.env.GOOGLE_GEOCODING_API_KEY ||
       '',
   ).trim();
-  if (!key) return null;
 
   const schoolName = String(school.schoolName || '').trim();
   const block = String(school.block || '').trim();
@@ -923,27 +922,37 @@ export async function resolveSchoolPlace(
   if (!schoolName) return null;
 
   // 1) Exact school on Google (100 m) — supervisor at the school building.
-  const schoolMatch = await searchSchoolPlace(
-    schoolName,
-    block,
-    district,
-    udise,
-    key,
-    siblingBlocks,
-  );
-  if (schoolMatch) return schoolMatch;
-
-  // 2) Village from school title (400 m) — supervisor in that village, not at block HQ.
-  const village = localityHintFromSchoolName(schoolName);
-  if (village && village.toLowerCase() !== block.toLowerCase()) {
-    const villageMatch = await resolveVillagePlace(
-      village,
+  if (key) {
+    const schoolMatch = await searchSchoolPlace(
+      schoolName,
       block,
       district,
+      udise,
       key,
       siblingBlocks,
     );
-    if (villageMatch) return villageMatch;
+    if (schoolMatch) return schoolMatch;
+  }
+
+  // 2–3) Village from school title (400 m) — Google strict, then OSM + relaxed district match.
+  const village = localityHintFromSchoolName(schoolName);
+  if (village && village.toLowerCase() !== block.toLowerCase()) {
+    if (key) {
+      const villageMatch = await resolveVillagePlace(
+        village,
+        block,
+        district,
+        key,
+        siblingBlocks,
+      );
+      if (villageMatch) return villageMatch;
+    }
+
+    const { resolveVillagePin, villagePinToSchoolPlace } = await import(
+      './village-location.util'
+    );
+    const { pin } = await resolveVillagePin(village, block, district, key);
+    if (pin) return villagePinToSchoolPlace(pin);
   }
 
   return null;
