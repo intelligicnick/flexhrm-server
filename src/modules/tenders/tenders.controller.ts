@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -9,10 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { TendersService } from './tenders.service';
-import {
-  RequirePermissions,
-  SuperAdminOnly,
-} from '../../common/decorators/auth.decorators';
+import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   AdminSessionPayload,
@@ -85,10 +83,19 @@ export class TendersController {
   }
 
   @Post('bulk-permanent-delete')
-  @SuperAdminOnly()
   @RequirePermissions('bids', 'delete')
-  bulkPermanentDelete(@Body() dto: BulkDeleteTenderDto) {
-    return this.tendersService.bulkPermanentDelete(dto.ids || []);
+  bulkPermanentDelete(
+    @Body() dto: BulkDeleteTenderDto,
+    @CurrentUser() user: AdminSessionPayload,
+  ) {
+    if (!isSuperAdminSession(user)) {
+      throw new ForbiddenException(
+        'Only super-administrators can permanently delete tenders.',
+      );
+    }
+    return this.tendersService.bulkPermanentDelete(dto.ids || [], {
+      allowMissedParticipation: true,
+    });
   }
 
   @Post('duplicate-check')
@@ -112,10 +119,19 @@ export class TendersController {
   }
 
   @Delete(':id/permanent')
-  @SuperAdminOnly()
   @RequirePermissions('bids', 'delete')
-  async permanentRemove(@Param('id') id: string) {
-    await this.tendersService.permanentDelete(id);
+  async permanentRemove(
+    @Param('id') id: string,
+    @CurrentUser() user: AdminSessionPayload,
+  ) {
+    if (!isSuperAdminSession(user)) {
+      throw new ForbiddenException(
+        'Only super-administrators can permanently delete tenders.',
+      );
+    }
+    await this.tendersService.permanentDelete(id, {
+      allowMissedParticipation: true,
+    });
     return { success: true };
   }
 

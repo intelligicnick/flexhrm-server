@@ -436,12 +436,21 @@ export class TendersService {
     await doc.save();
   }
 
-  async permanentDelete(id: string): Promise<void> {
+  async permanentDelete(
+    id: string,
+    options?: { allowMissedParticipation?: boolean },
+  ): Promise<void> {
     const doc = await this.tenderModel.findOne({ id }).exec();
     if (!doc) throw new NotFoundException('Tender not found.');
-    if (!doc.deletedAt?.trim()) {
+    const softDeleted = Boolean(doc.deletedAt?.trim());
+    const missedAllowed =
+      Boolean(options?.allowMissedParticipation) &&
+      this.isMissedParticipation(doc);
+    if (!softDeleted && !missedAllowed) {
       throw new BadRequestException(
-        'Only soft-deleted tenders can be permanently removed.',
+        options?.allowMissedParticipation
+          ? 'Only soft-deleted or missed (locked) tenders can be permanently removed.'
+          : 'Only soft-deleted tenders can be permanently removed.',
       );
     }
     await this.tenderModel.deleteOne({ id }).exec();
@@ -449,6 +458,7 @@ export class TendersService {
 
   async bulkPermanentDelete(
     ids: string[],
+    options?: { allowMissedParticipation?: boolean },
   ): Promise<{ deleted: number; errors: string[] }> {
     const tenderIds = Array.from(
       new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
@@ -462,7 +472,7 @@ export class TendersService {
 
     for (const id of tenderIds) {
       try {
-        await this.permanentDelete(id);
+        await this.permanentDelete(id, options);
         deleted += 1;
       } catch (err) {
         errors.push(
