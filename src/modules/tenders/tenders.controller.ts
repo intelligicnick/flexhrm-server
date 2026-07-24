@@ -13,6 +13,11 @@ import {
   RequirePermissions,
   SuperAdminOnly,
 } from '../../common/decorators/auth.decorators';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  AdminSessionPayload,
+  isSuperAdminSession,
+} from '../../common/utils/permissions.util';
 import {
   BulkDeleteTenderDto,
   BulkImportTenderDto,
@@ -70,8 +75,13 @@ export class TendersController {
 
   @Post('bulk-delete')
   @RequirePermissions('bids', 'delete')
-  bulkDelete(@Body() dto: BulkDeleteTenderDto) {
-    return this.tendersService.bulkDelete(dto.ids || []);
+  bulkDelete(
+    @Body() dto: BulkDeleteTenderDto,
+    @CurrentUser() user: AdminSessionPayload,
+  ) {
+    return this.tendersService.bulkDelete(dto.ids || [], {
+      allowMissedParticipation: isSuperAdminSession(user),
+    });
   }
 
   @Post('bulk-permanent-delete')
@@ -111,8 +121,13 @@ export class TendersController {
 
   @Delete(':id')
   @RequirePermissions('bids', 'delete')
-  async remove(@Param('id') id: string) {
-    await this.tendersService.delete(id);
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AdminSessionPayload,
+  ) {
+    await this.tendersService.delete(id, {
+      allowMissedParticipation: isSuperAdminSession(user),
+    });
     return { success: true };
   }
 }

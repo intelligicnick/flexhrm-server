@@ -418,10 +418,16 @@ export class TendersService {
     return this.toPlain(doc);
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(
+    id: string,
+    options?: { allowMissedParticipation?: boolean },
+  ): Promise<void> {
     const doc = await this.tenderModel.findOne({ id }).exec();
     if (!doc) throw new NotFoundException('Tender not found.');
-    if (this.isMissedParticipation(doc)) {
+    if (
+      this.isMissedParticipation(doc) &&
+      !options?.allowMissedParticipation
+    ) {
       throw new BadRequestException(
         'Deadline passed without participation — tender cannot be deleted.',
       );
@@ -499,7 +505,10 @@ export class TendersService {
     return { updated, errors: errors.slice(0, 20) };
   }
 
-  async bulkDelete(ids: string[]): Promise<{ deleted: number; errors: string[] }> {
+  async bulkDelete(
+    ids: string[],
+    options?: { allowMissedParticipation?: boolean },
+  ): Promise<{ deleted: number; errors: string[] }> {
     const tenderIds = Array.from(
       new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
     );
@@ -512,7 +521,7 @@ export class TendersService {
 
     for (const id of tenderIds) {
       try {
-        await this.delete(id);
+        await this.delete(id, options);
         deleted += 1;
       } catch (err) {
         errors.push(

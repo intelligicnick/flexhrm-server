@@ -17,6 +17,16 @@ export interface AdminSessionPayload {
   impersonated?: boolean;
 }
 
+/** Root admin username or role named `admin` (full permissions). */
+export function isSuperAdminSession(
+  user: Pick<AdminSessionPayload, 'username' | 'role'> | null | undefined,
+): boolean {
+  if (!user) return false;
+  const username = String(user.username || '').trim().toLowerCase();
+  const role = String(user.role || '').trim().toLowerCase();
+  return username === 'admin' || role === 'admin' || !role;
+}
+
 export interface RoleDocumentLike {
   name: string;
   permissions?: Partial<Record<PermissionModule, { view?: boolean; edit?: boolean; delete?: boolean }>>;
