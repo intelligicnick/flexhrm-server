@@ -329,7 +329,7 @@ export class SchoolWorksController {
       block: dto.block,
       district: dto.district,
       saveVerified: dto.saveVerified === true,
-      skipExisting: dto.skipExisting !== false,
+      skipExisting: dto.skipExisting === true,
       limit: dto.limit,
       offset: dto.offset,
     });
@@ -357,7 +357,7 @@ export class SchoolWorksController {
       block: dto.block,
       district: dto.district,
       saveDraft: dto.saveDraft !== false,
-      skipExisting: dto.skipExisting !== false,
+      skipExisting: dto.skipExisting === true,
       tryExactSchoolUpgrade: dto.tryExactSchoolUpgrade === true,
       schoolLimit: dto.schoolLimit ?? dto.villageLimit,
       schoolOffset: dto.schoolOffset ?? dto.villageOffset ?? dto.offset,

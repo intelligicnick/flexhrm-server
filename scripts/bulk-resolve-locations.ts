@@ -33,7 +33,7 @@ function parseArgs(argv: string[]) {
       ? 'api'
       : 'direct';
   const all = argv.includes('--all');
-  const skipExisting = !argv.includes('--replace');
+  const skipExisting = argv.includes('--skip-verified');
   const district = argv.includes('--district')
     ? String(argv[argv.indexOf('--district') + 1] || '').trim()
     : '';
@@ -127,6 +127,21 @@ async function loginApiSession(log: (s: string) => void): Promise<{
   return { cookieHeader, csrfToken };
 }
 
+function logBatchResults(
+  rows: unknown,
+  log: (s: string) => void,
+) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const name = String(r.schoolName || r.schoolWorkId || '?');
+    const status = String(r.status || '?');
+    const reason = String(r.message || r.failureReason || r.successReason || '');
+    log(`  · ${name}: ${status}${reason ? ` — ${reason}` : ''}`);
+  }
+}
+
 async function resolveBlockViaApi(
   job: BlockJob,
   opts: { skipExisting: boolean; schoolLimit: number },
@@ -171,6 +186,7 @@ async function resolveBlockViaApi(
     log(
       `${job.district}/${job.block}: ${Math.min(offset, total)}/${total} — resolved ${resolved}, skipped ${skipped}, failed ${failed}`,
     );
+    logBatchResults(data.results, log);
 
     if (!data.hasMore) break;
     await new Promise((r) => setTimeout(r, 300));
@@ -231,6 +247,7 @@ async function resolveBlockDirect(
       log(
         `${job.district}/${job.block}: ${Math.min(offset, total)}/${total} — resolved ${resolved}, skipped ${skipped}, failed ${failed}`,
       );
+      logBatchResults(data.results, log);
 
       if (!data.hasMore) break;
       await new Promise((r) => setTimeout(r, 300));

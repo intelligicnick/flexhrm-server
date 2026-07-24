@@ -17,12 +17,12 @@ export type ResolvedVillagePin = {
   placeName: string;
   formattedAddress: string;
   googleMapsUrl: string;
-  locationSource: 'osm_nominatim' | 'google_geocode' | 'google_places';
+  locationSource: 'osm_nominatim' | 'google_geocode' | 'google_places' | 'onefivenine';
   locationConfidence: 'village';
   geofenceRadiusM: number;
   queryUsed: string;
   matchScore: number;
-  resolutionStep: 'osm_village' | 'village';
+  resolutionStep: 'osm_village' | 'village' | 'onefivenine_village' | 'onefivenine_direct' | 'block_cache' | 'google_combo' | 'osm_combo';
 };
 
 export type VillagePinFailureReason =
@@ -242,6 +242,128 @@ function toVillagePin(
   };
 }
 
+async function reverseGeocodeLatLng(
+  lat: number,
+  lng: number,
+  apiKey: string,
+): Promise<{ formattedAddress: string; placeName: string } | null> {
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('latlng', `${lat},${lng}`);
+    url.searchParams.set('key', apiKey);
+    url.searchParams.set('region', 'in');
+    const res = await fetch(url.toString());
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      status?: string;
+      results?: Array<{
+        formatted_address?: string;
+        address_components?: Array<{ long_name?: string; types?: string[] }>;
+      }>;
+    };
+    if (data.status !== 'OK' || !data.results?.length) return null;
+    const result = data.results[0];
+    const formattedAddress = String(result.formatted_address || '').trim();
+    const locality =
+      result.address_components?.find((c) =>
+        (c.types || []).some((t) =>
+          ['locality', 'village', 'hamlet', 'neighbourhood', 'sublocality'].includes(t),
+        ),
+      )?.long_name || '';
+    return {
+      formattedAddress,
+      placeName: String(locality || formattedAddress.split(',')[0] || '').trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Confirm external coords via Google reverse geocode; enrich place name when district matches. */
+export async function enrichPinWithGoogleReverseGeocode(
+  pin: ResolvedVillagePin,
+  village: string,
+  district: string,
+  block: string,
+  apiKey?: string,
+): Promise<ResolvedVillagePin> {
+  const key = String(
+    apiKey ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      process.env.GOOGLE_GEOCODING_API_KEY ||
+      '',
+  ).trim();
+  if (!key) return pin;
+
+  const reversed = await reverseGeocodeLatLng(pin.lat, pin.lng, key);
+  if (!reversed) return pin;
+
+  const haystack = normalizeToken(`${reversed.placeName} ${reversed.formattedAddress}`);
+  const villageNorm = normalizeToken(village);
+  const districtNorm = normalizeToken(district);
+
+  if (districtNorm && !tokenInHaystackLocal(districtNorm, haystack)) return pin;
+  if (villageNorm && !villageNameInResult(village, reversed.placeName, reversed.formattedAddress)) {
+    return pin;
+  }
+  if (!placeInExpectedAdminArea(reversed.formattedAddress, district, block)) return pin;
+
+  return {
+    ...pin,
+    placeName: reversed.placeName || pin.placeName,
+    formattedAddress: reversed.formattedAddress || pin.formattedAddress,
+    googleMapsUrl: buildGoogleMapsUrl(pin.lat, pin.lng),
+  };
+}
+
+/** Try OSM then Google for one village name combo. */
+export async function resolveOsmVillageCombo(
+  village: string,
+  block: string,
+  district: string,
+): Promise<ResolvedVillagePin | null> {
+  const villageNorm = String(village || '').trim();
+  if (!villageNorm || villageNorm.length < 3) return null;
+
+  for (const query of buildVillageQueries(villageNorm, block, district)) {
+    const osmResults = await searchNominatimForward(query);
+    let bestOsm: { lat: number; lng: number; displayName: string; score: number } | null = null;
+
+    for (const result of osmResults) {
+      const score = scoreRelaxedVillageCandidate(
+        result.displayName,
+        result.displayName,
+        villageNorm,
+        block,
+        district,
+        result.lat,
+        result.lng,
+      );
+      if (score < 0) continue;
+      if (!bestOsm || score > bestOsm.score) {
+        bestOsm = { ...result, score };
+      }
+    }
+
+    if (bestOsm) {
+      return toVillagePin(
+        bestOsm.lat,
+        bestOsm.lng,
+        villageNorm,
+        bestOsm.displayName,
+        'osm_nominatim',
+        query,
+        bestOsm.score,
+        'osm_combo',
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  return null;
+}
+
 /** Primary village-first resolver: OSM → Google geocode. District-only validation. */
 export async function resolveVillagePin(
   village: string,
@@ -345,7 +467,7 @@ export function villagePinToSchoolPlace(pin: ResolvedVillagePin): {
   geofenceRadiusM: number;
   queryUsed: string;
   matchScore?: number;
-  resolutionStep?: 'osm_village' | 'village';
+  resolutionStep?: 'osm_village' | 'village' | 'onefivenine_village' | 'onefivenine_direct' | 'block_cache' | 'google_combo' | 'osm_combo';
 } {
   return {
     lat: pin.lat,

@@ -1,8 +1,43 @@
 import { coordinatesInBihar } from './bihar-geography.util';
 import { localityHintFromSchoolName } from './reverse-geocode.util';
+import { villageSearchCombinationsFromSchoolName } from './onefivenine-village.util';
 import { placeInExpectedDistrict } from './village-location.util';
 
 export type SchoolPlaceConfidence = 'exact' | 'partial' | 'village' | 'not_found';
+
+export type SchoolResolveFailureReason =
+  | 'empty_school_name'
+  | 'google_not_configured'
+  | 'school_not_on_google'
+  | 'village_not_found'
+  | 'no_village_in_name'
+  | 'school_and_village_miss'
+  | 'outside_bihar'
+  | 'wrong_admin_area'
+  | 'unsafe_match';
+
+export type SchoolResolveSuccessReason =
+  | 'school_on_dramitkumar'
+  | 'school_on_schools_org_in'
+  | 'school_on_google'
+  | 'school_relaxed_google'
+  | 'village_on_onefivenine'
+  | 'village_on_onefivenine_direct'
+  | 'village_from_block_cache'
+  | 'village_on_google'
+  | 'village_on_google_combo'
+  | 'village_on_osm'
+  | 'village_on_osm_combo'
+  | 'already_verified';
+
+export type SchoolResolveOutcome = {
+  match: ResolvedSchoolPlace | null;
+  successReason?: SchoolResolveSuccessReason;
+  failureReason?: SchoolResolveFailureReason;
+  message: string;
+  stepsTried: string[];
+  villageHint: string;
+};
 
 export type ResolvedSchoolPlace = {
   lat: number;
@@ -11,12 +46,29 @@ export type ResolvedSchoolPlace = {
   formattedAddress: string;
   googlePlaceId: string;
   googleMapsUrl: string;
-  locationSource: 'google_places' | 'google_geocode' | 'village_fallback' | 'osm_nominatim';
+  locationSource:
+    | 'google_places'
+    | 'google_geocode'
+    | 'village_fallback'
+    | 'osm_nominatim'
+    | 'onefivenine'
+    | 'dramitkumar'
+    | 'schools_org_in';
   locationConfidence: SchoolPlaceConfidence;
   geofenceRadiusM: number;
   queryUsed: string;
   matchScore?: number;
-  resolutionStep?: 'school' | 'village' | 'osm_village';
+  resolutionStep?:
+    | 'school'
+    | 'village'
+    | 'osm_village'
+    | 'onefivenine_village'
+    | 'onefivenine_direct'
+    | 'block_cache'
+    | 'google_combo'
+    | 'osm_combo'
+    | 'dramitkumar_registry'
+    | 'schools_org_in_registry';
 };
 
 export const SCHOOL_GEOFENCE_EXACT_M = 100;
@@ -31,6 +83,20 @@ export function getGoogleMapsApiKey(): string {
   return String(
     process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_GEOCODING_API_KEY || '',
   ).trim();
+}
+
+/** Browser-restricted key for Maps JavaScript API (supervisor APK / admin web). */
+export function getGoogleMapsJsApiKey(): string {
+  return String(
+    process.env.GOOGLE_MAPS_JS_API_KEY ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      process.env.GOOGLE_GEOCODING_API_KEY ||
+      '',
+  ).trim();
+}
+
+export function isGoogleMapsJsConfigured(): boolean {
+  return Boolean(getGoogleMapsJsApiKey());
 }
 
 function buildGoogleMapsUrl(lat: number, lng: number, placeId?: string): string {
@@ -447,6 +513,107 @@ function isExactSchoolType(types: string[] | undefined): boolean {
   return types.some((t) => exactSchoolTypes.has(t));
 }
 
+function isSchoolLikeType(types: string[] | undefined): boolean {
+  if (!types?.length) return false;
+  const schoolLikeTypes = new Set([
+    'school',
+    'primary_school',
+    'secondary_school',
+    'university',
+    'establishment',
+    'point_of_interest',
+  ]);
+  return types.some((t) => schoolLikeTypes.has(t));
+}
+
+function placeLooksLikeSchool(haystack: string): boolean {
+  return /\b(school|vidyalaya|vidyalay|college|education)\b/.test(haystack);
+}
+
+export function describeResolveMessage(
+  successReason?: SchoolResolveSuccessReason,
+  failureReason?: SchoolResolveFailureReason,
+  extras?: { villageHint?: string; placeName?: string; block?: string; district?: string },
+): string {
+  if (successReason === 'already_verified') {
+    return 'Already verified — pin kept unchanged';
+  }
+  if (successReason === 'school_on_dramitkumar') {
+    return `School pin from schoolinfo.dramitkumar.in (UDISE) in ${extras?.block || 'block'} — 100 m geofence (verify on map)`;
+  }
+  if (successReason === 'school_on_schools_org_in') {
+    return `School pin from schools.org.in (UDISE) in ${extras?.block || 'block'} — 100 m geofence (verify on map)`;
+  }
+  if (successReason === 'school_on_google') {
+    return `Exact school found on Google in ${extras?.block || 'block'}${extras?.district ? `, ${extras.district}` : ''}`;
+  }
+  if (successReason === 'school_relaxed_google') {
+    return `School matched on Google (relaxed type check) in ${extras?.block || 'block'}`;
+  }
+  if (successReason === 'village_on_onefivenine') {
+    return `Village "${extras?.villageHint || 'from name'}" found on onefivenine.com (${extras?.block || 'block'}) — coords verified in Bihar (400 m)`;
+  }
+  if (successReason === 'village_on_onefivenine_direct') {
+    return `Village "${extras?.villageHint || 'from name'}" found via direct onefivenine.com URL in ${extras?.block || 'block'} (400 m)`;
+  }
+  if (successReason === 'village_from_block_cache') {
+    return `Village "${extras?.villageHint || 'from name'}" reused from earlier resolve in this block (400 m)`;
+  }
+  if (successReason === 'village_on_google_combo') {
+    return `Village "${extras?.villageHint || 'from name'}" matched on Google using school-name combinations (400 m)`;
+  }
+  if (successReason === 'village_on_google') {
+    return `School not listed — village "${extras?.villageHint || 'from name'}" pinned via Google (400 m)`;
+  }
+  if (successReason === 'village_on_osm') {
+    return `Google missed hamlet — village "${extras?.villageHint || 'from name'}" pinned via OpenStreetMap (400 m)`;
+  }
+  if (successReason === 'village_on_osm_combo') {
+    return `Village "${extras?.villageHint || 'from name'}" found on OpenStreetMap via name combinations (400 m)`;
+  }
+
+  if (failureReason === 'empty_school_name') return 'School name is empty — cannot resolve';
+  if (failureReason === 'google_not_configured') {
+    return 'Google Places API key is not configured on the backend';
+  }
+  if (failureReason === 'no_village_in_name') {
+    return 'Could not parse a village name from the school title for fallback lookup';
+  }
+  if (failureReason === 'school_not_on_google') {
+    return `School not found on Google in ${extras?.block || 'block'} — village fallback also failed`;
+  }
+  if (failureReason === 'village_not_found') {
+    return `Village "${extras?.villageHint || 'from name'}" not found on Google or OpenStreetMap in this block`;
+  }
+  if (failureReason === 'school_and_village_miss') {
+    return `No match on Google or OpenStreetMap for school or village "${extras?.villageHint || 'from name'}" in ${extras?.block || 'block'}`;
+  }
+  if (failureReason === 'outside_bihar') {
+    return `Pin is outside Bihar${extras?.placeName ? ` (${extras.placeName})` : ''} — rejected`;
+  }
+  if (failureReason === 'wrong_admin_area') {
+    return `Google pin is in the wrong block/district for ${extras?.block || 'this block'}`;
+  }
+  if (failureReason === 'unsafe_match') {
+    return `Match looks unsafe (block office or wrong village) — needs manual pin`;
+  }
+  return 'Resolve failed';
+}
+
+export function unsafePinFailureReason(
+  lat: number,
+  lng: number,
+  formattedAddress: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): SchoolResolveFailureReason {
+  if (!coordinatesInBihar(lat, lng)) return 'outside_bihar';
+  const adminMismatch = adminAreaMismatchReason(formattedAddress, block, district, siblingBlocks);
+  if (adminMismatch) return 'wrong_admin_area';
+  return 'unsafe_match';
+}
+
 async function* searchGooglePlacesCandidates(
   textQuery: string,
   apiKey: string,
@@ -511,8 +678,13 @@ function pickBestSchoolPlace(
   block: string,
   district: string,
   siblingBlocks: string[] = [],
-): { match: (typeof candidates)[number]; score: number } | null {
-  let best: { match: (typeof candidates)[number]; score: number } | null = null;
+): {
+  match: (typeof candidates)[number];
+  score: number;
+  relaxed?: boolean;
+} | null {
+  let strictBest: { match: (typeof candidates)[number]; score: number } | null = null;
+  let relaxedBest: { match: (typeof candidates)[number]; score: number } | null = null;
 
   for (const candidate of candidates) {
     const score = scoreSchoolCandidate(
@@ -522,14 +694,30 @@ function pickBestSchoolPlace(
       district,
       siblingBlocks,
     );
-    if (score < 50) continue;
-    if (!isExactSchoolType(candidate.types)) continue;
-    if (!best || score > best.score) {
-      best = { match: candidate, score };
+    if (score < 45) continue;
+
+    const haystack = placeText(candidate.placeName, candidate.formattedAddress);
+
+    if (score >= 50 && isExactSchoolType(candidate.types)) {
+      if (!strictBest || score > strictBest.score) {
+        strictBest = { match: candidate, score };
+      }
+      continue;
+    }
+
+    const relaxedOk =
+      score >= 55 &&
+      (isSchoolLikeType(candidate.types) || placeLooksLikeSchool(haystack));
+    if (relaxedOk) {
+      if (!relaxedBest || score > relaxedBest.score) {
+        relaxedBest = { match: candidate, score };
+      }
     }
   }
 
-  return best;
+  if (strictBest) return { ...strictBest, relaxed: false };
+  if (relaxedBest) return { ...relaxedBest, relaxed: true };
+  return null;
 }
 
 function pickVillagePlace(
@@ -658,9 +846,11 @@ function toResolvedPlace(
     locationSource,
     locationConfidence,
     geofenceRadiusM:
-      locationConfidence === 'exact'
-        ? SCHOOL_GEOFENCE_EXACT_M
-        : SCHOOL_GEOFENCE_VILLAGE_M,
+      extras?.resolutionStep === 'village' ||
+      extras?.resolutionStep === 'osm_village' ||
+      locationConfidence === 'village'
+        ? SCHOOL_GEOFENCE_VILLAGE_M
+        : SCHOOL_GEOFENCE_EXACT_M,
     queryUsed,
     matchScore: extras?.matchScore,
     resolutionStep: extras?.resolutionStep,
@@ -687,19 +877,47 @@ async function searchSchoolPlace(
       district,
       siblingBlocks,
     );
-    if (!picked) continue;
+    if (picked) {
+      return toResolvedPlace(
+        picked.match.lat,
+        picked.match.lng,
+        picked.match.placeName || schoolName,
+        picked.match.formattedAddress,
+        picked.match.placeId,
+        'google_places',
+        picked.relaxed ? 'partial' : 'exact',
+        query,
+        { matchScore: picked.score, resolutionStep: 'school' },
+      );
+    }
 
-    return toResolvedPlace(
-      picked.match.lat,
-      picked.match.lng,
-      picked.match.placeName || schoolName,
-      picked.match.formattedAddress,
-      picked.match.placeId,
-      'google_places',
-      'exact',
-      query,
-      { matchScore: picked.score, resolutionStep: 'school' },
-    );
+    const geocoded = await geocodeAddress(query, apiKey);
+    if (geocoded) {
+      const score = scoreSchoolCandidate(
+        {
+          placeName: schoolName,
+          formattedAddress: geocoded.formattedAddress,
+          types: ['school'],
+        },
+        schoolName,
+        block,
+        district,
+        siblingBlocks,
+      );
+      if (score >= 45 && placeInExpectedAdminArea(geocoded.formattedAddress, block, district, siblingBlocks)) {
+        return toResolvedPlace(
+          geocoded.lat,
+          geocoded.lng,
+          schoolName,
+          geocoded.formattedAddress,
+          '',
+          'google_geocode',
+          'partial',
+          query,
+          { matchScore: score, resolutionStep: 'school' },
+        );
+      }
+    }
   }
 
   return null;
@@ -870,6 +1088,27 @@ async function resolveVillagePlace(
   return null;
 }
 
+/** Google Places + geocode for a single village name in this block. */
+export async function resolveGoogleVillageByName(
+  village: string,
+  block: string,
+  district: string,
+  apiKey: string,
+  siblingBlocks: string[] = [],
+): Promise<ResolvedSchoolPlace | null> {
+  return resolveVillagePlace(village, block, district, apiKey, siblingBlocks);
+}
+
+/** OSM Nominatim for a single village name in this block. */
+export async function resolveOsmVillageByName(
+  village: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): Promise<ResolvedSchoolPlace | null> {
+  return resolveVillageOsm(village, block, district, siblingBlocks);
+}
+
 /** Optional hybrid upgrade: exact Google school (100 m) when listed. */
 export async function tryExactSchoolUpgrade(
   school: {
@@ -898,7 +1137,7 @@ export async function tryExactSchoolUpgrade(
   return searchSchoolPlace(schoolName, block, district, udise, key, siblingBlocks);
 }
 
-export async function resolveSchoolPlace(
+export async function resolveSchoolPlaceDetailed(
   school: {
     schoolName?: string;
     block?: string;
@@ -907,7 +1146,8 @@ export async function resolveSchoolPlace(
   },
   apiKey?: string,
   siblingBlocks: string[] = [],
-): Promise<ResolvedSchoolPlace | null> {
+  options?: { villageCache?: import('./village-resolve-orchestrator.util').BlockVillageCache },
+): Promise<SchoolResolveOutcome> {
   const key = String(
     apiKey ||
       process.env.GOOGLE_PLACES_API_KEY ||
@@ -919,10 +1159,51 @@ export async function resolveSchoolPlace(
   const block = String(school.block || '').trim();
   const district = String(school.district || '').trim();
   const udise = String(school.udise || '').trim();
-  if (!schoolName) return null;
+  const villageHint = localityHintFromSchoolName(schoolName);
+  const stepsTried: string[] = [];
+  const extras = { villageHint, block, district };
 
-  // 1) Exact school on Google (100 m) — supervisor at the school building.
-  if (key) {
+  // Step 0: Bihar school registries with UDISE + GPS (dramitkumar.in, then schools.org.in).
+  if (udise && district && block) {
+    stepsTried.push('external_registry_udise');
+    const { lookupExternalSchoolRegistry, externalRecordToResolvedPlace } = await import(
+      './external-school-registry.util'
+    );
+    const external = await lookupExternalSchoolRegistry({ udise, district, block });
+    if (external) {
+      const match = externalRecordToResolvedPlace(external, block, district);
+      const successReason: SchoolResolveSuccessReason =
+        external.source === 'dramitkumar' ? 'school_on_dramitkumar' : 'school_on_schools_org_in';
+      return {
+        match,
+        successReason,
+        message: describeResolveMessage(successReason, undefined, {
+          ...extras,
+          placeName: match.placeName,
+          villageHint: external.village || villageHint,
+        }),
+        stepsTried,
+        villageHint: external.village || villageHint,
+      };
+    }
+    stepsTried.push('external_registry_miss');
+  }
+
+  if (!schoolName) {
+    return {
+      match: null,
+      failureReason: 'empty_school_name',
+      message: describeResolveMessage(undefined, 'empty_school_name', extras),
+      stepsTried,
+      villageHint,
+    };
+  }
+
+  if (!key) {
+    stepsTried.push('google_not_configured_school_skipped');
+  } else {
+    // 1) School in this block on Google (100 m exact, or relaxed partial).
+    stepsTried.push('google_school_in_block');
     const schoolMatch = await searchSchoolPlace(
       schoolName,
       block,
@@ -931,31 +1212,82 @@ export async function resolveSchoolPlace(
       key,
       siblingBlocks,
     );
-    if (schoolMatch) return schoolMatch;
-  }
-
-  // 2–3) Village from school title (400 m) — Google strict, then OSM + relaxed district match.
-  const village = localityHintFromSchoolName(schoolName);
-  if (village && village.toLowerCase() !== block.toLowerCase()) {
-    if (key) {
-      const villageMatch = await resolveVillagePlace(
-        village,
-        block,
-        district,
-        key,
-        siblingBlocks,
-      );
-      if (villageMatch) return villageMatch;
+    if (schoolMatch) {
+      const successReason: SchoolResolveSuccessReason =
+        schoolMatch.locationConfidence === 'partial'
+          ? 'school_relaxed_google'
+          : 'school_on_google';
+      return {
+        match: schoolMatch,
+        successReason,
+        message: describeResolveMessage(successReason, undefined, {
+          ...extras,
+          placeName: schoolMatch.placeName,
+        }),
+        stepsTried,
+        villageHint,
+      };
     }
-
-    const { resolveVillagePin, villagePinToSchoolPlace } = await import(
-      './village-location.util'
-    );
-    const { pin } = await resolveVillagePin(village, block, district, key);
-    if (pin) return villagePinToSchoolPlace(pin);
+    stepsTried.push('google_school_miss');
   }
 
-  return null;
+  // 2+) Multi-source village orchestrator (onefivenine, cache, Google combos, OSM combos).
+  const { resolveVillageMultiSource } = await import('./village-resolve-orchestrator.util');
+  const villageResult = await resolveVillageMultiSource({
+    schoolName,
+    block,
+    district,
+    siblingBlocks,
+    apiKey: key,
+    villageCache: options?.villageCache,
+  });
+
+  if (villageResult.pin && villageResult.successReason) {
+    const { villagePinToSchoolPlace } = await import('./village-location.util');
+    const match = villagePinToSchoolPlace(villageResult.pin);
+    return {
+      match,
+      successReason: villageResult.successReason,
+      message: describeResolveMessage(villageResult.successReason, undefined, {
+        ...extras,
+        villageHint: villageResult.villageHint || villageHint,
+      }),
+      stepsTried: [...stepsTried, ...villageResult.stepsTried],
+      villageHint: villageResult.villageHint || villageHint,
+    };
+  }
+
+  if (!villageHint && !villageSearchCombinationsFromSchoolName(schoolName).length) {
+    return {
+      match: null,
+      failureReason: 'no_village_in_name',
+      message: describeResolveMessage(undefined, 'no_village_in_name', extras),
+      stepsTried: [...stepsTried, ...villageResult.stepsTried],
+      villageHint,
+    };
+  }
+
+  return {
+    match: null,
+    failureReason: 'school_and_village_miss',
+    message: describeResolveMessage(undefined, 'school_and_village_miss', extras),
+    stepsTried: [...stepsTried, ...villageResult.stepsTried],
+    villageHint: villageResult.villageHint || villageHint,
+  };
+}
+
+export async function resolveSchoolPlace(
+  school: {
+    schoolName?: string;
+    block?: string;
+    district?: string;
+    udise?: string;
+  },
+  apiKey?: string,
+  siblingBlocks: string[] = [],
+): Promise<ResolvedSchoolPlace | null> {
+  const outcome = await resolveSchoolPlaceDetailed(school, apiKey, siblingBlocks);
+  return outcome.match;
 }
 
 /** Google-only location search for admin map (Places + Geocode, Bihar). */

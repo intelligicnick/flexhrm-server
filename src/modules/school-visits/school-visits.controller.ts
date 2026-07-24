@@ -31,6 +31,11 @@ import {
   filterSchoolsForSupervisor,
   supervisorCanAccessSchool,
 } from './supervisor-school-access.util';
+import {
+  getGoogleMapsJsApiKey,
+  isGoogleMapsJsConfigured,
+} from '../../common/utils/google-school-place.util';
+import { localityHintFromSchoolName } from '../../common/utils/village-location.util';
 
 @Controller('school-visits')
 export class SchoolVisitsController {
@@ -124,6 +129,72 @@ export class SchoolVisitsController {
       throw new NotFoundException('School not found.');
     }
     return school;
+  }
+
+  @Get('supervisor/maps-config')
+  @UseGuards(SupervisorGuard)
+  getSupervisorMapsConfig() {
+    return {
+      configured: isGoogleMapsJsConfigured(),
+      mapsApiKey: getGoogleMapsJsApiKey(),
+    };
+  }
+
+  @Post('supervisor/schools/:schoolWorkId/ensure-location')
+  @UseGuards(SupervisorGuard)
+  async ensureSupervisorSchoolLocation(
+    @Req() req: Request & { user: AdminSessionPayload },
+    @Param('schoolWorkId') schoolWorkId: string,
+  ) {
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
+    const school = await this.schoolWorksService.findById(schoolWorkId);
+    if (!school || !supervisorCanAccessSchool(school, supervisorId, assignedBlocks)) {
+      throw new NotFoundException('School not found.');
+    }
+
+    const villageHint = localityHintFromSchoolName(String(school.schoolName || ''));
+
+    if (this.schoolWorksService.getVerifiedSchoolPin(school)) {
+      return {
+        status: 'ready',
+        school,
+        villageHint,
+        matchedPlaceName: String(school.matchedPlaceName || ''),
+      };
+    }
+
+    const outcome = await this.schoolWorksService.autoResolveSchoolLocation(schoolWorkId);
+    return {
+      status: outcome.status === 'ready' ? 'ready' : 'failed',
+      school: outcome.school,
+      villageHint: outcome.villageHint,
+      matchedPlaceName: String(outcome.school.matchedPlaceName || ''),
+      failureReason: outcome.failureReason || '',
+    };
+  }
+
+  @Post('supervisor/ensure-locations')
+  @UseGuards(SupervisorGuard)
+  async ensureSupervisorSchoolLocations(
+    @Req() req: Request & { user: AdminSessionPayload },
+    @Body() body: { schoolOffset?: number; schoolLimit?: number },
+  ) {
+    const supervisorId = String(req.user.employeeId || req.user.username || '');
+    const assignedBlocks =
+      (req.user as AdminSessionPayload & { assignedBlocks?: string[] }).assignedBlocks || [];
+    const allSchools = await this.schoolWorksService.findAllForSupervisorList();
+    const supervisorSchools = filterSchoolsForSupervisor(
+      allSchools,
+      supervisorId,
+      assignedBlocks,
+    );
+    return this.schoolWorksService.ensureSupervisorSchoolLocations(
+      supervisorSchools,
+      Number(body?.schoolOffset) || 0,
+      Number(body?.schoolLimit) || 2,
+    );
   }
 
   @Get('supervisor/reverse-geocode')

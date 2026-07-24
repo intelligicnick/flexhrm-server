@@ -134,6 +134,10 @@ export class SchoolWork {
   @Prop({ default: '' })
   matchedPlaceName!: string;
 
+  /** Last Google auto-resolve attempt (rate-limit supervisor ensure-location). */
+  @Prop({ default: '' })
+  locationLastResolveAt!: string;
+
   @Prop({ type: Object, default: {} })
   monthlyExpenseLedger!: Record<string, SchoolMonthlyExpenseEntry>;
 

@@ -193,6 +193,9 @@ export class SchoolWorksService {
           locationVerified: 1,
           geofenceRadiusM: 1,
           locationConfidence: 1,
+          matchedPlaceName: 1,
+          googleMapsUrl: 1,
+          locationSource: 1,
         })
         .sort({ srNo: 1 })
         .lean()
@@ -378,6 +381,7 @@ export class SchoolWorksService {
       googlePlaceId: String(raw.googlePlaceId || ''),
       googleMapsUrl: String(raw.googleMapsUrl || ''),
       matchedPlaceName: String(raw.matchedPlaceName || ''),
+      locationLastResolveAt: String(raw.locationLastResolveAt || ''),
       monthlyExpenseLedger: this.normalizeMonthlyLedger(raw.monthlyExpenseLedger),
       monthlyWorkdaysLedger: this.normalizeMonthlyWorkdaysLedger(
         raw.monthlyWorkdaysLedger,
@@ -392,7 +396,13 @@ export class SchoolWorksService {
       srNo: Number(raw.srNo) || count + 1,
     };
     const doc = await this.schoolWorkModel.create(processed);
-    return this.toPlain(doc);
+    const plain = this.toPlain(doc);
+    try {
+      const resolved = await this.autoResolveSchoolLocation(String(plain.id));
+      return resolved.school;
+    } catch {
+      return plain;
+    }
   }
 
   async update(
@@ -530,11 +540,12 @@ export class SchoolWorksService {
         continue;
       }
       srNo++;
-      await this.schoolWorkModel.create({
+      const doc = await this.schoolWorkModel.create({
         ...this.normalize(raw),
         srNo,
       });
       added++;
+      void this.autoResolveSchoolLocation(String(doc.id)).catch(() => undefined);
     }
     return { added, skipped, skippedCodes };
   }
@@ -832,7 +843,7 @@ export class SchoolWorksService {
     nextOffset: number;
     batchProcessed: number;
   }> {
-    const { resolveSchoolPlace, isGooglePlacesConfigured } = await import(
+    const { resolveSchoolPlaceDetailed, isGooglePlacesConfigured } = await import(
       '../../common/utils/google-school-place.util'
     );
     const block = String(params.block || '').trim();
@@ -866,7 +877,7 @@ export class SchoolWorksService {
       const villageHint = localityHintFromSchoolName(schoolName);
 
       if (
-        params.skipExisting !== false &&
+        params.skipExisting === true &&
         school.locationVerified &&
         Number(school.lat) !== 0 &&
         Number(school.lng) !== 0
@@ -886,11 +897,13 @@ export class SchoolWorksService {
           locationConfidence: String(school.locationConfidence || ''),
           locationVerified: true,
           googleMapsUrl: String(school.googleMapsUrl || ''),
+          successReason: 'already_verified',
+          message: 'Already verified — pin kept unchanged',
         });
         continue;
       }
 
-      const match = await resolveSchoolPlace(
+      const outcome = await resolveSchoolPlaceDetailed(
         {
           schoolName,
           block: String(school.block || block),
@@ -900,6 +913,7 @@ export class SchoolWorksService {
         undefined,
         siblingBlocks,
       );
+      const match = outcome.match;
 
       if (!match) {
         failed++;
@@ -907,10 +921,13 @@ export class SchoolWorksService {
           schoolWorkId: schoolId,
           schoolName,
           udise,
-          villageHint,
+          villageHint: outcome.villageHint || villageHint,
           block: String(school.block || ''),
           district: String(school.district || ''),
           status: 'not_found',
+          failureReason: outcome.failureReason || 'school_and_village_miss',
+          message: outcome.message,
+          stepsTried: outcome.stepsTried,
         });
         await new Promise((r) => setTimeout(r, 350));
         continue;
@@ -921,7 +938,7 @@ export class SchoolWorksService {
         schoolWorkId: schoolId,
         schoolName,
         udise,
-        villageHint,
+        villageHint: outcome.villageHint || villageHint,
         block: String(school.block || ''),
         district: String(school.district || ''),
         status: 'resolved',
@@ -937,6 +954,9 @@ export class SchoolWorksService {
         queryUsed: match.queryUsed,
         matchScore: match.matchScore,
         resolutionStep: match.resolutionStep,
+        successReason: outcome.successReason,
+        message: outcome.message,
+        stepsTried: outcome.stepsTried,
       };
 
       if (params.saveVerified) {
@@ -1020,14 +1040,17 @@ export class SchoolWorksService {
     nextOffset: number;
     batchProcessed: number;
   }> {
-    const { resolveSchoolPlace } = await import(
-      '../../common/utils/google-school-place.util'
-    );
+    const { resolveSchoolPlaceDetailed, describeResolveMessage, unsafePinFailureReason } =
+      await import('../../common/utils/google-school-place.util');
     const block = String(params.block || '').trim();
     const district = String(params.district || '').trim();
     if (!block) {
       throw new BadRequestException('Block is required.');
     }
+    const { getSessionVillageCache } = await import(
+      '../../common/utils/village-resolve-orchestrator.util'
+    );
+    const villageCache = getSessionVillageCache(district, block);
 
     const allSchools = await this.findSchoolsInBlock(block, district || undefined);
     const siblingBlocks = district
@@ -1074,7 +1097,7 @@ export class SchoolWorksService {
         Number.isFinite(Number(school.lng)) &&
         !(Number(school.lat) === 0 && Number(school.lng) === 0);
 
-      if (params.skipExisting !== false && hasPin && school.locationVerified) {
+      if (params.skipExisting === true && hasPin && school.locationVerified) {
         skipped++;
         results.push({
           schoolWorkId: schoolId,
@@ -1090,11 +1113,17 @@ export class SchoolWorksService {
           locationConfidence: String(school.locationConfidence || ''),
           locationVerified: true,
           googleMapsUrl: String(school.googleMapsUrl || ''),
+          successReason: 'already_verified',
+          message: describeResolveMessage('already_verified', undefined, {
+            villageHint,
+            block: schoolBlock,
+            district: schoolDistrict,
+          }),
         });
         continue;
       }
 
-      const match = await resolveSchoolPlace(
+      const outcome = await resolveSchoolPlaceDetailed(
         {
           schoolName,
           block: schoolBlock,
@@ -1103,7 +1132,9 @@ export class SchoolWorksService {
         },
         undefined,
         siblingBlocks,
+        { villageCache },
       );
+      const match = outcome.match;
 
       if (!match) {
         failed++;
@@ -1111,11 +1142,13 @@ export class SchoolWorksService {
           schoolWorkId: schoolId,
           schoolName,
           udise,
-          villageHint,
+          villageHint: outcome.villageHint || villageHint,
           block: schoolBlock,
           district: schoolDistrict,
           status: 'not_found',
-          failureReason: 'school_and_village_miss',
+          failureReason: outcome.failureReason || 'school_and_village_miss',
+          message: outcome.message,
+          stepsTried: outcome.stepsTried,
         });
         await new Promise((r) => setTimeout(r, 400));
         continue;
@@ -1132,11 +1165,25 @@ export class SchoolWorksService {
 
       if (!safe) {
         failed++;
-        results.push({
+        const failureReason = unsafePinFailureReason(
+          match.lat,
+          match.lng,
+          match.formattedAddress,
+          schoolBlock,
+          schoolDistrict,
+          siblingBlocks,
+        );
+        const unsafeMessage = describeResolveMessage(undefined, failureReason, {
+          villageHint: outcome.villageHint || villageHint,
+          block: schoolBlock,
+          district: schoolDistrict,
+          placeName: match.placeName,
+        });
+        const unsafeRow: Record<string, unknown> = {
           schoolWorkId: schoolId,
           schoolName,
           udise,
-          villageHint,
+          villageHint: outcome.villageHint || villageHint,
           block: schoolBlock,
           district: schoolDistrict,
           status: 'unsafe_pin',
@@ -1144,21 +1191,44 @@ export class SchoolWorksService {
           lng: match.lng,
           matchedPlaceName: match.placeName,
           formattedAddress: match.formattedAddress,
-          failureReason: 'outside_bihar_or_wrong_area',
-        });
+          failureReason,
+          message: unsafeMessage,
+          resolutionStep: match.resolutionStep,
+          stepsTried: outcome.stepsTried,
+          locationVerified: false,
+        };
+
+        if (params.saveDraft !== false) {
+          await this.update(schoolId, {
+            lat: match.lat,
+            lng: match.lng,
+            locationVerified: false,
+            locationVerifiedAt: '',
+            locationSource: match.locationSource,
+            locationConfidence: match.locationConfidence,
+            geofenceRadiusM: match.geofenceRadiusM,
+            googlePlaceId: match.googlePlaceId,
+            googleMapsUrl: match.googleMapsUrl,
+            matchedPlaceName: match.placeName,
+          });
+        }
+
+        results.push(unsafeRow);
         await new Promise((r) => setTimeout(r, 400));
         continue;
       }
 
       resolved++;
-      if (villageHint) villagesSeen.add(villageHint.toLowerCase());
+      if (outcome.villageHint || villageHint) {
+        villagesSeen.add(String(outcome.villageHint || villageHint).toLowerCase());
+      }
 
       const verifiedAt = new Date().toISOString();
       const row: Record<string, unknown> = {
         schoolWorkId: schoolId,
         schoolName,
         udise,
-        villageHint,
+        villageHint: outcome.villageHint || villageHint,
         block: schoolBlock,
         district: schoolDistrict,
         status: 'verified',
@@ -1176,6 +1246,9 @@ export class SchoolWorksService {
         resolutionStep: match.resolutionStep,
         locationVerified: true,
         locationVerifiedAt: verifiedAt,
+        successReason: outcome.successReason,
+        message: outcome.message,
+        stepsTried: outcome.stepsTried,
       };
 
       if (params.saveDraft !== false) {
@@ -1409,6 +1482,237 @@ export class SchoolWorksService {
       throw new BadRequestException('Failed to verify school location.');
     }
     return updated;
+  }
+
+  async autoResolveSchoolLocation(
+    schoolId: string,
+    options?: { force?: boolean; skipRateLimit?: boolean },
+  ): Promise<{
+    school: Record<string, unknown>;
+    status: 'ready' | 'failed' | 'skipped';
+    villageHint: string;
+    failureReason?: string;
+    successReason?: string;
+    message?: string;
+    stepsTried?: string[];
+  }> {
+    const { resolveSchoolPlaceDetailed, isGooglePlacesConfigured, describeResolveMessage, unsafePinFailureReason } =
+      await import('../../common/utils/google-school-place.util');
+
+    const school = await this.findById(schoolId);
+    if (!school) {
+      throw new BadRequestException('School record not found.');
+    }
+
+    const villageHint = localityHintFromSchoolName(String(school.schoolName || ''));
+
+    if (school.locationVerified && this.getVerifiedSchoolPin(school)) {
+      return {
+        school,
+        status: 'ready',
+        villageHint,
+        successReason: 'already_verified',
+        message: describeResolveMessage('already_verified', undefined, {
+          villageHint,
+          block: String(school.block || ''),
+          district: String(school.district || ''),
+        }),
+      };
+    }
+
+    if (!options?.force && !options?.skipRateLimit) {
+      const lastAt = String(school.locationLastResolveAt || '').trim();
+      if (lastAt) {
+        const elapsedMs = Date.now() - new Date(lastAt).getTime();
+        if (Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs < 3_600_000) {
+          const pin = this.getVerifiedSchoolPin(school);
+          return {
+            school,
+            status: pin ? 'ready' : 'failed',
+            villageHint,
+            failureReason: pin ? undefined : 'resolve_rate_limited',
+          };
+        }
+      }
+    }
+
+    const resolveAttemptAt = new Date().toISOString();
+    await this.update(schoolId, { locationLastResolveAt: resolveAttemptAt });
+
+    if (!isGooglePlacesConfigured()) {
+      return {
+        school,
+        status: 'failed',
+        villageHint,
+        failureReason: 'google_not_configured',
+        message: describeResolveMessage(undefined, 'google_not_configured', {
+          villageHint,
+          block: String(school.block || ''),
+          district: String(school.district || ''),
+        }),
+      };
+    }
+
+    const block = String(school.block || '');
+    const district = String(school.district || '');
+    const siblingBlocks = district
+      ? await this.listBlocksInDistrict(district)
+      : [block];
+
+    const outcome = await resolveSchoolPlaceDetailed(
+      {
+        schoolName: String(school.schoolName || ''),
+        block,
+        district,
+        udise: String(school.udise || ''),
+      },
+      undefined,
+      siblingBlocks,
+    );
+    const match = outcome.match;
+
+    if (!match) {
+      return {
+        school: (await this.findById(schoolId)) || school,
+        status: 'failed',
+        villageHint: outcome.villageHint || villageHint,
+        failureReason: outcome.failureReason || 'school_and_village_miss',
+        message: outcome.message,
+        stepsTried: outcome.stepsTried,
+      };
+    }
+
+    const safe = this.pinSafeForAutoVerify(
+      school,
+      match.lat,
+      match.lng,
+      match.placeName,
+      match.formattedAddress,
+      match.locationConfidence,
+    );
+
+    const verifiedAt = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      lat: match.lat,
+      lng: match.lng,
+      locationSource: match.locationSource,
+      locationConfidence: match.locationConfidence,
+      geofenceRadiusM: match.geofenceRadiusM,
+      googlePlaceId: match.googlePlaceId,
+      googleMapsUrl: match.googleMapsUrl,
+      matchedPlaceName: match.placeName,
+      locationLastResolveAt: resolveAttemptAt,
+    };
+
+    if (safe) {
+      patch.locationVerified = true;
+      patch.locationVerifiedAt = verifiedAt;
+    } else {
+      patch.locationVerified = false;
+      patch.locationVerifiedAt = '';
+    }
+
+    const updated = await this.update(schoolId, patch);
+    const resultSchool = updated || (await this.findById(schoolId)) || school;
+
+    if (safe) {
+      return {
+        school: resultSchool,
+        status: 'ready',
+        villageHint: outcome.villageHint || villageHint,
+        successReason: outcome.successReason,
+        message: outcome.message,
+        stepsTried: outcome.stepsTried,
+      };
+    }
+
+    const failureReason = unsafePinFailureReason(
+      match.lat,
+      match.lng,
+      match.formattedAddress,
+      block,
+      district,
+      siblingBlocks,
+    );
+
+    return {
+      school: resultSchool,
+      status: 'failed',
+      villageHint: outcome.villageHint || villageHint,
+      failureReason,
+      message: describeResolveMessage(undefined, failureReason, {
+        villageHint: outcome.villageHint || villageHint,
+        block,
+        district,
+        placeName: match.placeName,
+      }),
+      stepsTried: outcome.stepsTried,
+    };
+  }
+
+  async ensureSupervisorSchoolLocations(
+    supervisorSchools: Record<string, unknown>[],
+    schoolOffset = 0,
+    schoolLimit = 2,
+  ): Promise<{
+    total: number;
+    processed: number;
+    resolved: number;
+    failed: number;
+    skipped: number;
+    hasMore: boolean;
+    nextSchoolOffset: number;
+    results: Array<Record<string, unknown>>;
+  }> {
+    const pending = supervisorSchools.filter((school) => !this.getVerifiedSchoolPin(school));
+    const total = pending.length;
+    const limit = Math.min(Math.max(Number(schoolLimit) || 2, 1), 5);
+    const offset = Math.max(0, Number(schoolOffset) || 0);
+    const batch = pending.slice(offset, offset + limit);
+
+    let resolved = 0;
+    let failed = 0;
+    let skipped = 0;
+    const results: Array<Record<string, unknown>> = [];
+
+    for (const school of batch) {
+      const schoolId = String(school.id || '');
+      if (!schoolId) {
+        skipped++;
+        continue;
+      }
+
+      const outcome = await this.autoResolveSchoolLocation(schoolId);
+      if (outcome.status === 'ready') resolved++;
+      else failed++;
+
+      results.push({
+        schoolWorkId: schoolId,
+        schoolName: String(school.schoolName || ''),
+        status: outcome.status,
+        failureReason: outcome.failureReason || '',
+        successReason: outcome.successReason || '',
+        message: outcome.message || '',
+        stepsTried: outcome.stepsTried || [],
+        villageHint: outcome.villageHint,
+        locationVerified: !!outcome.school.locationVerified,
+        matchedPlaceName: String(outcome.school.matchedPlaceName || ''),
+      });
+
+      await new Promise((r) => setTimeout(r, 350));
+    }
+
+    const nextSchoolOffset = offset + batch.length;
+    return {
+      total,
+      processed: batch.length,
+      resolved,
+      failed,
+      skipped,
+      hasMore: nextSchoolOffset < total,
+      nextSchoolOffset,
+      results,
+    };
   }
 
   getVerifiedSchoolPin(school: Record<string, unknown>): {
