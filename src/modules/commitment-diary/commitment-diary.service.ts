@@ -219,21 +219,24 @@ export class CommitmentDiaryService {
     assertNotPastDate(sortedFrom, sortedTo);
 
     const today = todayIsoDate();
-    const supervisorProfiles =
-      await this.schoolSupervisorsService.getActiveSupervisorAccessProfiles();
-    const blockSharedCooldown =
-      this.schoolSupervisorsService.isSchoolSharedVisitCooldown(
-        school,
-        supervisorProfiles,
-      );
-    const lastVisitQuery = blockSharedCooldown
-      ? { schoolWorkId: dto.schoolWorkId }
-      : { supervisorId, schoolWorkId: dto.schoolWorkId };
-    const lastVisit = await this.visitModel
-      .findOne(lastVisitQuery)
-      .sort({ visitDate: -1 })
-      .exec();
-    assertVisitCooldownAllowed(lastVisit?.visitDate, today, 'schedule');
+    const isStar = await this.schoolSupervisorsService.isStarSupervisor(supervisorId);
+    if (!isStar) {
+      const supervisorProfiles =
+        await this.schoolSupervisorsService.getActiveSupervisorAccessProfiles();
+      const blockSharedCooldown =
+        this.schoolSupervisorsService.isSchoolSharedVisitCooldown(
+          school,
+          supervisorProfiles,
+        );
+      const lastVisitQuery = blockSharedCooldown
+        ? { schoolWorkId: dto.schoolWorkId }
+        : { supervisorId, schoolWorkId: dto.schoolWorkId };
+      const lastVisit = await this.visitModel
+        .findOne(lastVisitQuery)
+        .sort({ visitDate: -1 })
+        .exec();
+      assertVisitCooldownAllowed(lastVisit?.visitDate, today, 'schedule');
+    }
 
     const activeCommitment = await this.commitmentModel
       .findOne({

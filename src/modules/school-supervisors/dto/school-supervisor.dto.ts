@@ -20,6 +20,10 @@ export class UpsertSchoolSupervisorDto {
 
   @IsOptional()
   @IsBoolean()
+  isStarSupervisor?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   loginEnabled?: boolean;
 
   @IsOptional()

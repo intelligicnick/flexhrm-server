@@ -41,6 +41,8 @@ export interface EffectiveLastVisitInfo {
   lastVisitBySupervisorId: string | null;
   lastVisitBySupervisorName: string | null;
   blockSharedCooldown: boolean;
+  /** Star supervisors bypass the 5-day school visit cooldown. */
+  cooldownExempt?: boolean;
 }
 
 function todayIsoInKolkata(): string {
@@ -94,6 +96,16 @@ export class SchoolVisitsService {
     schoolOrBlock?: Record<string, unknown> | string,
     supervisorProfiles?: SupervisorAccessProfile[],
   ): Promise<EffectiveLastVisitInfo> {
+    if (await this.schoolSupervisorsService.isStarSupervisor(supervisorId)) {
+      return {
+        lastVisitDate: null,
+        lastVisitBySupervisorId: null,
+        lastVisitBySupervisorName: null,
+        blockSharedCooldown: false,
+        cooldownExempt: true,
+      };
+    }
+
     let school: Record<string, unknown> | null = null;
     if (schoolOrBlock && typeof schoolOrBlock === 'object') {
       school = schoolOrBlock;
@@ -128,6 +140,7 @@ export class SchoolVisitsService {
         ? String(doc.supervisorName)
         : null,
       blockSharedCooldown,
+      cooldownExempt: false,
     };
   }
 
@@ -135,6 +148,25 @@ export class SchoolVisitsService {
     supervisorId: string,
     assignedBlocks: string[],
   ): Promise<(EffectiveLastVisitInfo & { schoolWorkId: string })[]> {
+    if (await this.schoolSupervisorsService.isStarSupervisor(supervisorId)) {
+      const allSchools = await this.schoolWorksService.findAllForSupervisorList();
+      const schools = filterSchoolsForSupervisor(
+        allSchools,
+        supervisorId,
+        assignedBlocks,
+      );
+      return schools
+        .map((school) => ({
+          schoolWorkId: String(school.id || ''),
+          lastVisitDate: null,
+          lastVisitBySupervisorId: null,
+          lastVisitBySupervisorName: null,
+          blockSharedCooldown: false,
+          cooldownExempt: true,
+        }))
+        .filter((entry) => entry.schoolWorkId);
+    }
+
     const allSchools = await this.schoolWorksService.findAllForSupervisorList();
     const schools = filterSchoolsForSupervisor(
       allSchools,
@@ -261,6 +293,9 @@ export class SchoolVisitsService {
     schoolWorkId: string,
     visitDate: string,
   ): Promise<void> {
+    if (await this.schoolSupervisorsService.isStarSupervisor(supervisorId)) {
+      return;
+    }
     const info = await this.getEffectiveLastVisitInfo(
       supervisorId,
       schoolWorkId,

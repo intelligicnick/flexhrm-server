@@ -38,6 +38,10 @@ export class SchoolSupervisor {
   @Prop({ type: [String], default: [] })
   assignedBlocks!: string[];
 
+  /** Star supervisors may visit assigned-block schools without the 5-day cooldown. */
+  @Prop({ default: false })
+  isStarSupervisor!: boolean;
+
   @Prop({ type: SchoolSupervisorLogin, default: {} })
   login!: SchoolSupervisorLogin;
 

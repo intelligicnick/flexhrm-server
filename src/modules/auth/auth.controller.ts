@@ -633,6 +633,7 @@ export class AuthController {
       designation: raw?.designation || '',
       bio: raw?.bio || '',
       status: supervisor?.status || 'active',
+      isStarSupervisor: !!supervisor?.isStarSupervisor,
       impersonated: !!user.impersonated,
     };
   }

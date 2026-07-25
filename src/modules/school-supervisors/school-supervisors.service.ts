@@ -107,6 +107,17 @@ export class SchoolSupervisorsService {
       : [];
   }
 
+  async isStarSupervisor(id: string): Promise<boolean> {
+    const supervisorId = String(id || '').trim();
+    if (!supervisorId) return false;
+    const doc = await this.supervisorModel
+      .findOne({ id: supervisorId })
+      .select({ isStarSupervisor: 1 })
+      .lean()
+      .exec();
+    return !!doc?.isStarSupervisor;
+  }
+
   async findById(id: string): Promise<Record<string, unknown> | null> {
     const doc = await this.supervisorModel.findOne({ id }).exec();
     return doc ? this.toPlain(doc) : null;
@@ -147,6 +158,7 @@ export class SchoolSupervisorsService {
       name: dto.name || '',
       phone: this.normalizePhoneDigits(String(dto.phone || loginPhone || '')),
       assignedBlocks: dto.assignedBlocks || [],
+      isStarSupervisor: !!dto.isStarSupervisor,
       login,
       status: dto.status || 'active',
     });
@@ -161,6 +173,7 @@ export class SchoolSupervisorsService {
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.phone !== undefined) patch.phone = this.normalizePhoneDigits(dto.phone);
     if (dto.assignedBlocks !== undefined) patch.assignedBlocks = dto.assignedBlocks;
+    if (dto.isStarSupervisor !== undefined) patch.isStarSupervisor = !!dto.isStarSupervisor;
     if (dto.status !== undefined) patch.status = dto.status;
 
     const existingLogin = existing.login;
