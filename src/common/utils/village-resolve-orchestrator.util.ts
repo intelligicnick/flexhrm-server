@@ -87,9 +87,16 @@ async function finalizePin(
   district: string,
   block: string,
   apiKey: string,
-): Promise<ResolvedVillagePin> {
-  if (!apiKey) return pin;
-  return enrichPinWithGoogleReverseGeocode(pin, villageLabel, district, block, apiKey);
+  siblingBlocks: string[] = [],
+): Promise<ResolvedVillagePin | null> {
+  return enrichPinWithGoogleReverseGeocode(
+    pin,
+    villageLabel,
+    district,
+    block,
+    apiKey,
+    siblingBlocks,
+  );
 }
 
 function cachePin(
@@ -150,31 +157,48 @@ export async function resolveVillageMultiSource(params: {
       district,
       block,
       apiKey,
+      siblingBlocks,
     );
-    return successFromPin(pin, 'village_from_block_cache', villageHint || label, stepsTried);
+    if (pin) {
+      return successFromPin(pin, 'village_from_block_cache', villageHint || label, stepsTried);
+    }
+    stepsTried.push(`cache_reject_block_gate:${label}`);
   }
   stepsTried.push('block_village_cache_miss');
-
-  stepsTried.push('onefivenine_village_combos');
-  const oneFiveNine = await resolveOneFiveNineVillagePin(schoolName, block, district);
-  if (oneFiveNine.pin) {
-    stepsTried.push(`onefivenine_hit:${oneFiveNine.queryUsed}`);
-    const pin = await finalizePin(oneFiveNine.pin, villageHint || oneFiveNine.villageHint, district, block, apiKey);
-    cachePin(params.villageCache, district, block, villageHint || oneFiveNine.villageHint, pin);
-    return successFromPin(pin, 'village_on_onefivenine', oneFiveNine.villageHint || villageHint, stepsTried);
-  }
-  stepsTried.push('onefivenine_village_miss');
 
   stepsTried.push('onefivenine_direct_paths');
   for (const combo of combos) {
     const directPin = await tryOneFiveNineDirectPath(district, block, combo);
     if (!directPin) continue;
     stepsTried.push(`onefivenine_direct:${combo}`);
-    const pin = await finalizePin(directPin, combo, district, block, apiKey);
-    cachePin(params.villageCache, district, block, combo, pin);
-    return successFromPin(pin, 'village_on_onefivenine_direct', villageHint || combo, stepsTried);
+    const pin = await finalizePin(directPin, combo, district, block, apiKey, siblingBlocks);
+    if (pin) {
+      cachePin(params.villageCache, district, block, combo, pin);
+      return successFromPin(pin, 'village_on_onefivenine_direct', villageHint || combo, stepsTried);
+    }
+    stepsTried.push(`onefivenine_direct_reject:${combo}`);
   }
   stepsTried.push('onefivenine_direct_miss');
+
+  stepsTried.push('onefivenine_village_combos');
+  const oneFiveNine = await resolveOneFiveNineVillagePin(schoolName, block, district, siblingBlocks);
+  if (oneFiveNine.pin) {
+    stepsTried.push(`onefivenine_hit:${oneFiveNine.queryUsed}`);
+    const pin = await finalizePin(
+      oneFiveNine.pin,
+      villageHint || oneFiveNine.villageHint,
+      district,
+      block,
+      apiKey,
+      siblingBlocks,
+    );
+    if (pin) {
+      cachePin(params.villageCache, district, block, villageHint || oneFiveNine.villageHint, pin);
+      return successFromPin(pin, 'village_on_onefivenine', oneFiveNine.villageHint || villageHint, stepsTried);
+    }
+    stepsTried.push('onefivenine_reject_block_gate');
+  }
+  stepsTried.push('onefivenine_village_miss');
 
   if (apiKey) {
     stepsTried.push('google_village_combos');
@@ -196,9 +220,12 @@ export async function resolveVillageMultiSource(params: {
         },
         'google_combo',
       );
-      const pin = await finalizePin(rawPin, combo, district, block, apiKey);
-      cachePin(params.villageCache, district, block, combo, pin);
-      return successFromPin(pin, 'village_on_google_combo', villageHint || combo, stepsTried);
+      const pin = await finalizePin(rawPin, combo, district, block, apiKey, siblingBlocks);
+      if (pin) {
+        cachePin(params.villageCache, district, block, combo, pin);
+        return successFromPin(pin, 'village_on_google_combo', villageHint || combo, stepsTried);
+      }
+      stepsTried.push(`google_combo_reject:${combo}`);
     }
     stepsTried.push('google_village_combos_miss');
   }
@@ -208,9 +235,12 @@ export async function resolveVillageMultiSource(params: {
     const osmPin = await resolveOsmVillageCombo(combo, block, district);
     if (!osmPin) continue;
     stepsTried.push(`osm_combo:${combo}`);
-    const pin = await finalizePin(osmPin, combo, district, block, apiKey);
-    cachePin(params.villageCache, district, block, combo, pin);
-    return successFromPin(pin, 'village_on_osm_combo', villageHint || combo, stepsTried);
+    const pin = await finalizePin(osmPin, combo, district, block, apiKey, siblingBlocks);
+    if (pin) {
+      cachePin(params.villageCache, district, block, combo, pin);
+      return successFromPin(pin, 'village_on_osm_combo', villageHint || combo, stepsTried);
+    }
+    stepsTried.push(`osm_combo_reject:${combo}`);
   }
   stepsTried.push('osm_village_combos_miss');
 
@@ -219,11 +249,14 @@ export async function resolveVillageMultiSource(params: {
     const { pin: utilPin } = await resolveVillagePin(combo, block, district, apiKey);
     if (!utilPin) continue;
     stepsTried.push(`village_util:${combo}`);
-    const pin = await finalizePin(utilPin, combo, district, block, apiKey);
-    const reason: SchoolResolveSuccessReason =
-      utilPin.resolutionStep === 'osm_village' ? 'village_on_osm' : 'village_on_google';
-    cachePin(params.villageCache, district, block, combo, pin);
-    return successFromPin(pin, reason, villageHint || combo, stepsTried);
+    const pin = await finalizePin(utilPin, combo, district, block, apiKey, siblingBlocks);
+    if (pin) {
+      const reason: SchoolResolveSuccessReason =
+        utilPin.resolutionStep === 'osm_village' ? 'village_on_osm' : 'village_on_google';
+      cachePin(params.villageCache, district, block, combo, pin);
+      return successFromPin(pin, reason, villageHint || combo, stepsTried);
+    }
+    stepsTried.push(`village_util_reject:${combo}`);
   }
   stepsTried.push('village_pin_util_miss');
 

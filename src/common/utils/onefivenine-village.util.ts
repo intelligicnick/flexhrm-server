@@ -1,9 +1,13 @@
 import {
   coordinatesInBihar,
-  placeInExpectedAdminArea,
   tokenInHaystack,
   villageNameInResult,
 } from './bihar-geography.util';
+import {
+  oneFiveNineBlockSegmentMatches,
+  villageNameCollidesWithOtherBlock,
+} from './block-pin-gate.util';
+import { placeInExpectedAdminArea as strictPlaceInExpectedAdminArea } from './google-school-place.util';
 import { localityHintFromSchoolName } from './reverse-geocode.util';
 import type { ResolvedVillagePin } from './village-location.util';
 
@@ -129,6 +133,7 @@ function scoreOneFiveNineHit(
   query: string,
   district: string,
   block: string,
+  siblingBlocks: string[] = [],
 ): number {
   const queryNorm = normalizeToken(query);
   const villageNorm = normalizeToken(hit.villageSegment);
@@ -141,11 +146,20 @@ function scoreOneFiveNineHit(
     return -1;
   }
 
+  if (blockNorm && !oneFiveNineBlockSegmentMatches(hit.blockSegment, block)) {
+    return -1;
+  }
+
+  if (
+    villageNameCollidesWithOtherBlock(query, block, siblingBlocks) &&
+    !oneFiveNineBlockSegmentMatches(hit.blockSegment, block)
+  ) {
+    return -1;
+  }
+
   let score = 40;
   if (blockNorm && (tokenInHaystack(blockNorm, pathNorm) || tokenInHaystack(blockNorm, labelNorm))) {
-    score += 25;
-  } else if (blockNorm) {
-    score -= 10;
+    score += 30;
   }
 
   if (villageNorm && queryNorm && (villageNorm === queryNorm || villageNorm.includes(queryNorm) || queryNorm.includes(villageNorm))) {
@@ -315,6 +329,10 @@ function pinFromOneFiveNine(
 ): ResolvedVillagePin | null {
   if (!coordinatesInBihar(coords.lat, coords.lng)) return null;
 
+  if (block && !oneFiveNineBlockSegmentMatches(hit.blockSegment || block, block)) {
+    return null;
+  }
+
   const formattedAddress = [
     hit.villageSegment || villageLabel,
     hit.blockSegment || block,
@@ -325,7 +343,7 @@ function pinFromOneFiveNine(
     .filter(Boolean)
     .join(', ');
 
-  if (!placeInExpectedAdminArea(formattedAddress, district, block)) return null;
+  if (!strictPlaceInExpectedAdminArea(formattedAddress, block, district)) return null;
   if (!villageNameInResult(villageLabel, hit.villageSegment, formattedAddress)) return null;
 
   return {
@@ -347,6 +365,7 @@ export async function resolveOneFiveNineVillagePin(
   schoolName: string,
   block: string,
   district: string,
+  siblingBlocks: string[] = [],
 ): Promise<{ pin: ResolvedVillagePin | null; villageHint: string; queryUsed: string }> {
   const combos = villageSearchCombinationsFromSchoolName(schoolName);
   const villageHint = localityHintFromSchoolName(schoolName) || combos[combos.length - 1] || '';
@@ -354,7 +373,7 @@ export async function resolveOneFiveNineVillagePin(
   for (const query of combos) {
     const hits = await searchOneFiveNineVillages(query);
     const ranked = hits
-      .map((hit) => ({ hit, score: scoreOneFiveNineHit(hit, query, district, block) }))
+      .map((hit) => ({ hit, score: scoreOneFiveNineHit(hit, query, district, block, siblingBlocks) }))
       .filter((row) => row.score >= 45)
       .sort((a, b) => b.score - a.score);
 

@@ -44,25 +44,6 @@ function normalizeToken(value: string): string {
     .trim();
 }
 
-function editDistance(a: string, b: string): number {
-  const rows = a.length + 1;
-  const cols = b.length + 1;
-  const matrix: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
-  for (let i = 0; i < rows; i += 1) matrix[i][0] = i;
-  for (let j = 0; j < cols; j += 1) matrix[0][j] = j;
-  for (let i = 1; i < rows; i += 1) {
-    for (let j = 1; j < cols; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost,
-      );
-    }
-  }
-  return matrix[a.length][b.length];
-}
-
 function tokenInHaystackLocal(token: string, haystack: string): boolean {
   return tokenInHaystack(token, haystack);
 }
@@ -118,7 +99,6 @@ function scoreRelaxedVillageCandidate(
 
   const villageNorm = normalizeToken(village);
   if (!villageNorm) return -1;
-
   if (!villageNameInResult(villageNorm, placeName, formattedAddress)) return -1;
 
   const haystack = normalizeToken(`${placeName} ${formattedAddress}`);
@@ -156,7 +136,6 @@ async function searchNominatimForward(
     url.searchParams.set('countrycodes', 'in');
     url.searchParams.set('viewbox', nominatimBiharViewbox());
     url.searchParams.set('bounded', '1');
-
     const res = await fetch(url.toString(), {
       headers: {
         Accept: 'application/json',
@@ -164,13 +143,7 @@ async function searchNominatimForward(
       },
     });
     if (!res.ok) return [];
-
-    const data = (await res.json()) as Array<{
-      lat?: string;
-      lon?: string;
-      display_name?: string;
-    }>;
-
+    const data = (await res.json()) as Array<{ lat?: string; lon?: string; display_name?: string }>;
     return data
       .map((row) => ({
         lat: Number(row.lat),
@@ -242,76 +215,42 @@ function toVillagePin(
   };
 }
 
-async function reverseGeocodeLatLng(
-  lat: number,
-  lng: number,
-  apiKey: string,
-): Promise<{ formattedAddress: string; placeName: string } | null> {
-  try {
-    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-    url.searchParams.set('latlng', `${lat},${lng}`);
-    url.searchParams.set('key', apiKey);
-    url.searchParams.set('region', 'in');
-    const res = await fetch(url.toString());
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      status?: string;
-      results?: Array<{
-        formatted_address?: string;
-        address_components?: Array<{ long_name?: string; types?: string[] }>;
-      }>;
-    };
-    if (data.status !== 'OK' || !data.results?.length) return null;
-    const result = data.results[0];
-    const formattedAddress = String(result.formatted_address || '').trim();
-    const locality =
-      result.address_components?.find((c) =>
-        (c.types || []).some((t) =>
-          ['locality', 'village', 'hamlet', 'neighbourhood', 'sublocality'].includes(t),
-        ),
-      )?.long_name || '';
-    return {
-      formattedAddress,
-      placeName: String(locality || formattedAddress.split(',')[0] || '').trim(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Confirm external coords via Google reverse geocode; enrich place name when district matches. */
+/** Confirm external coords via Google reverse geocode + block gate; reject on failure. */
 export async function enrichPinWithGoogleReverseGeocode(
   pin: ResolvedVillagePin,
   village: string,
   district: string,
   block: string,
   apiKey?: string,
-): Promise<ResolvedVillagePin> {
-  const key = String(
-    apiKey ||
-      process.env.GOOGLE_PLACES_API_KEY ||
-      process.env.GOOGLE_GEOCODING_API_KEY ||
-      '',
-  ).trim();
-  if (!key) return pin;
+  siblingBlocks: string[] = [],
+): Promise<ResolvedVillagePin | null> {
+  const { validatePinForBlock } = await import('./block-pin-gate.util');
 
-  const reversed = await reverseGeocodeLatLng(pin.lat, pin.lng, key);
-  if (!reversed) return pin;
+  const sourceBlockSegment =
+    pin.resolutionStep === 'onefivenine_village' || pin.resolutionStep === 'onefivenine_direct'
+      ? pin.formattedAddress.split(',')[1]?.trim()
+      : undefined;
 
-  const haystack = normalizeToken(`${reversed.placeName} ${reversed.formattedAddress}`);
-  const villageNorm = normalizeToken(village);
-  const districtNorm = normalizeToken(district);
+  const gate = await validatePinForBlock({
+    lat: pin.lat,
+    lng: pin.lng,
+    block,
+    district,
+    villageHint: village,
+    siblingBlocks,
+    formattedAddress: pin.formattedAddress,
+    placeName: pin.placeName,
+    sourceBlockSegment,
+    apiKey,
+    requireGoogle: Boolean(apiKey),
+  });
 
-  if (districtNorm && !tokenInHaystackLocal(districtNorm, haystack)) return pin;
-  if (villageNorm && !villageNameInResult(village, reversed.placeName, reversed.formattedAddress)) {
-    return pin;
-  }
-  if (!placeInExpectedAdminArea(reversed.formattedAddress, district, block)) return pin;
+  if (!gate.ok) return null;
 
   return {
     ...pin,
-    placeName: reversed.placeName || pin.placeName,
-    formattedAddress: reversed.formattedAddress || pin.formattedAddress,
+    placeName: gate.placeName || pin.placeName,
+    formattedAddress: gate.formattedAddress || pin.formattedAddress,
     googleMapsUrl: buildGoogleMapsUrl(pin.lat, pin.lng),
   };
 }
@@ -364,7 +303,7 @@ export async function resolveOsmVillageCombo(
   return null;
 }
 
-/** Primary village-first resolver: OSM → Google geocode. District-only validation. */
+/** OSM forward search, then Google geocode fallback for one village hint. */
 export async function resolveVillagePin(
   village: string,
   block: string,
@@ -455,20 +394,7 @@ export async function resolveVillagePin(
   return { pin: null, failureReason: 'osm_and_google_miss' };
 }
 
-export function villagePinToSchoolPlace(pin: ResolvedVillagePin): {
-  lat: number;
-  lng: number;
-  placeName: string;
-  formattedAddress: string;
-  googlePlaceId: string;
-  googleMapsUrl: string;
-  locationSource: ResolvedVillagePin['locationSource'];
-  locationConfidence: 'village';
-  geofenceRadiusM: number;
-  queryUsed: string;
-  matchScore?: number;
-  resolutionStep?: 'osm_village' | 'village' | 'onefivenine_village' | 'onefivenine_direct' | 'block_cache' | 'google_combo' | 'osm_combo';
-} {
+export function villagePinToSchoolPlace(pin: ResolvedVillagePin) {
   return {
     lat: pin.lat,
     lng: pin.lng,
@@ -477,7 +403,7 @@ export function villagePinToSchoolPlace(pin: ResolvedVillagePin): {
     googlePlaceId: '',
     googleMapsUrl: pin.googleMapsUrl,
     locationSource: pin.locationSource,
-    locationConfidence: 'village',
+    locationConfidence: 'village' as const,
     geofenceRadiusM: pin.geofenceRadiusM,
     queryUsed: pin.queryUsed,
     matchScore: pin.matchScore,

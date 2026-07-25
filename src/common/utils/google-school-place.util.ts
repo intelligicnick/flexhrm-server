@@ -302,6 +302,9 @@ export function isUnsafeSchoolPin(school: {
       if (!placeInExpectedDistrict(formattedAddress, district)) {
         return true;
       }
+      if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+        return true;
+      }
     } else if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
       return true;
     }
@@ -1173,24 +1176,58 @@ export async function resolveSchoolPlaceDetailed(
     const { lookupExternalSchoolRegistry, externalRecordToResolvedPlace } = await import(
       './external-school-registry.util'
     );
+    const { validatePinForBlock } = await import('./block-pin-gate.util');
     const external = await lookupExternalSchoolRegistry({ udise, district, block });
     if (external) {
-      const match = externalRecordToResolvedPlace(external, block, district);
-      const successReason: SchoolResolveSuccessReason =
-        external.source === 'dramitkumar' ? 'school_on_dramitkumar' : 'school_on_schools_org_in';
-      return {
-        match,
-        successReason,
-        message: describeResolveMessage(successReason, undefined, {
-          ...extras,
-          placeName: match.placeName,
-          villageHint: external.village || villageHint,
-        }),
-        stepsTried,
+      const syntheticAddress = [
+        external.village,
+        external.panchayat,
+        external.cluster,
+        block,
+        district,
+        'Bihar',
+        'India',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      const gate = await validatePinForBlock({
+        lat: external.lat,
+        lng: external.lng,
+        block,
+        district,
         villageHint: external.village || villageHint,
-      };
+        siblingBlocks,
+        formattedAddress: syntheticAddress,
+        placeName: external.schoolName,
+        apiKey: key,
+        requireGoogle: Boolean(key),
+      });
+      if (gate.ok) {
+        const match = externalRecordToResolvedPlace(external, block, district);
+        if (gate.formattedAddress) {
+          match.formattedAddress = gate.formattedAddress;
+        }
+        if (gate.placeName) {
+          match.placeName = gate.placeName;
+        }
+        const successReason: SchoolResolveSuccessReason =
+          external.source === 'dramitkumar' ? 'school_on_dramitkumar' : 'school_on_schools_org_in';
+        return {
+          match,
+          successReason,
+          message: describeResolveMessage(successReason, undefined, {
+            ...extras,
+            placeName: match.placeName,
+            villageHint: external.village || villageHint,
+          }),
+          stepsTried,
+          villageHint: external.village || villageHint,
+        };
+      }
+      stepsTried.push(`external_registry_block_gate_reject:${gate.reason || 'unknown'}`);
+    } else {
+      stepsTried.push('external_registry_miss');
     }
-    stepsTried.push('external_registry_miss');
   }
 
   if (!schoolName) {
