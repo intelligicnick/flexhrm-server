@@ -9,6 +9,7 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { SchoolWorksService } from './school-works.service';
 import {
   RequirePermissions,
@@ -319,6 +320,7 @@ export class SchoolWorksController {
     }
   }
 
+  @SkipThrottle()
   @Post('bulk-resolve-locations')
   @RequirePermissions('schoolWork', 'edit')
   async bulkResolveLocations(
@@ -347,6 +349,7 @@ export class SchoolWorksController {
     return result;
   }
 
+  @SkipThrottle()
   @Post('bulk-assign-village-locations')
   @RequirePermissions('schoolWork', 'edit')
   async bulkAssignVillageLocations(

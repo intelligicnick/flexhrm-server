@@ -142,6 +142,61 @@ function logBatchResults(
   }
 }
 
+const BULK_BATCH_DELAY_MS = 800;
+const THROTTLE_RETRY_MS = 65_000;
+const GATEWAY_RETRY_MS = 10_000;
+
+function isRateLimitResponse(status: number, message: string): boolean {
+  if (status === 429) return true;
+  return /throttler|too many requests/i.test(message);
+}
+
+function isGatewayError(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function fetchBulkBatchApi(
+  url: string,
+  init: RequestInit,
+  log: (s: string) => void,
+): Promise<Response> {
+  for (;;) {
+    let lastErr: unknown;
+    let retryBatch = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(url, init);
+        const data = (await res.clone().json().catch(() => ({}))) as { message?: string };
+        const message = String(data.message || '');
+        if (isRateLimitResponse(res.status, message)) {
+          log(`Rate limit — pausing ${Math.ceil(THROTTLE_RETRY_MS / 1000)}s, then retrying same batch…`);
+          await new Promise((r) => setTimeout(r, THROTTLE_RETRY_MS));
+          retryBatch = true;
+          break;
+        }
+        if (isGatewayError(res.status)) {
+          log(`Gateway ${res.status} — retrying in ${GATEWAY_RETRY_MS / 1000}s…`);
+          await new Promise((r) => setTimeout(r, GATEWAY_RETRY_MS));
+          retryBatch = true;
+          break;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        if (attempt < 2) {
+          const waitMs = 1500 * (attempt + 1);
+          log(`Network error — retrying in ${waitMs / 1000}s…`);
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+      }
+    }
+    if (retryBatch) continue;
+    if (lastErr) {
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    }
+  }
+}
+
 async function resolveBlockViaApi(
   job: BlockJob,
   opts: { skipExisting: boolean; schoolLimit: number },
@@ -155,22 +210,26 @@ async function resolveBlockViaApi(
   let failed = 0;
 
   while (true) {
-    const res = await fetch(`${API_BASE}/api/school-works/bulk-assign-village-locations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Cookie: session.cookieHeader,
-        'x-csrf-token': session.csrfToken,
+    const res = await fetchBulkBatchApi(
+      `${API_BASE}/api/school-works/bulk-assign-village-locations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: session.cookieHeader,
+          'x-csrf-token': session.csrfToken,
+        },
+        body: JSON.stringify({
+          district: job.district,
+          block: job.block,
+          saveDraft: true,
+          skipExisting: opts.skipExisting,
+          schoolLimit: opts.schoolLimit,
+          schoolOffset: offset,
+        }),
       },
-      body: JSON.stringify({
-        district: job.district,
-        block: job.block,
-        saveDraft: true,
-        skipExisting: opts.skipExisting,
-        schoolLimit: opts.schoolLimit,
-        schoolOffset: offset,
-      }),
-    });
+      log,
+    );
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok) {
       throw new Error(String(data.message || `HTTP ${res.status}`));
@@ -189,7 +248,7 @@ async function resolveBlockViaApi(
     logBatchResults(data.results, log);
 
     if (!data.hasMore) break;
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, BULK_BATCH_DELAY_MS));
   }
 
   log(
@@ -250,7 +309,7 @@ async function resolveBlockDirect(
       logBatchResults(data.results, log);
 
       if (!data.hasMore) break;
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, BULK_BATCH_DELAY_MS));
     }
 
     log(
