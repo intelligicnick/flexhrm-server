@@ -85,6 +85,39 @@ export function coordinatesInBihar(lat: number, lng: number): boolean {
   );
 }
 
+/** Approximate district bounding boxes — rejects registry/Google pins in the wrong part of Bihar. */
+const DISTRICT_BOUNDS: Record<string, { minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
+  purnia: { minLat: 25.45, maxLat: 26.55, minLng: 86.75, maxLng: 87.95 },
+  madhepura: { minLat: 25.55, maxLat: 26.45, minLng: 86.35, maxLng: 87.35 },
+};
+
+export function coordinatesInExpectedDistrict(
+  lat: number,
+  lng: number,
+  district: string,
+): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const districtNorm = normalizeToken(district);
+  const bounds = DISTRICT_BOUNDS[districtNorm];
+  if (!bounds) return true;
+  return (
+    lat >= bounds.minLat &&
+    lat <= bounds.maxLat &&
+    lng >= bounds.minLng &&
+    lng <= bounds.maxLng
+  );
+}
+
+export function districtCoordinateMismatchReason(
+  lat: number,
+  lng: number,
+  district: string,
+): string | null {
+  if (!district.trim()) return null;
+  if (coordinatesInExpectedDistrict(lat, lng, district)) return null;
+  return `GPS (${lat.toFixed(4)}, ${lng.toFixed(4)}) is outside expected ${district} district bounds`;
+}
+
 export function addressMentionsWrongState(formattedAddress: string): boolean {
   const haystack = normalizeToken(formattedAddress);
   if (!haystack) return false;

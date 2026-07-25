@@ -1,4 +1,4 @@
-import { coordinatesInBihar } from './bihar-geography.util';
+import { coordinatesInBihar, coordinatesInExpectedDistrict } from './bihar-geography.util';
 import { localityHintFromSchoolName } from './reverse-geocode.util';
 import { villageSearchCombinationsFromSchoolName } from './onefivenine-village.util';
 import { placeInExpectedDistrict } from './village-location.util';
@@ -275,10 +275,6 @@ export function isUnsafeSchoolPin(school: {
 }): boolean {
   const lat = Number(school.lat);
   const lng = Number(school.lng);
-  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
-    return true;
-  }
-
   const matchedPlaceName = String(school.matchedPlaceName || '').trim();
   const formattedAddress = String(school.formattedAddress || '').trim();
   const schoolName = String(school.schoolName || '').trim();
@@ -286,6 +282,13 @@ export function isUnsafeSchoolPin(school: {
   const district = String(school.district || '').trim();
   const confidence = String(school.locationConfidence || '').trim();
   const siblingBlocks = school.siblingBlocks ?? [];
+
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
+    return true;
+  }
+  if (Number.isFinite(lat) && Number.isFinite(lng) && district) {
+    if (!coordinatesInExpectedDistrict(lat, lng, district)) return true;
+  }
 
   if (isAdminPlaceName(matchedPlaceName, block)) {
     return true;
@@ -609,6 +612,7 @@ export function unsafePinFailureReason(
   siblingBlocks: string[] = [],
 ): SchoolResolveFailureReason {
   if (!coordinatesInBihar(lat, lng)) return 'outside_bihar';
+  if (district && !coordinatesInExpectedDistrict(lat, lng, district)) return 'wrong_admin_area';
   const adminMismatch = adminAreaMismatchReason(formattedAddress, block, district, siblingBlocks);
   if (adminMismatch) return 'wrong_admin_area';
   return 'unsafe_match';

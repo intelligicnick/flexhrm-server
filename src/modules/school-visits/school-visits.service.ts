@@ -34,7 +34,7 @@ import {
 } from '../../common/utils/reverse-geocode.util';
 import { distanceMeters, isWithinGeofence } from '../../common/utils/geo.util';
 import { VISIT_MAX_GPS_ACCURACY_M, geofenceAreaLabel } from '../../common/utils/google-school-place.util';
-import { buildPingWindow, verifyVisitAgainstPingTrail } from './visit-ping-verification.util';
+import { buildPingWindow, verifyVisitAgainstPingTrail, type VisitPingVerification } from './visit-ping-verification.util';
 
 export interface EffectiveLastVisitInfo {
   lastVisitDate: string | null;
@@ -377,15 +377,6 @@ export class SchoolVisitsService {
     }
 
     const schoolPin = this.schoolWorksService.getVerifiedSchoolPin(school);
-    if (!schoolPin) {
-      const village = localityHintFromSchoolName(String(school.schoolName || ''));
-      const schoolLabel = String(school.schoolName || 'School');
-      const udise = String(school.udise || '').trim();
-      const blockName = String(school.block || '').trim();
-      throw new BadRequestException(
-        `${schoolLabel}${village ? ` (village: ${village})` : ''}${udise ? `, UDISE ${udise}` : ''}: school location is not set up yet. Admin must run Pin & Resolve for block ${blockName || 'this block'} in Field Team.`,
-      );
-    }
 
     const visitDate = todayIsoInKolkata();
     if (dto.visitDate && dto.visitDate !== visitDate) {
@@ -440,35 +431,83 @@ export class SchoolVisitsService {
           'Mock GPS detected. Disable fake location apps and try again at the school.',
         );
       }
+    }
+
+    let locationMatchStatus = 'verified';
+    let needsReview = false;
+    const reviewNotes: string[] = [];
+
+    let schoolLat = 0;
+    let schoolLng = 0;
+    let geofenceRadiusM = 400;
+
+    if (!schoolPin) {
+      locationMatchStatus = 'school_pin_missing';
+      needsReview = true;
+      reviewNotes.push(
+        'School pin is not verified — visit saved with supervisor GPS for admin review.',
+      );
+      const draftLat = Number(school.lat);
+      const draftLng = Number(school.lng);
+      if (this.isValidVisitCoord(draftLat, draftLng)) {
+        schoolLat = draftLat;
+        schoolLng = draftLng;
+        geofenceRadiusM =
+          Number(school.geofenceRadiusM) > 0 ? Number(school.geofenceRadiusM) : 400;
+      }
+    } else {
+      schoolLat = schoolPin.lat;
+      schoolLng = schoolPin.lng;
+      geofenceRadiusM = schoolPin.radiusM;
+
+      for (const point of gpsPoints) {
+        const distance = distanceMeters(
+          point.lat,
+          point.lng,
+          schoolPin.lat,
+          schoolPin.lng,
+        );
+        if (
+          !isWithinGeofence(
+            point.lat,
+            point.lng,
+            schoolPin.lat,
+            schoolPin.lng,
+            schoolPin.radiusM,
+          )
+        ) {
+          locationMatchStatus = 'outside_geofence';
+          needsReview = true;
+          const area = geofenceAreaLabel(schoolPin.locationConfidence);
+          reviewNotes.push(
+            `Visit GPS ${Math.round(distance)} m from ${area} pin (limit ${schoolPin.radiusM} m).`,
+          );
+          break;
+        }
+      }
+    }
+
+    for (const point of gpsPoints) {
       if (
         point.accuracyMeters != null &&
         Number.isFinite(point.accuracyMeters) &&
         point.accuracyMeters > VISIT_MAX_GPS_ACCURACY_M
       ) {
-        throw new BadRequestException(
-          `GPS accuracy is too poor (${Math.round(point.accuracyMeters)} m). Move outdoors near the school and retry.`,
-        );
-      }
-      const distance = distanceMeters(
-        point.lat,
-        point.lng,
-        schoolPin.lat,
-        schoolPin.lng,
-      );
-      if (!isWithinGeofence(point.lat, point.lng, schoolPin.lat, schoolPin.lng, schoolPin.radiusM)) {
-        const area = geofenceAreaLabel(schoolPin.locationConfidence);
-        const village = localityHintFromSchoolName(String(school.schoolName || ''));
-        const placeLabel = village ? `${village} village` : area;
-        throw new BadRequestException(
-          `You are ${Math.round(distance)} m from ${placeLabel} (UDISE ${String(school.udise || '')}). Move within ${schoolPin.radiusM} m of the required pin to submit this visit.`,
+        needsReview = true;
+        if (locationMatchStatus === 'verified') {
+          locationMatchStatus = 'poor_gps_accuracy';
+        }
+        reviewNotes.push(
+          `GPS accuracy ${Math.round(point.accuracyMeters)} m — flagged for review.`,
         );
       }
     }
 
     const primaryGps = gpsPoints[0];
-    const distanceToSchoolM = primaryGps
-      ? distanceMeters(primaryGps.lat, primaryGps.lng, schoolPin.lat, schoolPin.lng)
-      : 0;
+    const distanceToSchoolM =
+      primaryGps && this.isValidVisitCoord(schoolLat, schoolLng)
+        ? distanceMeters(primaryGps.lat, primaryGps.lng, schoolLat, schoolLng)
+        : 0;
     const gpsAccuracyM = primaryGps?.accuracyMeters ?? 0;
 
     const id = `visit_${crypto.randomBytes(8).toString('hex')}`;
@@ -517,35 +556,71 @@ export class SchoolVisitsService {
     const visitLat = primaryGps?.lat ?? 0;
     const visitLng = primaryGps?.lng ?? 0;
 
-    let pingVerification = verifyVisitAgainstPingTrail({
-      visitLat,
-      visitLng,
-      schoolLat: schoolPin.lat,
-      schoolLng: schoolPin.lng,
-      geofenceRadiusM: schoolPin.radiusM,
-      visitCapturedAt,
-      pings: [],
-    });
+    let pingVerification: VisitPingVerification = {
+      locationMatchStatus: 'no_ping_trail',
+      pingTrailNearSchoolCount: 0,
+      pingTrailNearestSchoolM: null as number | null,
+      pingTrailNearestVisitM: null as number | null,
+      pingTrailPointCount: 0,
+      pingTrailWindowMinutes: 45,
+      pingVerificationNotes: '',
+      needsReview: false,
+    };
 
-    try {
-      const { from, to } = buildPingWindow(visitCapturedAt);
-      const pings = await this.schoolSupervisorsService.getLocationPingsInWindow(
-        supervisorId,
-        from,
-        to,
-      );
+    if (
+      primaryGps &&
+      this.isValidVisitCoord(schoolLat, schoolLng) &&
+      locationMatchStatus !== 'school_pin_missing'
+    ) {
       pingVerification = verifyVisitAgainstPingTrail({
-        visitLat,
-        visitLng,
-        schoolLat: schoolPin.lat,
-        schoolLng: schoolPin.lng,
-        geofenceRadiusM: schoolPin.radiusM,
-        visitCapturedAt,
-        pings,
+        visitLat: primaryGps.lat,
+        visitLng: primaryGps.lng,
+        schoolLat,
+        schoolLng,
+        geofenceRadiusM,
+        visitCapturedAt:
+          dto.gpsLocation?.capturedAt ||
+          dto.photos?.[0]?.takenAt ||
+          new Date().toISOString(),
+        pings: [],
       });
-    } catch {
-      /* keep default no_ping_trail if ping lookup fails */
+
+      try {
+        const visitCapturedAt =
+          dto.gpsLocation?.capturedAt ||
+          dto.photos?.[0]?.takenAt ||
+          new Date().toISOString();
+        const { from, to } = buildPingWindow(visitCapturedAt);
+        const pings = await this.schoolSupervisorsService.getLocationPingsInWindow(
+          supervisorId,
+          from,
+          to,
+        );
+        pingVerification = verifyVisitAgainstPingTrail({
+          visitLat: primaryGps.lat,
+          visitLng: primaryGps.lng,
+          schoolLat,
+          schoolLng,
+          geofenceRadiusM,
+          visitCapturedAt,
+          pings,
+        });
+      } catch {
+        /* keep default no_ping_trail if ping lookup fails */
+      }
+
+      if (
+        locationMatchStatus === 'verified' &&
+        pingVerification.locationMatchStatus !== 'verified'
+      ) {
+        locationMatchStatus = pingVerification.locationMatchStatus;
+      }
+      if (pingVerification.needsReview) needsReview = true;
     }
+
+    const pingVerificationNotes = [...reviewNotes, pingVerification.pingVerificationNotes]
+      .filter(Boolean)
+      .join(' ');
 
     const doc = await this.visitModel.create({
       id,
@@ -586,16 +661,16 @@ export class SchoolVisitsService {
       commitmentId,
       distanceToSchoolM: Math.round(distanceToSchoolM),
       gpsAccuracyM: Math.round(gpsAccuracyM),
-      locationMatchStatus: pingVerification.locationMatchStatus,
-      pingVerificationNotes: pingVerification.pingVerificationNotes,
+      locationMatchStatus,
+      pingVerificationNotes,
       pingTrailNearSchoolCount: pingVerification.pingTrailNearSchoolCount,
       pingTrailNearestSchoolM: pingVerification.pingTrailNearestSchoolM ?? 0,
       pingTrailNearestVisitM: pingVerification.pingTrailNearestVisitM ?? 0,
       pingTrailPointCount: pingVerification.pingTrailPointCount,
       pingTrailWindowMinutes: pingVerification.pingTrailWindowMinutes,
-      needsReview: pingVerification.needsReview,
-      schoolLat: schoolPin.lat,
-      schoolLng: schoolPin.lng,
+      needsReview: needsReview || pingVerification.needsReview,
+      schoolLat,
+      schoolLng,
     });
 
     await this.notificationsService.notifyVisitSubmitted({
