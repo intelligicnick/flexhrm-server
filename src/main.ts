@@ -22,6 +22,8 @@ async function bootstrap(): Promise<void> {
     if (!origin) return true;
     // Android WebView bundled assets and some mobile browsers send this literal value.
     if (origin === 'null') return true;
+    // Chrome extension pages (options / side panel) send chrome-extension://<id>.
+    if (origin.startsWith('chrome-extension://')) return true;
     if (corsOrigins.includes(origin)) return true;
     try {
       const { hostname } = new URL(origin);
