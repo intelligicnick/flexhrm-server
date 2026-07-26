@@ -362,6 +362,7 @@ export class SchoolWorksController {
       saveDraft: dto.saveDraft !== false,
       skipExisting: dto.skipExisting === true,
       tryExactSchoolUpgrade: dto.tryExactSchoolUpgrade === true,
+      fastMode: dto.fastMode !== false,
       schoolLimit: dto.schoolLimit ?? dto.villageLimit,
       schoolOffset: dto.schoolOffset ?? dto.villageOffset ?? dto.offset,
     });

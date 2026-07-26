@@ -6,7 +6,7 @@ import {
 
 const DRAMITKUMAR_BASE = 'https://schoolinfo.dramitkumar.in';
 const SCHOOLS_ORG_IN_BASE = 'https://schools.org.in';
-const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_TIMEOUT_MS = 12_000;
 
 export type ExternalSchoolRegistrySource = 'dramitkumar' | 'schools_org_in';
 

@@ -187,6 +187,7 @@ export async function searchOneFiveNineVillages(
         Accept: 'text/html',
       },
       body: new URLSearchParams({ queryString: q }).toString(),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return [];
 
@@ -269,6 +270,7 @@ async function fetchVillageIdFromPath(path: string): Promise<string> {
   try {
     const res = await fetch(`${ONEFIVENINE_BASE}/india/villages/${slugPath}`, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return '';
     const html = await res.text();
@@ -288,6 +290,7 @@ async function fetchOneFiveNineCoords(villageId: string): Promise<{ lat: number;
   try {
     const res = await fetch(`${ONEFIVENINE_BASE}/map.dont?method=loadEditMap&villageId=${encodeURIComponent(id)}`, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
     const html = await res.text();

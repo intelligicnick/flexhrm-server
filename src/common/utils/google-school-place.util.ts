@@ -642,6 +642,7 @@ async function* searchGooglePlacesCandidates(
           'places.id,places.displayName,places.formattedAddress,places.location,places.types',
       },
       body: JSON.stringify({ textQuery, languageCode: 'en' }),
+      signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) return;
     const data = (await res.json()) as {
@@ -805,7 +806,7 @@ async function geocodeAddress(
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
     url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;
@@ -961,6 +962,7 @@ async function searchNominatimForward(
         Accept: 'application/json',
         'User-Agent': 'FlexHRM-SchoolResolver/1.0 (school location lookup)',
       },
+      signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) return [];
 
@@ -1153,7 +1155,11 @@ export async function resolveSchoolPlaceDetailed(
   },
   apiKey?: string,
   siblingBlocks: string[] = [],
-  options?: { villageCache?: import('./village-resolve-orchestrator.util').BlockVillageCache },
+  options?: {
+    villageCache?: import('./village-resolve-orchestrator.util').BlockVillageCache;
+    /** Skip slow onefivenine autocomplete / OSM multi-combo loops. */
+    fastMode?: boolean;
+  },
 ): Promise<SchoolResolveOutcome> {
   const key = String(
     apiKey ||
@@ -1161,6 +1167,7 @@ export async function resolveSchoolPlaceDetailed(
       process.env.GOOGLE_GEOCODING_API_KEY ||
       '',
   ).trim();
+  const fastMode = options?.fastMode === true;
 
   const schoolName = String(school.schoolName || '').trim();
   const block = String(school.block || '').trim();
@@ -1190,6 +1197,7 @@ export async function resolveSchoolPlaceDetailed(
       ]
         .filter(Boolean)
         .join(', ');
+      // Fast mode: skip extra Google reverse-geocode on registry hits (saves ~1–3s/school).
       const gate = await validatePinForBlock({
         lat: external.lat,
         lng: external.lng,
@@ -1200,7 +1208,7 @@ export async function resolveSchoolPlaceDetailed(
         formattedAddress: syntheticAddress,
         placeName: external.schoolName,
         apiKey: key,
-        requireGoogle: Boolean(key),
+        requireGoogle: !fastMode && Boolean(key),
       });
       if (gate.ok) {
         const match = externalRecordToResolvedPlace(external, block, district);
@@ -1281,6 +1289,7 @@ export async function resolveSchoolPlaceDetailed(
     siblingBlocks,
     apiKey: key,
     villageCache: options?.villageCache,
+    fastMode,
   });
 
   if (villageResult.pin && villageResult.successReason) {

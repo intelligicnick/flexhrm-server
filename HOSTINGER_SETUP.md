@@ -209,6 +209,7 @@ curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | 
 | `502` / `503` / timeout | App not started, build failed, or wrong start command |
 | **408** | **Remove `PORT` from hPanel** — let Hostinger inject it; check deploy logs for crash |
 | `404` on `/api/health` | Wrong deploy root or app not running NestJS build |
+| Pin & Resolve “Cannot reach API” / 504 | Hostinger proxy ~20s — resolve uses **1 school per request**. A long Google/UDISE chain that exceeds the edge timeout looks like a network failure; retry the batch. Do not raise `schoolLimit` above 2. |
 
 ---
 

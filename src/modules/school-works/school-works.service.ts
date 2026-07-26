@@ -1021,6 +1021,8 @@ export class SchoolWorksService {
     saveDraft?: boolean;
     skipExisting?: boolean;
     tryExactSchoolUpgrade?: boolean;
+    /** Skip slow onefivenine/OSM loops — default true for Hostinger proxy. */
+    fastMode?: boolean;
     schoolLimit?: number;
     schoolOffset?: number;
     villageLimit?: number;
@@ -1068,14 +1070,18 @@ export class SchoolWorksService {
       0,
       Number(params.schoolOffset ?? params.villageOffset ?? params.offset) || 0,
     );
+    // Hostinger reverse proxy ~20s — never process more than 2 schools per HTTP request.
     const schoolLimit = Math.min(
       Math.max(
-        Number(params.schoolLimit ?? params.villageLimit ?? params.limit) || 2,
+        Number(params.schoolLimit ?? params.villageLimit ?? params.limit) || 1,
         1,
       ),
-      5,
+      2,
     );
     const batchSchools = allSchools.slice(schoolOffset, schoolOffset + schoolLimit);
+    const fastMode = params.fastMode !== false;
+    /** Soft budget per school so one hung Google/UDISE chain cannot blow the proxy. */
+    const SCHOOL_RESOLVE_BUDGET_MS = fastMode ? 12_000 : 16_000;
 
     const results: Array<Record<string, unknown>> = [];
     let resolved = 0;
@@ -1123,17 +1129,35 @@ export class SchoolWorksService {
         continue;
       }
 
-      const outcome = await resolveSchoolPlaceDetailed(
-        {
-          schoolName,
-          block: schoolBlock,
-          district: schoolDistrict,
-          udise,
-        },
-        undefined,
-        siblingBlocks,
-        { villageCache },
-      );
+      let resolveTimer: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        resolveSchoolPlaceDetailed(
+          {
+            schoolName,
+            block: schoolBlock,
+            district: schoolDistrict,
+            udise,
+          },
+          undefined,
+          siblingBlocks,
+          { villageCache, fastMode },
+        ),
+        new Promise<Awaited<ReturnType<typeof resolveSchoolPlaceDetailed>>>((resolve) => {
+          resolveTimer = setTimeout(
+            () =>
+              resolve({
+                match: null,
+                failureReason: 'school_and_village_miss',
+                message: `Timed out resolving after ${Math.round(SCHOOL_RESOLVE_BUDGET_MS / 1000)}s — retry this school`,
+                stepsTried: ['resolve_timeout'],
+                villageHint,
+              }),
+            SCHOOL_RESOLVE_BUDGET_MS,
+          );
+        }),
+      ]).finally(() => {
+        if (resolveTimer) clearTimeout(resolveTimer);
+      });
       const match = outcome.match;
 
       if (!match) {
@@ -1666,7 +1690,7 @@ export class SchoolWorksService {
   }> {
     const pending = supervisorSchools.filter((school) => !this.getVerifiedSchoolPin(school));
     const total = pending.length;
-    const limit = Math.min(Math.max(Number(schoolLimit) || 2, 1), 5);
+    const limit = Math.min(Math.max(Number(schoolLimit) || 1, 1), 2);
     const offset = Math.max(0, Number(schoolOffset) || 0);
     const batch = pending.slice(offset, offset + limit);
 

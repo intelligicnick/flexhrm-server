@@ -141,6 +141,7 @@ async function searchNominatimForward(
         Accept: 'application/json',
         'User-Agent': 'FlexHRM-VillageResolver/1.0 (school village lookup)',
       },
+      signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) return [];
     const data = (await res.json()) as Array<{ lat?: string; lon?: string; display_name?: string }>;
@@ -166,7 +167,7 @@ async function geocodeAddress(
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
     url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;

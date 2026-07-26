@@ -44,7 +44,7 @@ async function reverseGeocodeGoogle(
     url.searchParams.set('latlng', `${lat},${lng}`);
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;

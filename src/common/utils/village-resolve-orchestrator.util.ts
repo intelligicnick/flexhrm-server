@@ -126,11 +126,14 @@ export async function resolveVillageMultiSource(params: {
   siblingBlocks?: string[];
   apiKey?: string;
   villageCache?: BlockVillageCache;
+  /** Skip slow onefivenine autocomplete + multi OSM/util loops (Hostinger bulk). */
+  fastMode?: boolean;
 }): Promise<VillageOrchestratorResult> {
   const schoolName = String(params.schoolName || '').trim();
   const block = String(params.block || '').trim();
   const district = String(params.district || '').trim();
   const siblingBlocks = params.siblingBlocks ?? [];
+  const fastMode = params.fastMode === true;
   const apiKey = String(
     params.apiKey ||
       process.env.GOOGLE_PLACES_API_KEY ||
@@ -138,7 +141,9 @@ export async function resolveVillageMultiSource(params: {
       '',
   ).trim();
   const stepsTried: string[] = [];
-  const combos = villageSearchCombinationsFromSchoolName(schoolName);
+  const allCombos = villageSearchCombinationsFromSchoolName(schoolName);
+  // Fast mode: only try the strongest 2 name combos to stay under the proxy budget.
+  const combos = fastMode ? allCombos.slice(0, 2) : allCombos;
   const villageHint = localityHintFromSchoolName(schoolName) || combos[combos.length - 1] || '';
 
   if (!combos.length && !villageHint) {
@@ -151,6 +156,15 @@ export async function resolveVillageMultiSource(params: {
     const cached = params.villageCache?.get(blockVillageCacheKey(district, block, label));
     if (!cached) continue;
     stepsTried.push(`cache_hit:${label}`);
+    if (fastMode) {
+      // Trust cached pin without another Google reverse-geocode round-trip.
+      return successFromPin(
+        { ...cached, resolutionStep: 'block_cache', queryUsed: `cache:${label}` },
+        'village_from_block_cache',
+        villageHint || label,
+        stepsTried,
+      );
+    }
     const pin = await finalizePin(
       { ...cached, resolutionStep: 'block_cache', queryUsed: `cache:${label}` },
       label,
@@ -171,6 +185,10 @@ export async function resolveVillageMultiSource(params: {
     const directPin = await tryOneFiveNineDirectPath(district, block, combo);
     if (!directPin) continue;
     stepsTried.push(`onefivenine_direct:${combo}`);
+    if (fastMode) {
+      cachePin(params.villageCache, district, block, combo, directPin);
+      return successFromPin(directPin, 'village_on_onefivenine_direct', villageHint || combo, stepsTried);
+    }
     const pin = await finalizePin(directPin, combo, district, block, apiKey, siblingBlocks);
     if (pin) {
       cachePin(params.villageCache, district, block, combo, pin);
@@ -180,25 +198,30 @@ export async function resolveVillageMultiSource(params: {
   }
   stepsTried.push('onefivenine_direct_miss');
 
-  stepsTried.push('onefivenine_village_combos');
-  const oneFiveNine = await resolveOneFiveNineVillagePin(schoolName, block, district, siblingBlocks);
-  if (oneFiveNine.pin) {
-    stepsTried.push(`onefivenine_hit:${oneFiveNine.queryUsed}`);
-    const pin = await finalizePin(
-      oneFiveNine.pin,
-      villageHint || oneFiveNine.villageHint,
-      district,
-      block,
-      apiKey,
-      siblingBlocks,
-    );
-    if (pin) {
-      cachePin(params.villageCache, district, block, villageHint || oneFiveNine.villageHint, pin);
-      return successFromPin(pin, 'village_on_onefivenine', oneFiveNine.villageHint || villageHint, stepsTried);
+  // Slow autocomplete scrape — skip in fastMode (biggest Hostinger timeout culprit).
+  if (!fastMode) {
+    stepsTried.push('onefivenine_village_combos');
+    const oneFiveNine = await resolveOneFiveNineVillagePin(schoolName, block, district, siblingBlocks);
+    if (oneFiveNine.pin) {
+      stepsTried.push(`onefivenine_hit:${oneFiveNine.queryUsed}`);
+      const pin = await finalizePin(
+        oneFiveNine.pin,
+        villageHint || oneFiveNine.villageHint,
+        district,
+        block,
+        apiKey,
+        siblingBlocks,
+      );
+      if (pin) {
+        cachePin(params.villageCache, district, block, villageHint || oneFiveNine.villageHint, pin);
+        return successFromPin(pin, 'village_on_onefivenine', oneFiveNine.villageHint || villageHint, stepsTried);
+      }
+      stepsTried.push('onefivenine_reject_block_gate');
     }
-    stepsTried.push('onefivenine_reject_block_gate');
+    stepsTried.push('onefivenine_village_miss');
+  } else {
+    stepsTried.push('onefivenine_village_combos_skipped_fast');
   }
-  stepsTried.push('onefivenine_village_miss');
 
   if (apiKey) {
     stepsTried.push('google_village_combos');
@@ -220,6 +243,10 @@ export async function resolveVillageMultiSource(params: {
         },
         'google_combo',
       );
+      if (fastMode) {
+        cachePin(params.villageCache, district, block, combo, rawPin);
+        return successFromPin(rawPin, 'village_on_google_combo', villageHint || combo, stepsTried);
+      }
       const pin = await finalizePin(rawPin, combo, district, block, apiKey, siblingBlocks);
       if (pin) {
         cachePin(params.villageCache, district, block, combo, pin);
@@ -230,11 +257,17 @@ export async function resolveVillageMultiSource(params: {
     stepsTried.push('google_village_combos_miss');
   }
 
+  // OSM / util loops are slow under Nominatim rate limits — one combo only in fastMode.
+  const osmCombos = fastMode ? combos.slice(0, 1) : combos;
   stepsTried.push('osm_village_combos');
-  for (const combo of combos) {
+  for (const combo of osmCombos) {
     const osmPin = await resolveOsmVillageCombo(combo, block, district);
     if (!osmPin) continue;
     stepsTried.push(`osm_combo:${combo}`);
+    if (fastMode) {
+      cachePin(params.villageCache, district, block, combo, osmPin);
+      return successFromPin(osmPin, 'village_on_osm_combo', villageHint || combo, stepsTried);
+    }
     const pin = await finalizePin(osmPin, combo, district, block, apiKey, siblingBlocks);
     if (pin) {
       cachePin(params.villageCache, district, block, combo, pin);
@@ -244,21 +277,23 @@ export async function resolveVillageMultiSource(params: {
   }
   stepsTried.push('osm_village_combos_miss');
 
-  stepsTried.push('village_pin_util');
-  for (const combo of combos) {
-    const { pin: utilPin } = await resolveVillagePin(combo, block, district, apiKey);
-    if (!utilPin) continue;
-    stepsTried.push(`village_util:${combo}`);
-    const pin = await finalizePin(utilPin, combo, district, block, apiKey, siblingBlocks);
-    if (pin) {
-      const reason: SchoolResolveSuccessReason =
-        utilPin.resolutionStep === 'osm_village' ? 'village_on_osm' : 'village_on_google';
-      cachePin(params.villageCache, district, block, combo, pin);
-      return successFromPin(pin, reason, villageHint || combo, stepsTried);
+  if (!fastMode) {
+    stepsTried.push('village_pin_util');
+    for (const combo of combos) {
+      const { pin: utilPin } = await resolveVillagePin(combo, block, district, apiKey);
+      if (!utilPin) continue;
+      stepsTried.push(`village_util:${combo}`);
+      const pin = await finalizePin(utilPin, combo, district, block, apiKey, siblingBlocks);
+      if (pin) {
+        const reason: SchoolResolveSuccessReason =
+          utilPin.resolutionStep === 'osm_village' ? 'village_on_osm' : 'village_on_google';
+        cachePin(params.villageCache, district, block, combo, pin);
+        return successFromPin(pin, reason, villageHint || combo, stepsTried);
+      }
+      stepsTried.push(`village_util_reject:${combo}`);
     }
-    stepsTried.push(`village_util_reject:${combo}`);
+    stepsTried.push('village_pin_util_miss');
   }
-  stepsTried.push('village_pin_util_miss');
 
   return { pin: null, villageHint, stepsTried };
 }

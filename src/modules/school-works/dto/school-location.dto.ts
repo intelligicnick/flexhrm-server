@@ -20,7 +20,7 @@ export class BulkResolveSchoolLocationsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(20)
+  @Max(2)
   limit?: number;
 
   @IsOptional()
@@ -51,11 +51,19 @@ export class BulkAssignVillageLocationsDto {
   @IsBoolean()
   tryExactSchoolUpgrade?: boolean;
 
-  /** Schools per request (Hostinger ~20s proxy). Default 2. */
+  /**
+   * Faster resolve path for bulk Pin & Resolve (skips slow onefivenine/OSM loops).
+   * Default true for Hostinger-safe batches.
+   */
+  @IsOptional()
+  @IsBoolean()
+  fastMode?: boolean;
+
+  /** Schools per request (Hostinger ~20s proxy). Default 1 — keep ≤2. */
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(5)
+  @Max(2)
   schoolLimit?: number;
 
   @IsOptional()
@@ -67,7 +75,7 @@ export class BulkAssignVillageLocationsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(5)
+  @Max(2)
   villageLimit?: number;
 
   /** @deprecated Use schoolOffset */
@@ -80,7 +88,7 @@ export class BulkAssignVillageLocationsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(30)
+  @Max(2)
   limit?: number;
 
   /** @deprecated Use villageOffset */
