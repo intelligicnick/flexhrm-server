@@ -831,6 +831,7 @@ export class SchoolWorksService {
     district?: string;
     saveVerified?: boolean;
     skipExisting?: boolean;
+    fastMode?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<{
@@ -842,10 +843,21 @@ export class SchoolWorksService {
     hasMore: boolean;
     nextOffset: number;
     batchProcessed: number;
+    blockRegistrySchoolCount?: number;
   }> {
-    const { resolveSchoolPlaceDetailed, isGooglePlacesConfigured } = await import(
-      '../../common/utils/google-school-place.util'
+    const {
+      resolveSchoolPlaceDetailed,
+      isGooglePlacesConfigured,
+      describeResolveMessage,
+      unsafePinFailureReason,
+    } = await import('../../common/utils/google-school-place.util');
+    const { warmBlockRegistryIndex } = await import(
+      '../../common/utils/location-balanced-resolve.util'
     );
+    const {
+      RESOLVE_TIMING,
+      schoolResolveBudgetMs,
+    } = await import('../../common/utils/location-resolve-timing.util');
     const block = String(params.block || '').trim();
     const district = String(params.district || '').trim();
     if (!block) {
@@ -857,13 +869,24 @@ export class SchoolWorksService {
       );
     }
 
+    const { getSessionVillageCache } = await import(
+      '../../common/utils/village-resolve-orchestrator.util'
+    );
+    const villageCache = getSessionVillageCache(district, block);
+    const blockWarm = await warmBlockRegistryIndex(district, block);
+    const fastMode = params.fastMode !== false;
+    const schoolBudgetMs = schoolResolveBudgetMs(fastMode);
+
     const allSchools = await this.findSchoolsInBlock(block, district || undefined);
     const siblingBlocks = district
       ? await this.listBlocksInDistrict(district)
       : [block];
     const total = allSchools.length;
     const offset = Math.max(0, Number(params.offset) || 0);
-    const limit = Math.min(Math.max(Number(params.limit) || 3, 1), 20);
+    const limit = Math.min(
+      Math.max(Number(params.limit) || RESOLVE_TIMING.bulkSchoolsPerRequest, 1),
+      RESOLVE_TIMING.bulkSchoolsPerRequest,
+    );
     const schools = allSchools.slice(offset, offset + limit);
     const results: Array<Record<string, unknown>> = [];
     let resolved = 0;
@@ -875,6 +898,8 @@ export class SchoolWorksService {
       const schoolName = String(school.schoolName || '');
       const udise = String(school.udise || '');
       const villageHint = localityHintFromSchoolName(schoolName);
+      const schoolBlock = String(school.block || block);
+      const schoolDistrict = String(school.district || district);
 
       if (
         params.skipExisting === true &&
@@ -888,8 +913,8 @@ export class SchoolWorksService {
           schoolName,
           udise,
           villageHint,
-          block: String(school.block || ''),
-          district: String(school.district || ''),
+          block: schoolBlock,
+          district: schoolDistrict,
           status: 'skipped',
           lat: Number(school.lat),
           lng: Number(school.lng),
@@ -903,16 +928,35 @@ export class SchoolWorksService {
         continue;
       }
 
-      const outcome = await resolveSchoolPlaceDetailed(
-        {
-          schoolName,
-          block: String(school.block || block),
-          district: String(school.district || district),
-          udise,
-        },
-        undefined,
-        siblingBlocks,
-      );
+      let resolveTimer: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        resolveSchoolPlaceDetailed(
+          {
+            schoolName,
+            block: schoolBlock,
+            district: schoolDistrict,
+            udise,
+          },
+          undefined,
+          siblingBlocks,
+          { villageCache, fastMode, blockIndexWarm: blockWarm.schoolCount > 0 },
+        ),
+        new Promise<Awaited<ReturnType<typeof resolveSchoolPlaceDetailed>>>((resolve) => {
+          resolveTimer = setTimeout(
+            () =>
+              resolve({
+                match: null,
+                failureReason: 'school_and_village_miss',
+                message: `Timed out resolving after ${Math.round(schoolBudgetMs / 1000)}s — retry this school`,
+                stepsTried: ['resolve_timeout'],
+                villageHint,
+              }),
+            schoolBudgetMs,
+          );
+        }),
+      ]).finally(() => {
+        if (resolveTimer) clearTimeout(resolveTimer);
+      });
       const match = outcome.match;
 
       if (!match) {
@@ -922,14 +966,58 @@ export class SchoolWorksService {
           schoolName,
           udise,
           villageHint: outcome.villageHint || villageHint,
-          block: String(school.block || ''),
-          district: String(school.district || ''),
+          block: schoolBlock,
+          district: schoolDistrict,
           status: 'not_found',
           failureReason: outcome.failureReason || 'school_and_village_miss',
           message: outcome.message,
           stepsTried: outcome.stepsTried,
         });
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
+        continue;
+      }
+
+      const safe = this.pinSafeForAutoVerify(
+        school,
+        match.lat,
+        match.lng,
+        match.placeName,
+        match.formattedAddress,
+        match.locationConfidence,
+      );
+
+      if (!safe) {
+        failed++;
+        const failureReason = unsafePinFailureReason(
+          match.lat,
+          match.lng,
+          match.formattedAddress,
+          schoolBlock,
+          schoolDistrict,
+          siblingBlocks,
+        );
+        results.push({
+          schoolWorkId: schoolId,
+          schoolName,
+          udise,
+          villageHint: outcome.villageHint || villageHint,
+          block: schoolBlock,
+          district: schoolDistrict,
+          status: 'unsafe_pin',
+          lat: match.lat,
+          lng: match.lng,
+          matchedPlaceName: match.placeName,
+          formattedAddress: match.formattedAddress,
+          failureReason,
+          message: describeResolveMessage(undefined, failureReason, {
+            villageHint: outcome.villageHint || villageHint,
+            block: schoolBlock,
+            district: schoolDistrict,
+            placeName: match.placeName,
+          }),
+          stepsTried: outcome.stepsTried,
+        });
+        await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
         continue;
       }
 
@@ -978,7 +1066,7 @@ export class SchoolWorksService {
       }
 
       results.push(row);
-      await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
     }
 
     const nextOffset = offset + schools.length;
@@ -991,6 +1079,7 @@ export class SchoolWorksService {
       hasMore: nextOffset < total,
       nextOffset,
       batchProcessed: schools.length,
+      blockRegistrySchoolCount: blockWarm.schoolCount,
     };
   }
 
@@ -1040,10 +1129,20 @@ export class SchoolWorksService {
     hasMore: boolean;
     nextVillageOffset: number;
     nextOffset: number;
+    nextSchoolOffset: number;
     batchProcessed: number;
+    blockRegistrySchoolCount?: number;
+    blockRegistryCached?: boolean;
   }> {
     const { resolveSchoolPlaceDetailed, describeResolveMessage, unsafePinFailureReason } =
       await import('../../common/utils/google-school-place.util');
+    const { warmBlockRegistryIndex } = await import(
+      '../../common/utils/location-balanced-resolve.util'
+    );
+    const {
+      RESOLVE_TIMING,
+      schoolResolveBudgetMs,
+    } = await import('../../common/utils/location-resolve-timing.util');
     const block = String(params.block || '').trim();
     const district = String(params.district || '').trim();
     if (!block) {
@@ -1053,6 +1152,8 @@ export class SchoolWorksService {
       '../../common/utils/village-resolve-orchestrator.util'
     );
     const villageCache = getSessionVillageCache(district, block);
+
+    const blockWarm = await warmBlockRegistryIndex(district, block);
 
     const allSchools = await this.findSchoolsInBlock(block, district || undefined);
     const siblingBlocks = district
@@ -1070,18 +1171,17 @@ export class SchoolWorksService {
       0,
       Number(params.schoolOffset ?? params.villageOffset ?? params.offset) || 0,
     );
-    // Hostinger reverse proxy ~20s — never process more than 2 schools per HTTP request.
+    // Process several schools per request so dramitkumar + village cache are reused.
     const schoolLimit = Math.min(
       Math.max(
         Number(params.schoolLimit ?? params.villageLimit ?? params.limit) || 1,
         1,
       ),
-      2,
+      RESOLVE_TIMING.bulkSchoolsPerRequest,
     );
     const batchSchools = allSchools.slice(schoolOffset, schoolOffset + schoolLimit);
     const fastMode = params.fastMode !== false;
-    /** Soft budget per school so one hung Google/UDISE chain cannot blow the proxy. */
-    const SCHOOL_RESOLVE_BUDGET_MS = fastMode ? 12_000 : 16_000;
+    const SCHOOL_RESOLVE_BUDGET_MS = schoolResolveBudgetMs(fastMode);
 
     const results: Array<Record<string, unknown>> = [];
     let resolved = 0;
@@ -1140,7 +1240,7 @@ export class SchoolWorksService {
           },
           undefined,
           siblingBlocks,
-          { villageCache, fastMode },
+          { villageCache, fastMode, blockIndexWarm: blockWarm.schoolCount > 0 },
         ),
         new Promise<Awaited<ReturnType<typeof resolveSchoolPlaceDetailed>>>((resolve) => {
           resolveTimer = setTimeout(
@@ -1174,7 +1274,7 @@ export class SchoolWorksService {
           message: outcome.message,
           stepsTried: outcome.stepsTried,
         });
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
         continue;
       }
 
@@ -1238,7 +1338,7 @@ export class SchoolWorksService {
         }
 
         results.push(unsafeRow);
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
         continue;
       }
 
@@ -1291,7 +1391,7 @@ export class SchoolWorksService {
       }
 
       results.push(row);
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, RESOLVE_TIMING.interSchoolDelayMs));
     }
 
     villagesResolved = villagesSeen.size;
@@ -1307,7 +1407,10 @@ export class SchoolWorksService {
       hasMore: nextSchoolOffset < total,
       nextVillageOffset: nextSchoolOffset,
       nextOffset: nextSchoolOffset,
+      nextSchoolOffset,
       batchProcessed: batchSchools.length,
+      blockRegistrySchoolCount: blockWarm.schoolCount,
+      blockRegistryCached: blockWarm.cached,
     };
   }
 
@@ -1583,6 +1686,17 @@ export class SchoolWorksService {
       ? await this.listBlocksInDistrict(district)
       : [block];
 
+    const { warmBlockRegistryIndex } = await import(
+      '../../common/utils/location-balanced-resolve.util'
+    );
+    const { getSessionVillageCache } = await import(
+      '../../common/utils/village-resolve-orchestrator.util'
+    );
+    if (block && district) {
+      await warmBlockRegistryIndex(district, block);
+    }
+    const villageCache = getSessionVillageCache(district, block);
+
     const outcome = await resolveSchoolPlaceDetailed(
       {
         schoolName: String(school.schoolName || ''),
@@ -1592,6 +1706,7 @@ export class SchoolWorksService {
       },
       undefined,
       siblingBlocks,
+      { villageCache, fastMode: false, blockIndexWarm: true },
     );
     const match = outcome.match;
 

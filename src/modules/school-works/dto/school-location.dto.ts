@@ -16,11 +16,15 @@ export class BulkResolveSchoolLocationsDto {
   @IsBoolean()
   skipExisting?: boolean;
 
-  /** Process at most this many schools per request (Hostinger proxy ~20s limit). */
+  @IsOptional()
+  @IsBoolean()
+  fastMode?: boolean;
+
+  /** Process at most this many schools per request (shared dramitkumar block cache). */
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(4)
   limit?: number;
 
   @IsOptional()
@@ -59,11 +63,11 @@ export class BulkAssignVillageLocationsDto {
   @IsBoolean()
   fastMode?: boolean;
 
-  /** Schools per request (Hostinger ~20s proxy). Default 1 — keep ≤2. */
+  /** Schools per request (shared block cache). Default 4. */
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(4)
   schoolLimit?: number;
 
   @IsOptional()
@@ -75,7 +79,7 @@ export class BulkAssignVillageLocationsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(4)
   villageLimit?: number;
 
   /** @deprecated Use schoolOffset */
@@ -88,7 +92,7 @@ export class BulkAssignVillageLocationsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(4)
   limit?: number;
 
   /** @deprecated Use villageOffset */

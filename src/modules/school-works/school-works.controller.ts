@@ -332,6 +332,7 @@ export class SchoolWorksController {
       district: dto.district,
       saveVerified: dto.saveVerified === true,
       skipExisting: dto.skipExisting === true,
+      fastMode: dto.fastMode !== false,
       limit: dto.limit,
       offset: dto.offset,
     });

@@ -9,6 +9,7 @@ import {
 } from './block-pin-gate.util';
 import { placeInExpectedAdminArea as strictPlaceInExpectedAdminArea } from './google-school-place.util';
 import { localityHintFromSchoolName } from './reverse-geocode.util';
+import { oneFiveNineFetchTimeoutMs } from './location-resolve-timing.util';
 import type { ResolvedVillagePin } from './village-location.util';
 
 const ONEFIVENINE_GEOFENCE_M = 400;
@@ -187,7 +188,7 @@ export async function searchOneFiveNineVillages(
         Accept: 'text/html',
       },
       body: new URLSearchParams({ queryString: q }).toString(),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(oneFiveNineFetchTimeoutMs(false)),
     });
     if (!res.ok) return [];
 
@@ -230,15 +231,17 @@ export async function tryOneFiveNineDirectPath(
   district: string,
   block: string,
   villageCombo: string,
+  fastMode = false,
 ): Promise<ResolvedVillagePin | null> {
   const combo = String(villageCombo || '').trim();
   if (combo.length < 4) return null;
+  const fetchTimeoutMs = oneFiveNineFetchTimeoutMs(fastMode);
 
   for (const path of buildDirectOneFiveNinePaths(district, block, combo)) {
-    const villageId = await fetchVillageIdFromPath(path);
+    const villageId = await fetchVillageIdFromPath(path, fetchTimeoutMs);
     if (!villageId) continue;
 
-    const coords = await fetchOneFiveNineCoords(villageId);
+    const coords = await fetchOneFiveNineCoords(villageId, fetchTimeoutMs);
     if (!coords) continue;
 
     const segments = pathSegments(path);
@@ -263,14 +266,14 @@ export async function tryOneFiveNineDirectPath(
   return null;
 }
 
-async function fetchVillageIdFromPath(path: string): Promise<string> {
+async function fetchVillageIdFromPath(path: string, timeoutMs: number): Promise<string> {
   const slugPath = String(path || '').trim();
   if (!slugPath) return '';
 
   try {
     const res = await fetch(`${ONEFIVENINE_BASE}/india/villages/${slugPath}`, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return '';
     const html = await res.text();
@@ -283,14 +286,17 @@ async function fetchVillageIdFromPath(path: string): Promise<string> {
   }
 }
 
-async function fetchOneFiveNineCoords(villageId: string): Promise<{ lat: number; lng: number } | null> {
+async function fetchOneFiveNineCoords(
+  villageId: string,
+  timeoutMs: number,
+): Promise<{ lat: number; lng: number } | null> {
   const id = String(villageId || '').trim();
   if (!id) return null;
 
   try {
     const res = await fetch(`${ONEFIVENINE_BASE}/map.dont?method=loadEditMap&villageId=${encodeURIComponent(id)}`, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;
     const html = await res.text();
@@ -381,10 +387,11 @@ export async function resolveOneFiveNineVillagePin(
       .sort((a, b) => b.score - a.score);
 
     for (const { hit } of ranked.slice(0, 5)) {
-      const villageId = await fetchVillageIdFromPath(hit.path);
+      const fetchTimeoutMs = oneFiveNineFetchTimeoutMs(false);
+      const villageId = await fetchVillageIdFromPath(hit.path, fetchTimeoutMs);
       if (!villageId) continue;
 
-      const coords = await fetchOneFiveNineCoords(villageId);
+      const coords = await fetchOneFiveNineCoords(villageId, fetchTimeoutMs);
       if (!coords) continue;
 
       const pin = pinFromOneFiveNine(

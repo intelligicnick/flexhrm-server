@@ -8,6 +8,7 @@ import {
   adminAreaMismatchReason,
   placeInExpectedAdminArea,
 } from './google-school-place.util';
+import { blockGateFetchTimeoutMs } from './location-resolve-timing.util';
 
 export type BlockPinGateResult = {
   ok: boolean;
@@ -44,7 +45,7 @@ async function reverseGeocodeGoogle(
     url.searchParams.set('latlng', `${lat},${lng}`);
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(blockGateFetchTimeoutMs()) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;

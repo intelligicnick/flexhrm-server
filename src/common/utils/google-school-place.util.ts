@@ -2,6 +2,7 @@ import { coordinatesInBihar, coordinatesInExpectedDistrict } from './bihar-geogr
 import { localityHintFromSchoolName } from './reverse-geocode.util';
 import { villageSearchCombinationsFromSchoolName } from './onefivenine-village.util';
 import { placeInExpectedDistrict } from './village-location.util';
+import { googleFetchTimeoutMs } from './location-resolve-timing.util';
 
 export type SchoolPlaceConfidence = 'exact' | 'partial' | 'village' | 'not_found';
 
@@ -642,7 +643,7 @@ async function* searchGooglePlacesCandidates(
           'places.id,places.displayName,places.formattedAddress,places.location,places.types',
       },
       body: JSON.stringify({ textQuery, languageCode: 'en' }),
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(googleFetchTimeoutMs()),
     });
     if (!res.ok) return;
     const data = (await res.json()) as {
@@ -806,7 +807,7 @@ async function geocodeAddress(
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
     url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(googleFetchTimeoutMs()) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;
@@ -873,8 +874,11 @@ async function searchSchoolPlace(
   udise: string,
   apiKey: string,
   siblingBlocks: string[] = [],
+  fastMode = false,
 ): Promise<ResolvedSchoolPlace | null> {
-  for (const query of buildSchoolQueries(schoolName, block, district, udise)) {
+  const queries = buildSchoolQueries(schoolName, block, district, udise);
+  const queryList = fastMode ? queries.slice(0, 1) : queries;
+  for (const query of queryList) {
     const candidates = await collectGooglePlacesCandidates(query, apiKey);
     if (!candidates.length) continue;
 
@@ -962,7 +966,7 @@ async function searchNominatimForward(
         Accept: 'application/json',
         'User-Agent': 'FlexHRM-SchoolResolver/1.0 (school location lookup)',
       },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(googleFetchTimeoutMs()),
     });
     if (!res.ok) return [];
 
@@ -1159,6 +1163,8 @@ export async function resolveSchoolPlaceDetailed(
     villageCache?: import('./village-resolve-orchestrator.util').BlockVillageCache;
     /** Skip slow onefivenine autocomplete / OSM multi-combo loops. */
     fastMode?: boolean;
+    /** dramitkumar index already loaded for this block (bulk batch). */
+    blockIndexWarm?: boolean;
   },
 ): Promise<SchoolResolveOutcome> {
   const key = String(
@@ -1168,6 +1174,7 @@ export async function resolveSchoolPlaceDetailed(
       '',
   ).trim();
   const fastMode = options?.fastMode === true;
+  const blockIndexWarm = options?.blockIndexWarm === true;
 
   const schoolName = String(school.schoolName || '').trim();
   const block = String(school.block || '').trim();
@@ -1233,6 +1240,29 @@ export async function resolveSchoolPlaceDetailed(
         };
       }
       stepsTried.push(`external_registry_block_gate_reject:${gate.reason || 'unknown'}`);
+      const { tryRegistryVillageFallback } = await import('./location-balanced-resolve.util');
+      const villageFallback = await tryRegistryVillageFallback({
+        external,
+        block,
+        district,
+        villageHint: external.village || villageHint,
+        siblingBlocks,
+        apiKey: key,
+        fastMode,
+      });
+      stepsTried.push(...villageFallback.stepsTried);
+      if (villageFallback.match && villageFallback.successReason) {
+        return {
+          match: villageFallback.match,
+          successReason: villageFallback.successReason,
+          message: describeResolveMessage(villageFallback.successReason, undefined, {
+            ...extras,
+            villageHint: villageFallback.villageUsed || external.village || villageHint,
+          }),
+          stepsTried,
+          villageHint: villageFallback.villageUsed || external.village || villageHint,
+        };
+      }
     } else {
       stepsTried.push('external_registry_miss');
     }
@@ -1260,8 +1290,23 @@ export async function resolveSchoolPlaceDetailed(
       udise,
       key,
       siblingBlocks,
+      fastMode,
     );
     if (schoolMatch) {
+      const googleUnsafe = isUnsafeSchoolPin({
+        schoolName,
+        matchedPlaceName: schoolMatch.placeName,
+        formattedAddress: schoolMatch.formattedAddress,
+        block,
+        district,
+        locationConfidence: schoolMatch.locationConfidence,
+        siblingBlocks,
+        lat: schoolMatch.lat,
+        lng: schoolMatch.lng,
+      });
+      if (googleUnsafe) {
+        stepsTried.push('google_school_unsafe_reject');
+      } else {
       const successReason: SchoolResolveSuccessReason =
         schoolMatch.locationConfidence === 'partial'
           ? 'school_relaxed_google'
@@ -1276,6 +1321,7 @@ export async function resolveSchoolPlaceDetailed(
         stepsTried,
         villageHint,
       };
+      }
     }
     stepsTried.push('google_school_miss');
   }

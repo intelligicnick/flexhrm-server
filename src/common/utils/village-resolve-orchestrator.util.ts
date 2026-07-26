@@ -182,7 +182,7 @@ export async function resolveVillageMultiSource(params: {
 
   stepsTried.push('onefivenine_direct_paths');
   for (const combo of combos) {
-    const directPin = await tryOneFiveNineDirectPath(district, block, combo);
+    const directPin = await tryOneFiveNineDirectPath(district, block, combo, fastMode);
     if (!directPin) continue;
     stepsTried.push(`onefivenine_direct:${combo}`);
     if (fastMode) {

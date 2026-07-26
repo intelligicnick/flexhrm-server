@@ -8,6 +8,7 @@ import {
   villageNameInResult,
   villageTokensFromHint,
 } from './bihar-geography.util';
+import { osmFetchTimeoutMs, googleFetchTimeoutMs } from './location-resolve-timing.util';
 
 export const SCHOOL_GEOFENCE_VILLAGE_M = 400;
 
@@ -141,7 +142,7 @@ async function searchNominatimForward(
         Accept: 'application/json',
         'User-Agent': 'FlexHRM-VillageResolver/1.0 (school village lookup)',
       },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(osmFetchTimeoutMs()),
     });
     if (!res.ok) return [];
     const data = (await res.json()) as Array<{ lat?: string; lon?: string; display_name?: string }>;
@@ -167,7 +168,7 @@ async function geocodeAddress(
     url.searchParams.set('key', apiKey);
     url.searchParams.set('region', 'in');
     url.searchParams.set('components', 'administrative_area:Bihar|country:IN');
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12_000) });
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(googleFetchTimeoutMs()) });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       status?: string;

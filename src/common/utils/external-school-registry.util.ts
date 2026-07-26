@@ -3,10 +3,10 @@ import type { ResolvedSchoolPlace } from './google-school-place.util';
 import {
   SCHOOL_GEOFENCE_EXACT_M,
 } from './google-school-place.util';
+import { registryFetchTimeoutMs } from './location-resolve-timing.util';
 
 const DRAMITKUMAR_BASE = 'https://schoolinfo.dramitkumar.in';
 const SCHOOLS_ORG_IN_BASE = 'https://schools.org.in';
-const FETCH_TIMEOUT_MS = 12_000;
 
 export type ExternalSchoolRegistrySource = 'dramitkumar' | 'schools_org_in';
 
@@ -80,10 +80,10 @@ function normalizeUdise(value: string | number | undefined): string {
   return String(value || '').replace(/\D/g, '').trim();
 }
 
-async function fetchText(url: string): Promise<string | null> {
+async function fetchText(url: string, timeoutMs = registryFetchTimeoutMs()): Promise<string | null> {
   try {
     const res = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         Accept: 'application/json,text/html,*/*',
         'User-Agent': 'FlexHRM/1.0 (school location resolver)',
@@ -150,6 +150,17 @@ export async function getDramitKumarBlockIndex(
 
   dramitBlockCaches.set(key, index);
   return index;
+}
+
+/** Prefetch dramitkumar block index once per bulk batch — avoids per-school 10s fetch. */
+export async function warmBlockRegistryIndex(
+  district: string,
+  block: string,
+): Promise<{ schoolCount: number; cached: boolean }> {
+  const key = blockCacheKey(district, block);
+  const wasCached = dramitBlockCaches.has(key);
+  const index = await getDramitKumarBlockIndex(district, block);
+  return { schoolCount: index.size, cached: wasCached };
 }
 
 function parseSchoolsOrgInHtml(html: string, udise: string): ExternalSchoolRecord | null {
