@@ -146,7 +146,7 @@ export class AuthController {
         },
       });
 
-      const roles = await this.rolesService.findAll();
+      const roles = await this.rolesService.findAll(tenantId);
       const roleConfig = resolveRoleConfig(admin.role || 'admin', roles);
 
       await this.firewallService.clearLoginFailures(clientIp);
@@ -683,8 +683,14 @@ export class AuthController {
     if (user.userType === 'supervisor') {
       throw new ForbiddenException('Use /auth/supervisor/me for supervisor sessions.');
     }
-    const roles = await this.rolesService.findAll();
-    const roleConfig = resolveRoleConfig(user.role, roles);
+    const tenantId = user.tenantId ?? DEFAULT_TENANT_ID;
+    const adminProfile = await this.adminsService.findProfile(user.username);
+    const effectiveRole = adminProfile?.role || user.role || 'admin';
+    if (adminProfile?.role && adminProfile.role !== user.role) {
+      await this.sessionsService.syncAdminRole(user.username, adminProfile.role);
+    }
+    const roles = await this.rolesService.findAll(tenantId);
+    const roleConfig = resolveRoleConfig(effectiveRole, roles);
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
     const csrfToken = (await this.sessionsService.ensureCsrfToken(user.token)) ?? '';
     if (csrfToken) {
@@ -692,11 +698,11 @@ export class AuthController {
     }
     return {
       username: user.username,
-      role: user.role,
+      role: effectiveRole,
       locations: user.locations,
       permissions: roleConfig.permissions,
       uiRestrictions: roleConfig.uiRestrictions,
-      tenantId: user.tenantId ?? DEFAULT_TENANT_ID,
+      tenantId,
       csrfToken,
     };
   }

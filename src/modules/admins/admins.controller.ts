@@ -100,6 +100,12 @@ export class AdminsController {
     if (dto.email !== undefined) patch.email = dto.email.trim().toLowerCase();
 
     const updated = await this.adminsService.update(dto.username, patch);
+    if (dto.locations !== undefined) {
+      await this.sessionsService.syncAdminLocations(dto.username, dto.locations);
+    }
+    if (dto.role !== undefined) {
+      await this.sessionsService.syncAdminRole(dto.username, dto.role);
+    }
     const changedFields: string[] = [];
     if (dto.role !== undefined && oldState.role !== dto.role) {
       changedFields.push(`role (from "${oldState.role}" to "${dto.role}")`);

@@ -20,6 +20,7 @@ import {
   hasPermission,
 } from '../utils/permissions.util';
 import { RolesService } from '../../modules/roles/roles.service';
+import { AdminsService } from '../../modules/admins/admins.service';
 import { PlanEnforcementService } from '../services/plan-enforcement.service';
 
 type PermissionMetadata =
@@ -31,6 +32,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly rolesService: RolesService,
+    private readonly adminsService: AdminsService,
     private readonly planEnforcement: PlanEnforcementService,
   ) {}
 
@@ -81,18 +83,22 @@ export class PermissionsGuard implements CanActivate {
       permissionMeta.anyOf ? permissionMeta.modules[0] : permissionMeta.module,
     );
 
+    const adminProfile = await this.adminsService.findProfile(user.username);
+    const effectiveRole = adminProfile?.role || user.role || 'admin';
+
     const roles = await this.rolesService.findAll(tenantId);
-    const permissions = buildPermissions(user.role, roles);
+    const permissions = buildPermissions(effectiveRole, roles);
 
     const allowed = permissionMeta.anyOf
       ? hasAnyPermission(permissions, permissionMeta.modules, permissionMeta.action)
       : hasPermission(permissions, permissionMeta.module, permissionMeta.action);
 
     if (!allowed) {
+      const roleLabel = effectiveRole.trim() || 'admin';
       throw new ForbiddenException(
         permissionMeta.anyOf
-          ? `Insufficient permissions: none of the required modules (${permissionMeta.modules.join(', ')}) allow ${permissionMeta.action}.`
-          : `Insufficient permissions: ${permissionMeta.module}.${permissionMeta.action} is not allowed for your role.`,
+          ? `Insufficient permissions: none of the required modules (${permissionMeta.modules.join(', ')}) allow ${permissionMeta.action} for role "${roleLabel}".`
+          : `Insufficient permissions: ${permissionMeta.module}.${permissionMeta.action} is not allowed for role "${roleLabel}".`,
       );
     }
 

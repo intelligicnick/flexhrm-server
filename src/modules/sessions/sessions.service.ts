@@ -195,6 +195,34 @@ export class SessionsService {
     await this.sessionModel.deleteMany({ username });
   }
 
+  async syncAdminLocations(username: string, locations: string[]): Promise<void> {
+    const cleanUsername = String(username || '').trim();
+    if (!cleanUsername) return;
+    const normalizedLocations = Array.isArray(locations) ? locations : [];
+    await this.sessionModel.updateMany(
+      {
+        username: cleanUsername,
+        userType: 'admin',
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { locations: normalizedLocations } },
+    );
+  }
+
+  async syncAdminRole(username: string, role: string): Promise<void> {
+    const cleanUsername = String(username || '').trim();
+    if (!cleanUsername) return;
+    const normalizedRole = String(role || 'admin').trim() || 'admin';
+    await this.sessionModel.updateMany(
+      {
+        username: cleanUsername,
+        userType: 'admin',
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { role: normalizedRole } },
+    );
+  }
+
   async syncSupervisorAssignedBlocks(
     employeeId: string,
     assignedBlocks: string[],
