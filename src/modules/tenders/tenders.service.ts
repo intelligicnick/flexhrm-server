@@ -163,6 +163,11 @@ export class TendersService implements OnModuleInit {
     return '';
   }
 
+  /** Prefer explicit client actor (extension) over JWT session username. */
+  private resolveTenderActor(sessionUser = '', actorUsername?: string): string {
+    return this.resolveActor(actorUsername, sessionUser);
+  }
+
   private stampAddedBy(doc: TenderDocument, actor: string): void {
     const name = this.resolveActor(actor);
     if (!name || doc.createdBy?.trim()) return;
@@ -250,9 +255,6 @@ export class TendersService implements OnModuleInit {
       if (log.action === 'SYNC_TENDER_GEM') {
         syncedBy.set(fromTarget, user);
       }
-      if (!addedBy.has(fromTarget) && /GEM\//i.test(log.target)) {
-        addedBy.set(fromTarget, user);
-      }
     }
 
     return { addedBy, syncedBy };
@@ -279,22 +281,7 @@ export class TendersService implements OnModuleInit {
 
   /** Fills missing added-by / GeM-sync-by on older tenders (audit logs, then default admin). */
   async backfillLegacyTenderActors(): Promise<number> {
-    const docs = await this.tenderModel
-      .find({
-        $or: [
-          { createdBy: { $in: ['', null] } },
-          { createdBy: { $exists: false } },
-          {
-            statusSyncedAt: { $nin: ['', null] },
-            $or: [
-              { statusSyncedBy: { $in: ['', null] } },
-              { statusSyncedBy: { $exists: false } },
-            ],
-          },
-        ],
-      })
-      .exec();
-
+    const docs = await this.tenderModel.find().exec();
     if (!docs.length) return 0;
 
     const [{ addedBy, syncedBy }, defaultActor] = await Promise.all([
@@ -306,15 +293,31 @@ export class TendersService implements OnModuleInit {
     for (const doc of docs) {
       const key = this.bidKey(doc.bidNo);
       let changed = false;
+      const auditAdded = key ? addedBy.get(key) : undefined;
+      const currentAdded = doc.createdBy?.trim() || '';
 
-      if (!doc.createdBy?.trim()) {
-        doc.createdBy = (key && addedBy.get(key)) || defaultActor;
+      if (auditAdded && auditAdded !== currentAdded) {
+        if (!currentAdded || currentAdded === defaultActor) {
+          doc.createdBy = auditAdded;
+          changed = true;
+        }
+      } else if (!currentAdded) {
+        doc.createdBy = defaultActor;
         changed = true;
       }
-      if (doc.statusSyncedAt?.trim() && !doc.statusSyncedBy?.trim()) {
-        doc.statusSyncedBy =
-          (key && syncedBy.get(key)) || doc.createdBy?.trim() || defaultActor;
-        changed = true;
+
+      if (doc.statusSyncedAt?.trim()) {
+        const auditSynced = key ? syncedBy.get(key) : undefined;
+        const currentSynced = doc.statusSyncedBy?.trim() || '';
+        const nextSynced =
+          auditSynced ||
+          (currentSynced && currentSynced !== defaultActor
+            ? currentSynced
+            : doc.createdBy?.trim() || defaultActor);
+        if (nextSynced && nextSynced !== currentSynced) {
+          doc.statusSyncedBy = nextSynced;
+          changed = true;
+        }
       }
 
       if (changed) {
@@ -488,8 +491,9 @@ export class TendersService implements OnModuleInit {
   async create(
     dto: CreateTenderDto,
     sessionUser = '',
+    actorUsername?: string,
   ): Promise<Record<string, unknown>> {
-    const createdBy = this.resolveActor(sessionUser);
+    const createdBy = this.resolveTenderActor(sessionUser, actorUsername ?? dto.actorUsername);
     const bidNo = dto.bidNo.trim();
     if (!bidNo) throw new BadRequestException('Bid number is required.');
 
@@ -759,7 +763,7 @@ export class TendersService implements OnModuleInit {
     sessionUser = '',
     actorUsername?: string,
   ): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {
-    const actor = this.resolveActor(sessionUser, actorUsername);
+    const actor = this.resolveTenderActor(sessionUser, actorUsername);
     let created = 0;
     let updated = 0;
     let skipped = 0;
@@ -780,7 +784,7 @@ export class TendersService implements OnModuleInit {
           touchedBidNos.push(bidNo);
           continue;
         }
-        await this.create(item, actor);
+        await this.create(item, sessionUser, actorUsername);
         created += 1;
         touchedBidNos.push(bidNo);
       } catch (err) {
@@ -854,7 +858,7 @@ export class TendersService implements OnModuleInit {
     sessionUser = '',
     actorUsername?: string,
   ): Promise<{ updated: number; notFound: number; errors: string[] }> {
-    const syncedBy = this.resolveActor(sessionUser, actorUsername);
+    const syncedBy = this.resolveTenderActor(sessionUser, actorUsername);
     let updated = 0;
     let notFound = 0;
     const errors: string[] = [];
@@ -929,7 +933,6 @@ export class TendersService implements OnModuleInit {
         doc.statusBeforeSync = prevStatus;
         doc.statusSyncedAt = new Date().toISOString();
         if (syncedBy) doc.statusSyncedBy = syncedBy;
-        this.stampAddedBy(doc, syncedBy);
         await doc.save();
         this.recordTenderAudit(syncedBy, 'SYNC_TENDER_GEM', bidNo, { bidNo });
         updated += 1;

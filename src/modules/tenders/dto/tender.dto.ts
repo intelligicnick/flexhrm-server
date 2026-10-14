@@ -121,6 +121,11 @@ export class CreateTenderDto {
   @IsOptional()
   @IsString()
   gemCurrentStage?: string;
+
+  /** Extension / import: who added the tender (preferred over session username). */
+  @IsOptional()
+  @IsString()
+  actorUsername?: string;
 }
 
 export class UpdateTenderDto {
@@ -315,7 +320,7 @@ export class BulkImportTenderDto {
   @IsNotEmpty()
   items!: CreateTenderDto[];
 
-  /** Fallback when session username is unavailable (e.g. extension) */
+  /** Who performed the import (preferred over session username, e.g. extension). */
   @IsOptional()
   @IsString()
   actorUsername?: string;
