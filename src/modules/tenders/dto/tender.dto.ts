@@ -314,11 +314,20 @@ export class SyncTenderDto {
 export class BulkImportTenderDto {
   @IsNotEmpty()
   items!: CreateTenderDto[];
+
+  /** Fallback when session username is unavailable (e.g. extension) */
+  @IsOptional()
+  @IsString()
+  actorUsername?: string;
 }
 
 export class BulkSyncTenderDto {
   @IsNotEmpty()
   items!: SyncTenderDto[];
+
+  @IsOptional()
+  @IsString()
+  actorUsername?: string;
 }
 
 export class BulkUpdateTenderDto {

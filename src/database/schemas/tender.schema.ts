@@ -129,6 +129,14 @@ export class Tender {
   @Prop({ default: '', index: true })
   statusSyncedAt!: string;
 
+  /** FlexHRM account that created this tender record */
+  @Prop({ default: '' })
+  createdBy!: string;
+
+  /** FlexHRM account that last ran GeM sync for this tender */
+  @Prop({ default: '' })
+  statusSyncedBy!: string;
+
   /** Result of last GeM sync: "status change found" or "unchanged" */
   @Prop({ default: '' })
   statusSyncNote!: string;

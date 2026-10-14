@@ -85,6 +85,10 @@ import {
   BgDdDocument,
   BgDdDocumentSchema,
 } from './schemas/bg-dd-document.schema';
+import {
+  StandaloneUpload,
+  StandaloneUploadSchema,
+} from './schemas/standalone-upload.schema';
 import { CaptureCandidate, CaptureCandidateSchema } from './schemas/capture-candidate.schema';
 import { CaptureLead, CaptureLeadSchema } from './schemas/capture-lead.schema';
 import { CaptureContact, CaptureContactSchema } from './schemas/capture-contact.schema';
@@ -220,6 +224,7 @@ const MODELS = [
   { name: RenewalDocument.name, schema: RenewalDocumentSchema },
   { name: BgDdRecord.name, schema: BgDdRecordSchema },
   { name: BgDdDocument.name, schema: BgDdDocumentSchema },
+  { name: StandaloneUpload.name, schema: StandaloneUploadSchema },
   { name: CaptureCandidate.name, schema: CaptureCandidateSchema },
   { name: CaptureLead.name, schema: CaptureLeadSchema },
   { name: CaptureContact.name, schema: CaptureContactSchema },

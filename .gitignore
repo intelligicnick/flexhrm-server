@@ -40,5 +40,8 @@ data/bulk-pay-exports/*
 # Employee uploads (photos, documents, ID cards — generated at runtime)
 data/employee-assets/
 
+# Standalone uploads module (files stored at runtime)
+data/standalone-uploads/
+
 # Python cache
 scripts/__pycache__/

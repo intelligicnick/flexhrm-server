@@ -1,16 +1,21 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as crypto from 'crypto';
+import { AuditLog, AuditLogDocument } from '../../database/schemas/audit-log.schema';
 import {
   Tender,
   TenderDocument,
   TenderStatus,
 } from '../../database/schemas/tender.schema';
+import { AdminsService } from '../admins/admins.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   CreateTenderDto,
   SyncTenderDto,
@@ -22,11 +27,23 @@ import {
 } from './gem-status-inference.util';
 
 @Injectable()
-export class TendersService {
+export class TendersService implements OnModuleInit {
+  private readonly logger = new Logger(TendersService.name);
+  private legacyBackfillDone = false;
+  private legacyBackfillRunning: Promise<void> | null = null;
+
   constructor(
     @InjectModel(Tender.name)
     private readonly tenderModel: Model<TenderDocument>,
+    @InjectModel(AuditLog.name)
+    private readonly auditLogModel: Model<AuditLogDocument>,
+    private readonly adminsService: AdminsService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
+
+  onModuleInit(): void {
+    void this.startLegacyActorBackfill();
+  }
 
   private formatParticipationStamp(date = new Date()): string {
     const day = String(date.getDate()).padStart(2, '0');
@@ -134,6 +151,184 @@ export class TendersService {
     }
   }
 
+  private resolveActor(...candidates: (string | undefined)[]): string {
+    for (const value of candidates) {
+      const trimmed = String(value || '').trim();
+      if (trimmed && trimmed.toLowerCase() !== 'system') return trimmed;
+    }
+    for (const value of candidates) {
+      const trimmed = String(value || '').trim();
+      if (trimmed) return trimmed;
+    }
+    return '';
+  }
+
+  private stampAddedBy(doc: TenderDocument, actor: string): void {
+    const name = this.resolveActor(actor);
+    if (!name || doc.createdBy?.trim()) return;
+    doc.createdBy = name;
+  }
+
+  private recordTenderAudit(
+    username: string,
+    action: 'CREATE_TENDER' | 'SYNC_TENDER_GEM' | 'IMPORT_TENDERS',
+    target: string,
+    details?: Record<string, unknown>,
+  ): void {
+    const actor = this.resolveActor(username);
+    if (!actor) return;
+    void this.auditLogsService.append({
+      username: actor,
+      action,
+      target,
+      details,
+    });
+  }
+
+  private bidKey(bidNo: string): string {
+    return String(bidNo || '').trim().toUpperCase();
+  }
+
+  private extractBidNoFromAuditTarget(target: string): string {
+    const match = String(target || '').match(/GEM\/[\w/]+/i);
+    return match ? match[0].trim() : String(target || '').trim();
+  }
+
+  private async resolveDefaultLegacyActor(): Promise<string> {
+    const root = await this.adminsService.findByUsername('admin');
+    if (root && !root.disabled) return root.username;
+    const admins = await this.adminsService.findAllSafe();
+    const active = admins.filter((row) => !row.disabled);
+    if (active.length === 1) return active[0].username;
+    if (active.length > 1) {
+      const sorted = [...active].sort((a, b) =>
+        String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+      );
+      return sorted[0]?.username || 'admin';
+    }
+    return 'admin';
+  }
+
+  private async buildLegacyActorMaps(): Promise<{
+    addedBy: Map<string, string>;
+    syncedBy: Map<string, string>;
+  }> {
+    const addedBy = new Map<string, string>();
+    const syncedBy = new Map<string, string>();
+
+    const logs = await this.auditLogModel
+      .find({
+        $or: [
+          { action: { $in: ['CREATE_TENDER', 'SYNC_TENDER_GEM', 'IMPORT_TENDERS'] } },
+          { target: { $regex: 'GEM/', $options: 'i' } },
+        ],
+      })
+      .sort({ timestamp: 1 })
+      .lean()
+      .exec();
+
+    for (const log of logs) {
+      const user = String(log.username || '').trim();
+      if (!user) continue;
+
+      if (log.action === 'IMPORT_TENDERS') {
+        const bidNos = log.details?.bidNos;
+        if (Array.isArray(bidNos)) {
+          for (const bid of bidNos) {
+            const key = this.bidKey(String(bid));
+            if (key && !addedBy.has(key)) addedBy.set(key, user);
+          }
+        }
+      }
+
+      const fromTarget = this.bidKey(this.extractBidNoFromAuditTarget(log.target));
+      if (!fromTarget) continue;
+
+      if (log.action === 'CREATE_TENDER' && !addedBy.has(fromTarget)) {
+        addedBy.set(fromTarget, user);
+      }
+      if (log.action === 'SYNC_TENDER_GEM') {
+        syncedBy.set(fromTarget, user);
+      }
+      if (!addedBy.has(fromTarget) && /GEM\//i.test(log.target)) {
+        addedBy.set(fromTarget, user);
+      }
+    }
+
+    return { addedBy, syncedBy };
+  }
+
+  private startLegacyActorBackfill(): Promise<void> {
+    if (this.legacyBackfillDone) return Promise.resolve();
+    if (!this.legacyBackfillRunning) {
+      this.legacyBackfillRunning = this.backfillLegacyTenderActors()
+        .then(() => {
+          this.legacyBackfillDone = true;
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Tender actor backfill failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        })
+        .finally(() => {
+          this.legacyBackfillRunning = null;
+        });
+    }
+    return this.legacyBackfillRunning;
+  }
+
+  /** Fills missing added-by / GeM-sync-by on older tenders (audit logs, then default admin). */
+  async backfillLegacyTenderActors(): Promise<number> {
+    const docs = await this.tenderModel
+      .find({
+        $or: [
+          { createdBy: { $in: ['', null] } },
+          { createdBy: { $exists: false } },
+          {
+            statusSyncedAt: { $nin: ['', null] },
+            $or: [
+              { statusSyncedBy: { $in: ['', null] } },
+              { statusSyncedBy: { $exists: false } },
+            ],
+          },
+        ],
+      })
+      .exec();
+
+    if (!docs.length) return 0;
+
+    const [{ addedBy, syncedBy }, defaultActor] = await Promise.all([
+      this.buildLegacyActorMaps(),
+      this.resolveDefaultLegacyActor(),
+    ]);
+
+    let updated = 0;
+    for (const doc of docs) {
+      const key = this.bidKey(doc.bidNo);
+      let changed = false;
+
+      if (!doc.createdBy?.trim()) {
+        doc.createdBy = (key && addedBy.get(key)) || defaultActor;
+        changed = true;
+      }
+      if (doc.statusSyncedAt?.trim() && !doc.statusSyncedBy?.trim()) {
+        doc.statusSyncedBy =
+          (key && syncedBy.get(key)) || doc.createdBy?.trim() || defaultActor;
+        changed = true;
+      }
+
+      if (changed) {
+        await doc.save();
+        updated += 1;
+      }
+    }
+
+    if (updated > 0) {
+      this.logger.log(`Backfilled tender account names on ${updated} record(s).`);
+    }
+    return updated;
+  }
+
   private activeBidFilter(bidNo: string): Record<string, unknown> {
     return {
       bidNo: bidNo.trim(),
@@ -162,8 +357,14 @@ export class TendersService {
       String(rest.organisation || rest.department || '').trim();
     const consigneeOfficer =
       String(rest.consigneeOfficer || rest.officerName || '').trim();
+    const createdBy = String(rest.createdBy || '').trim();
+    const statusSyncedBy = String(rest.statusSyncedBy || '').trim();
     return {
       ...rest,
+      createdBy,
+      statusSyncedBy,
+      addedBy: createdBy,
+      gemSyncedBy: statusSyncedBy,
       ministry: String(rest.ministry || '').trim(),
       organisation,
       consigneeOfficer,
@@ -191,6 +392,7 @@ export class TendersService {
     search?: string;
     deadline?: 'upcoming' | 'passed' | 'all';
   }): Promise<Record<string, unknown>[]> {
+    await this.startLegacyActorBackfill();
     const query: Record<string, unknown> = {};
     if (filters?.tenderType) query.tenderType = filters.tenderType;
     if (filters?.status) {
@@ -283,7 +485,11 @@ export class TendersService {
     return trimmed.filter((b) => existingSet.has(b.toUpperCase()));
   }
 
-  async create(dto: CreateTenderDto): Promise<Record<string, unknown>> {
+  async create(
+    dto: CreateTenderDto,
+    sessionUser = '',
+  ): Promise<Record<string, unknown>> {
+    const createdBy = this.resolveActor(sessionUser);
     const bidNo = dto.bidNo.trim();
     if (!bidNo) throw new BadRequestException('Bid number is required.');
 
@@ -325,13 +531,16 @@ export class TendersService {
       entryDate: dto.entryDate?.trim() || new Date().toISOString().slice(0, 10),
       gemDocUrl: dto.gemDocUrl?.trim() || '',
       gemCurrentStage: dto.gemCurrentStage?.trim() || '',
+      createdBy: createdBy.trim(),
     });
+    this.recordTenderAudit(createdBy, 'CREATE_TENDER', bidNo, { bidNo });
     return this.toPlain(doc);
   }
 
   async update(
     id: string,
     dto: UpdateTenderDto,
+    sessionUser = '',
   ): Promise<Record<string, unknown>> {
     const doc = await this.tenderModel.findOne({ id }).exec();
     if (!doc) throw new NotFoundException('Tender not found.');
@@ -413,6 +622,8 @@ export class TendersService {
     if (prevStatus === 'not_filed' && doc.status === 'filed') {
       doc.filedDate = this.formatParticipationStamp();
     }
+
+    this.stampAddedBy(doc, sessionUser);
 
     await doc.save();
     return this.toPlain(doc);
@@ -545,11 +756,15 @@ export class TendersService {
 
   async bulkImport(
     items: CreateTenderDto[],
+    sessionUser = '',
+    actorUsername?: string,
   ): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {
+    const actor = this.resolveActor(sessionUser, actorUsername);
     let created = 0;
     let updated = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const touchedBidNos: string[] = [];
 
     for (const item of items) {
       const bidNo = item.bidNo?.trim();
@@ -560,12 +775,14 @@ export class TendersService {
       try {
         const existing = await this.tenderModel.findOne(this.activeBidFilter(bidNo)).exec();
         if (existing) {
-          await this.mergeImportedTender(existing, item);
+          await this.mergeImportedTender(existing, item, actor);
           updated += 1;
+          touchedBidNos.push(bidNo);
           continue;
         }
-        await this.create(item);
+        await this.create(item, actor);
         created += 1;
+        touchedBidNos.push(bidNo);
       } catch (err) {
         skipped += 1;
         errors.push(
@@ -574,13 +791,23 @@ export class TendersService {
       }
     }
 
+    if (touchedBidNos.length > 0) {
+      this.recordTenderAudit(actor, 'IMPORT_TENDERS', `Tender import (${created} new)`, {
+        bidNos: touchedBidNos.slice(0, 500),
+        created,
+        updated,
+      });
+    }
+
     return { created, updated, skipped, errors: errors.slice(0, 20) };
   }
 
   private async mergeImportedTender(
     doc: TenderDocument,
     item: CreateTenderDto,
+    actor = '',
   ): Promise<void> {
+    this.stampAddedBy(doc, actor);
     if (item.category?.trim()) doc.category = item.category.trim();
     if (item.ministry?.trim()) doc.ministry = item.ministry.trim();
     if (item.organisation?.trim()) {
@@ -624,7 +851,10 @@ export class TendersService {
 
   async syncFromGem(
     items: SyncTenderDto[],
+    sessionUser = '',
+    actorUsername?: string,
   ): Promise<{ updated: number; notFound: number; errors: string[] }> {
+    const syncedBy = this.resolveActor(sessionUser, actorUsername);
     let updated = 0;
     let notFound = 0;
     const errors: string[] = [];
@@ -698,7 +928,10 @@ export class TendersService {
           prevStatus !== doc.status ? 'status change found' : 'unchanged';
         doc.statusBeforeSync = prevStatus;
         doc.statusSyncedAt = new Date().toISOString();
+        if (syncedBy) doc.statusSyncedBy = syncedBy;
+        this.stampAddedBy(doc, syncedBy);
         await doc.save();
+        this.recordTenderAudit(syncedBy, 'SYNC_TENDER_GEM', bidNo, { bidNo });
         updated += 1;
       } catch (err) {
         errors.push(

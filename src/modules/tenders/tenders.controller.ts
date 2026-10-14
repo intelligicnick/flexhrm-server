@@ -11,7 +11,10 @@ import {
 } from '@nestjs/common';
 import { TendersService } from './tenders.service';
 import { RequirePermissions } from '../../common/decorators/auth.decorators';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  CurrentUsername,
+} from '../../common/decorators/current-user.decorator';
 import {
   AdminSessionPayload,
   isSuperAdminSession,
@@ -49,20 +52,37 @@ export class TendersController {
 
   @Post()
   @RequirePermissions('bids', 'edit')
-  create(@Body() dto: CreateTenderDto) {
-    return this.tendersService.create(dto);
+  create(
+    @CurrentUsername() username: string,
+    @Body() dto: CreateTenderDto,
+  ) {
+    return this.tendersService.create(dto, username);
   }
 
   @Post('import')
   @RequirePermissions('bids', 'edit')
-  bulkImport(@Body() dto: BulkImportTenderDto) {
-    return this.tendersService.bulkImport(dto.items || []);
+  bulkImport(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkImportTenderDto,
+  ) {
+    return this.tendersService.bulkImport(
+      dto.items || [],
+      username,
+      dto.actorUsername,
+    );
   }
 
   @Post('sync')
   @RequirePermissions('bids', 'edit')
-  syncFromGem(@Body() dto: BulkSyncTenderDto) {
-    return this.tendersService.syncFromGem(dto.items || []);
+  syncFromGem(
+    @CurrentUsername() username: string,
+    @Body() dto: BulkSyncTenderDto,
+  ) {
+    return this.tendersService.syncFromGem(
+      dto.items || [],
+      username,
+      dto.actorUsername,
+    );
   }
 
   @Post('bulk-update')
@@ -114,8 +134,12 @@ export class TendersController {
 
   @Patch(':id')
   @RequirePermissions('bids', 'edit')
-  update(@Param('id') id: string, @Body() dto: UpdateTenderDto) {
-    return this.tendersService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @CurrentUsername() username: string,
+    @Body() dto: UpdateTenderDto,
+  ) {
+    return this.tendersService.update(id, dto, username);
   }
 
   @Delete(':id/permanent')
