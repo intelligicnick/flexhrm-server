@@ -24,7 +24,7 @@ import {
 } from '../../database/schemas/monitor-device.schema';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
-import { runWithTenantScope } from '../../platform/common/tenant-context.store';
+import { runWithTenantScope, runWithoutTenantScope } from '../../platform/common/tenant-context.store';
 import {
   canCompleteTask,
   canDeleteSharedFile,
@@ -47,6 +47,13 @@ function newId(prefix: string): string {
 function todayIsoDate(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function splitTaskBulletLines(description: string): string[] {
+  return (description ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s•\-*]+/, '').replace(/^\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
 }
 
 function toTaskPlain(doc: AgentTaskDocument) {
@@ -95,27 +102,30 @@ export class AgentWorkspaceService {
     return agent.tenantId?.trim() || DEFAULT_TENANT_ID;
   }
 
+  private async resolveAgentTenantId(agent: DeviceAgentDocument): Promise<string> {
+    const employee = await runWithoutTenantScope(() =>
+      this.employeeModel.findOne({ id: agent.employeeId }).select({ tenantId: 1 }).exec(),
+    );
+    return employee?.tenantId?.trim() || agent.tenantId?.trim() || DEFAULT_TENANT_ID;
+  }
+
   async listTasksForAgent(agent: DeviceAgentDocument) {
-    const tenantId = this.resolveTenantId(agent);
-    return runWithTenantScope(tenantId, async () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const docs = await this.taskModel
-        .find({
-          employeeId: agent.employeeId,
-          $or: [
-            { status: 'pending' },
-            { status: 'done', completedAt: { $gte: sevenDaysAgo } },
-          ],
-        })
-        .sort({ status: 1, createdAt: -1 })
-        .limit(100)
-        .exec();
-      return docs.map(toTaskPlain);
-    });
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const query = {
+      employeeId: agent.employeeId,
+      $or: [
+        { status: 'pending' },
+        { status: 'done', completedAt: { $gte: sevenDaysAgo } },
+      ],
+    };
+    const docs = await runWithoutTenantScope(() =>
+      this.taskModel.find(query).sort({ status: 1, createdAt: -1 }).limit(100).exec(),
+    );
+    return docs.map(toTaskPlain);
   }
 
   async reportSelfCompletedTask(agent: DeviceAgentDocument, title: string, note?: string) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
       const trimmedTitle = title.trim();
       if (!trimmedTitle) {
@@ -123,13 +133,17 @@ export class AgentWorkspaceService {
       }
       const employee = await this.employeeModel
         .findOne({ id: agent.employeeId })
-        .select({ id: 1, name: 1 })
+        .select({ id: 1, name: 1, nameAsPerAadhar: 1, employeeCode: 1 })
         .exec();
       const doc = await this.taskModel.create({
         id: newId('atask'),
         tenantId,
         employeeId: agent.employeeId,
-        employeeName: employee?.name?.trim() || agent.employeeId,
+        employeeName:
+          employee?.nameAsPerAadhar?.trim() ||
+          employee?.name?.trim() ||
+          employee?.employeeCode?.trim() ||
+          agent.employeeId,
         title: trimmedTitle,
         description: '',
         status: 'done',
@@ -144,7 +158,7 @@ export class AgentWorkspaceService {
   }
 
   async completeTask(agent: DeviceAgentDocument, taskId: string, note?: string) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
       const task = await this.taskModel.findOne({ id: taskId }).exec();
       if (!task) throw new NotFoundException('Task not found.');
@@ -164,32 +178,51 @@ export class AgentWorkspaceService {
   }
 
   async listSharedFolders(agent: DeviceAgentDocument) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
-      const rows = await this.fileModel
-        .aggregate([
-          {
-            $group: {
-              _id: '$employeeId',
-              employeeName: { $last: '$employeeName' },
-              fileCount: { $sum: 1 },
-              updatedAt: { $max: '$uploadedAt' },
+      const [employees, fileStats] = await Promise.all([
+        this.employeeModel
+          .find({})
+          .select({ id: 1, name: 1, nameAsPerAadhar: 1, employeeCode: 1 })
+          .sort({ nameAsPerAadhar: 1, employeeCode: 1 })
+          .limit(1000)
+          .exec(),
+        this.fileModel
+          .aggregate([
+            {
+              $group: {
+                _id: '$employeeId',
+                fileCount: { $sum: 1 },
+                updatedAt: { $max: '$uploadedAt' },
+              },
             },
-          },
-          { $sort: { updatedAt: -1 } },
-        ])
-        .exec();
-      return rows.map((r) => ({
-        employeeId: r._id as string,
-        employeeName: (r.employeeName as string) || r._id,
-        fileCount: r.fileCount as number,
-        updatedAt: r.updatedAt as Date,
-      }));
+          ])
+          .exec(),
+      ]);
+      const statsMap = new Map(
+        fileStats.map((row) => [
+          row._id as string,
+          { fileCount: row.fileCount as number, updatedAt: row.updatedAt as Date },
+        ]),
+      );
+      return employees.map((employee) => {
+        const stat = statsMap.get(employee.id);
+        return {
+          employeeId: employee.id,
+          employeeName:
+            employee.nameAsPerAadhar?.trim() ||
+            employee.name?.trim() ||
+            employee.employeeCode?.trim() ||
+            employee.id,
+          fileCount: stat?.fileCount ?? 0,
+          updatedAt: stat?.updatedAt ?? new Date(0),
+        };
+      });
     });
   }
 
   async listSharedFolderFiles(agent: DeviceAgentDocument, folderEmployeeId: string) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
       const docs = await this.fileModel
         .find({ employeeId: folderEmployeeId })
@@ -206,7 +239,7 @@ export class AgentWorkspaceService {
   }
 
   async uploadSharedFile(agent: DeviceAgentDocument, dto: UploadAgentSharedFileDto) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
       if (!canUploadToFolder(agent.employeeId, agent.employeeId)) {
         throw new ForbiddenException('Cannot upload to this folder.');
@@ -263,7 +296,7 @@ export class AgentWorkspaceService {
   }
 
   async downloadSharedFile(agent: DeviceAgentDocument, fileId: string, res: Response) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     await runWithTenantScope(tenantId, async () => {
       const file = await this.fileModel.findOne({ id: fileId }).exec();
       if (!file) throw new NotFoundException('File not found.');
@@ -287,7 +320,7 @@ export class AgentWorkspaceService {
   }
 
   async deleteSharedFile(agent: DeviceAgentDocument, fileId: string) {
-    const tenantId = this.resolveTenantId(agent);
+    const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
       const file = await this.fileModel.findOne({ id: fileId }).exec();
       if (!file) throw new NotFoundException('File not found.');
@@ -328,9 +361,28 @@ export class AgentWorkspaceService {
     if (!ids.length) {
       throw new BadRequestException('Select at least one employee.');
     }
+    const bulletLines = splitTaskBulletLines(dto.description ?? '');
     const tasks = [];
     for (const employeeId of ids) {
-      tasks.push(await this.createOneAdminTask(employeeId, dto, createdBy));
+      if (bulletLines.length > 1) {
+        for (const line of bulletLines) {
+          tasks.push(
+            await this.createOneAdminTask(
+              employeeId,
+              {
+                ...dto,
+                title: line,
+                description: dto.title.trim()
+                  ? `Group: ${dto.title.trim()}`
+                  : (dto.description ?? '').trim(),
+              },
+              createdBy,
+            ),
+          );
+        }
+      } else {
+        tasks.push(await this.createOneAdminTask(employeeId, dto, createdBy));
+      }
     }
     if (tasks.length === 1) return tasks[0];
     return { created: tasks.length, tasks };
@@ -341,8 +393,9 @@ export class AgentWorkspaceService {
     dto: CreateAdminAgentTaskDto,
     createdBy: string,
   ) {
-    const tenantId = getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
     const employee = await this.employeeModel.findOne({ id: employeeId }).exec();
+    const tenantId =
+      employee?.tenantId?.trim() || getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
     if (!employee) {
       throw new NotFoundException(`Employee not found: ${employeeId}`);
     }
