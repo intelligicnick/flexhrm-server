@@ -133,7 +133,7 @@ export class AgentWorkspaceService {
       }
       const employee = await this.employeeModel
         .findOne({ id: agent.employeeId })
-        .select({ id: 1, name: 1, nameAsPerAadhar: 1, employeeCode: 1 })
+        .select({ id: 1, nameAsPerAadhar: 1, employeeCode: 1 })
         .exec();
       const doc = await this.taskModel.create({
         id: newId('atask'),
@@ -141,7 +141,6 @@ export class AgentWorkspaceService {
         employeeId: agent.employeeId,
         employeeName:
           employee?.nameAsPerAadhar?.trim() ||
-          employee?.name?.trim() ||
           employee?.employeeCode?.trim() ||
           agent.employeeId,
         title: trimmedTitle,
@@ -183,7 +182,7 @@ export class AgentWorkspaceService {
       const [employees, fileStats] = await Promise.all([
         this.employeeModel
           .find({})
-          .select({ id: 1, name: 1, nameAsPerAadhar: 1, employeeCode: 1 })
+          .select({ id: 1, nameAsPerAadhar: 1, employeeCode: 1 })
           .sort({ nameAsPerAadhar: 1, employeeCode: 1 })
           .limit(1000)
           .exec(),
@@ -211,7 +210,6 @@ export class AgentWorkspaceService {
           employeeId: employee.id,
           employeeName:
             employee.nameAsPerAadhar?.trim() ||
-            employee.name?.trim() ||
             employee.employeeCode?.trim() ||
             employee.id,
           fileCount: stat?.fileCount ?? 0,
