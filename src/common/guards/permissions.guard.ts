@@ -78,10 +78,11 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const tenantId = request.tenantId ?? user?.tenantId;
-    await this.planEnforcement.assertModuleAccess(
-      tenantId,
-      permissionMeta.anyOf ? permissionMeta.modules[0] : permissionMeta.module,
-    );
+    if (permissionMeta.anyOf) {
+      await this.planEnforcement.assertAnyModuleAccess(tenantId, permissionMeta.modules);
+    } else {
+      await this.planEnforcement.assertModuleAccess(tenantId, permissionMeta.module);
+    }
 
     const adminProfile = await this.adminsService.findProfile(user.username);
     const effectiveRole = adminProfile?.role || user.role || 'admin';

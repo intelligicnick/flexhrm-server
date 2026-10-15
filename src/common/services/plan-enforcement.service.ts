@@ -86,6 +86,28 @@ export class PlanEnforcementService {
     }
   }
 
+  /** At least one RBAC module must be entitled on the tenant plan (for RequireAnyPermissions). */
+  async assertAnyModuleAccess(
+    tenantId: string | undefined,
+    modules: readonly (PermissionModule | string)[],
+  ): Promise<void> {
+    const tid = resolveTenantId(tenantId);
+    if (tid === DEFAULT_TENANT_ID) return;
+
+    for (const module of modules) {
+      if (await this.hasModuleAccess(tid, module)) {
+        return;
+      }
+    }
+
+    const labels = modules
+      .map((m) => resolveSaasModule(m) ?? m)
+      .filter((v, i, a) => a.indexOf(v) === i);
+    throw new ForbiddenException(
+      `None of the required modules (${labels.join(', ')}) are included in your subscription plan. Please upgrade.`,
+    );
+  }
+
   async getPlanLimits(tenantId: string | undefined): Promise<{
     maxEmployees: number;
     planId: string;

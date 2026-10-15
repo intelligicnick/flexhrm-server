@@ -158,7 +158,7 @@ export class SmartCaptureController {
   }
 
   @Post('connection-code')
-  @RequireAnyPermissions(['employees', 'admin'], 'view')
+  @RequireAnyPermissions(['bids', 'employees', 'admin'], 'view')
   createConnectionCode(
     @CurrentUser() user: AdminSessionPayload,
     @Body() dto: CreateConnectionCodeDto,
