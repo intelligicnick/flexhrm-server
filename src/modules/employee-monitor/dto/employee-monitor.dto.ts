@@ -35,6 +35,8 @@ export class RegisterAgentDto {
 }
 
 export class AgentHeartbeatDto {
+  @IsOptional() @IsString() lanHost?: string;
+  @IsOptional() @IsNumber() lanPort?: number;
   @IsOptional() @IsString() ipAddress?: string;
   @IsOptional() @IsString() currentApp?: string;
   @IsOptional() @IsString() currentWindow?: string;

@@ -40,6 +40,10 @@ export class AgentSharedFile {
 
   @Prop({ default: '' })
   uploadedByDeviceId!: string;
+
+  /** LAN download key (tenant-visible; same access as file list). */
+  @Prop({ default: '' })
+  lanAccessKey!: string;
 }
 
 export const AgentSharedFileSchema = SchemaFactory.createForClass(AgentSharedFile);

@@ -90,6 +90,12 @@ export class DeviceAgent {
 
   @Prop({ default: 0 })
   todayIdleSeconds!: number;
+
+  @Prop({ default: '' })
+  lanHost!: string;
+
+  @Prop({ default: 0 })
+  lanPort!: number;
 }
 
 export const DeviceAgentSchema = SchemaFactory.createForClass(DeviceAgent);

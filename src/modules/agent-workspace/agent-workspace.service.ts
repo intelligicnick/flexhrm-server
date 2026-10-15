@@ -18,7 +18,10 @@ import {
   AgentSharedFileDocument,
 } from '../../database/schemas/agent-shared-file.schema';
 import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
-import { DeviceAgentDocument } from '../../database/schemas/monitor-device.schema';
+import {
+  DeviceAgent,
+  DeviceAgentDocument,
+} from '../../database/schemas/monitor-device.schema';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
 import { runWithTenantScope } from '../../platform/common/tenant-context.store';
@@ -65,8 +68,28 @@ export class AgentWorkspaceService {
     @InjectModel(AgentSharedFile.name)
     private readonly fileModel: Model<AgentSharedFileDocument>,
     @InjectModel(Employee.name) private readonly employeeModel: Model<EmployeeDocument>,
+    @InjectModel(DeviceAgent.name) private readonly deviceAgentModel: Model<DeviceAgentDocument>,
     private readonly mediaStorage: MediaStorageService,
   ) {}
+
+  private async resolveOwnerLanPeer(ownerEmployeeId: string): Promise<{ lanHost: string; lanPort: number }> {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const agent = await this.deviceAgentModel
+      .findOne({
+        employeeId: ownerEmployeeId,
+        status: 'active',
+        lanHost: { $ne: '' },
+        lanPort: { $gt: 0 },
+        lastHeartbeatAt: { $gte: fiveMinAgo },
+      })
+      .sort({ lastHeartbeatAt: -1 })
+      .select({ lanHost: 1, lanPort: 1 })
+      .exec();
+    return {
+      lanHost: agent?.lanHost?.trim() ?? '',
+      lanPort: agent?.lanPort ?? 0,
+    };
+  }
 
   private resolveTenantId(agent: DeviceAgentDocument): string {
     return agent.tenantId?.trim() || DEFAULT_TENANT_ID;
@@ -144,7 +167,12 @@ export class AgentWorkspaceService {
         .sort({ uploadedAt: -1 })
         .limit(100)
         .exec();
-      return docs.map(toFilePlain);
+      const peer = await this.resolveOwnerLanPeer(folderEmployeeId);
+      return docs.map((doc) => ({
+        ...toFilePlain(doc),
+        peerLanHost: peer.lanHost,
+        peerLanPort: peer.lanPort,
+      }));
     });
   }
 
@@ -178,6 +206,7 @@ export class AgentWorkspaceService {
         tags: ['agent-workspace', agent.employeeId],
       });
 
+      const lanAccessKey = crypto.randomBytes(16).toString('hex');
       const doc = await this.fileModel.create({
         id: newId('asf'),
         tenantId,
@@ -191,6 +220,7 @@ export class AgentWorkspaceService {
         fileDataBase64: uploaded.fileDataBase64 ?? '',
         uploadedAt: new Date(),
         uploadedByDeviceId: agent.id,
+        lanAccessKey,
       });
 
       const employee = await this.employeeModel.findOne({ id: agent.employeeId }).select({ nameAsPerAadhar: 1 }).exec();

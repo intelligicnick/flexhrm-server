@@ -358,6 +358,8 @@ export class AgentService {
     agent.lastActivityAt = now;
     agent.status = 'active';
     if (dto.ipAddress) agent.ipAddress = dto.ipAddress;
+    if (dto.lanHost !== undefined) agent.lanHost = dto.lanHost?.trim() ?? '';
+    if (dto.lanPort !== undefined) agent.lanPort = Number(dto.lanPort) || 0;
     if (dto.currentApp !== undefined) agent.currentApp = dto.currentApp;
     if (dto.currentWindow !== undefined) agent.currentWindow = dto.currentWindow;
     if (dto.currentWebsite !== undefined) agent.currentWebsite = dto.currentWebsite;
