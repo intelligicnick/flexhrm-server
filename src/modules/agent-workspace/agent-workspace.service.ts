@@ -114,6 +114,35 @@ export class AgentWorkspaceService {
     });
   }
 
+  async reportSelfCompletedTask(agent: DeviceAgentDocument, title: string, note?: string) {
+    const tenantId = this.resolveTenantId(agent);
+    return runWithTenantScope(tenantId, async () => {
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle) {
+        throw new BadRequestException('Title is required.');
+      }
+      const employee = await this.employeeModel
+        .findOne({ id: agent.employeeId })
+        .select({ id: 1, name: 1 })
+        .exec();
+      const doc = await this.taskModel.create({
+        id: newId('atask'),
+        tenantId,
+        employeeId: agent.employeeId,
+        employeeName: employee?.name?.trim() || agent.employeeId,
+        title: trimmedTitle,
+        description: '',
+        status: 'done',
+        dueDate: todayIsoDate(),
+        createdBy: 'employee-self',
+        completedAt: new Date(),
+        completionNote: (note ?? '').trim(),
+        completedByDeviceId: agent.id,
+      });
+      return toTaskPlain(doc);
+    });
+  }
+
   async completeTask(agent: DeviceAgentDocument, taskId: string, note?: string) {
     const tenantId = this.resolveTenantId(agent);
     return runWithTenantScope(tenantId, async () => {

@@ -16,7 +16,11 @@ import { SkipCsrf } from '../../common/decorators/skip-csrf.decorator';
 import { DeviceAgentDocument } from '../../database/schemas/monitor-device.schema';
 import { AgentAuthGuard } from '../employee-monitor/guards/agent-auth.guard';
 import { AgentWorkspaceService } from './agent-workspace.service';
-import { CompleteAgentTaskDto, UploadAgentSharedFileDto } from './dto/agent-workspace.dto';
+import {
+  CompleteAgentTaskDto,
+  ReportSelfCompletedTaskDto,
+  UploadAgentSharedFileDto,
+} from './dto/agent-workspace.dto';
 
 @SkipCsrf()
 @Controller('monitor/agent/workspace')
@@ -40,6 +44,17 @@ export class AgentWorkspaceAgentController {
     @Body() dto: CompleteAgentTaskDto,
   ) {
     return this.workspaceService.completeTask(req.deviceAgent, id, dto.note);
+  }
+
+  @Public()
+  @UseGuards(AgentAuthGuard)
+  @Post('tasks/report-done')
+  @HttpCode(200)
+  reportSelfCompleted(
+    @Req() req: { deviceAgent: DeviceAgentDocument },
+    @Body() dto: ReportSelfCompletedTaskDto,
+  ) {
+    return this.workspaceService.reportSelfCompletedTask(req.deviceAgent, dto.title, dto.note);
   }
 
   @Public()

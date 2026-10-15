@@ -17,6 +17,19 @@ export class CompleteAgentTaskDto {
   note?: string;
 }
 
+/** Employee logs extra work they completed (not assigned by admin). */
+export class ReportSelfCompletedTaskDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string;
+}
+
 export class UploadAgentSharedFileDto {
   @IsString()
   @MinLength(1)
