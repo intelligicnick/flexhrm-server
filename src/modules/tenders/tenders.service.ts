@@ -918,7 +918,13 @@ export class TendersService implements OnModuleInit {
         }
         if (item.endDate !== undefined) doc.endDate = item.endDate.trim();
         if (item.startDate !== undefined) doc.startDate = item.startDate.trim();
-        if (item.filedDate !== undefined) doc.filedDate = item.filedDate.trim();
+        if (item.filedDate !== undefined) {
+          const incomingFiled = item.filedDate.trim();
+          const isFirstGemSync = !doc.statusSyncedAt?.trim();
+          if (incomingFiled && (isFirstGemSync || !doc.filedDate?.trim())) {
+            doc.filedDate = incomingFiled;
+          }
+        }
         if (item.gemDocUrl !== undefined) doc.gemDocUrl = item.gemDocUrl.trim();
         if (item.preBidAt !== undefined || item.preBidVenue !== undefined || item.noPreBid !== undefined) {
           if (doc.noPreBid) {

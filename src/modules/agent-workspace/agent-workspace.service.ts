@@ -179,41 +179,42 @@ export class AgentWorkspaceService {
   async listSharedFolders(agent: DeviceAgentDocument) {
     const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
-      const [employees, fileStats] = await Promise.all([
-        this.employeeModel
-          .find({})
-          .select({ id: 1, nameAsPerAadhar: 1, employeeCode: 1 })
-          .sort({ nameAsPerAadhar: 1, employeeCode: 1 })
-          .limit(1000)
-          .exec(),
-        this.fileModel
-          .aggregate([
-            {
-              $group: {
-                _id: '$employeeId',
-                fileCount: { $sum: 1 },
-                updatedAt: { $max: '$uploadedAt' },
-              },
+      const fileStats = await this.fileModel
+        .aggregate([
+          {
+            $group: {
+              _id: '$employeeId',
+              fileCount: { $sum: 1 },
+              updatedAt: { $max: '$uploadedAt' },
             },
-          ])
-          .exec(),
-      ]);
-      const statsMap = new Map(
-        fileStats.map((row) => [
-          row._id as string,
-          { fileCount: row.fileCount as number, updatedAt: row.updatedAt as Date },
-        ]),
-      );
-      return employees.map((employee) => {
-        const stat = statsMap.get(employee.id);
-        return {
-          employeeId: employee.id,
-          employeeName:
-            employee.nameAsPerAadhar?.trim() ||
+          },
+          { $sort: { updatedAt: -1 } },
+          { $limit: 200 },
+        ])
+        .exec();
+      if (!fileStats.length) return [];
+
+      const employeeIds = fileStats.map((row) => row._id as string);
+      const employees = await this.employeeModel
+        .find({ id: { $in: employeeIds } })
+        .select({ id: 1, nameAsPerAadhar: 1, employeeCode: 1 })
+        .exec();
+      const nameById = new Map(
+        employees.map((employee) => [
+          employee.id,
+          employee.nameAsPerAadhar?.trim() ||
             employee.employeeCode?.trim() ||
             employee.id,
-          fileCount: stat?.fileCount ?? 0,
-          updatedAt: stat?.updatedAt ?? new Date(0),
+        ]),
+      );
+
+      return fileStats.map((row) => {
+        const employeeId = row._id as string;
+        return {
+          employeeId,
+          employeeName: nameById.get(employeeId) || employeeId,
+          fileCount: row.fileCount as number,
+          updatedAt: row.updatedAt as Date,
         };
       });
     });
