@@ -185,6 +185,11 @@ import { FirewallBlock, FirewallBlockSchema } from './schemas/firewall-block.sch
 import { FirewallSettings, FirewallSettingsSchema } from './schemas/firewall-settings.schema';
 import { FirewallWhitelist, FirewallWhitelistSchema } from './schemas/firewall-whitelist.schema';
 import { FirewallLoginAttempt, FirewallLoginAttemptSchema } from './schemas/firewall-login-attempt.schema';
+import { AgentTask, AgentTaskSchema } from './schemas/agent-task.schema';
+import {
+  AgentSharedFile,
+  AgentSharedFileSchema,
+} from './schemas/agent-shared-file.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -274,6 +279,8 @@ const MODELS = [
   { name: FirewallSettings.name, schema: FirewallSettingsSchema },
   { name: FirewallWhitelist.name, schema: FirewallWhitelistSchema },
   { name: FirewallLoginAttempt.name, schema: FirewallLoginAttemptSchema },
+  { name: AgentTask.name, schema: AgentTaskSchema },
+  { name: AgentSharedFile.name, schema: AgentSharedFileSchema },
 ];
 
 for (const model of MODELS) {

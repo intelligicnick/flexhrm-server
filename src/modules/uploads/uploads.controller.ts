@@ -33,6 +33,18 @@ export class UploadsController {
     return this.uploadsService.create(username, dto);
   }
 
+  @Get(':id/preview')
+  async previewFile(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, mimeType, filename } =
+      await this.uploadsService.getFileBuffer(id);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.send(buffer);
+  }
+
   @Get(':id/file')
   async downloadFile(@Param('id') id: string, @Res() res: Response) {
     const redirectUrl = await this.uploadsService.getFileRedirectUrl(id);

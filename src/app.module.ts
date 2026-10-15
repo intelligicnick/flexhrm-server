@@ -59,6 +59,7 @@ import { QueueModule } from './modules/queue/queue.module';
 import { SsoModule } from './modules/sso/sso.module';
 import { FirewallModule } from './modules/firewall/firewall.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { AgentWorkspaceModule } from './modules/agent-workspace/agent-workspace.module';
 import { DeferredStartupService } from './bootstrap/deferred-startup.service';
 
 @Module({
@@ -119,6 +120,7 @@ import { DeferredStartupService } from './bootstrap/deferred-startup.service';
     SsoModule,
     FirewallModule,
     UploadsModule,
+    AgentWorkspaceModule,
   ],
   providers: [
     DeferredStartupService,
