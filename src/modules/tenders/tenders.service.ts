@@ -545,6 +545,7 @@ export class TendersService implements OnModuleInit {
     id: string,
     dto: UpdateTenderDto,
     sessionUser = '',
+    options?: { allowRevertToNotParticipated?: boolean },
   ): Promise<Record<string, unknown>> {
     const doc = await this.tenderModel.findOne({ id }).exec();
     if (!doc) throw new NotFoundException('Tender not found.');
@@ -602,7 +603,11 @@ export class TendersService implements OnModuleInit {
     if (dto.preBidVenue !== undefined) doc.preBidVenue = dto.preBidVenue.trim();
     if (dto.noPreBid !== undefined) doc.noPreBid = dto.noPreBid;
     if (dto.status !== undefined) {
-      if (dto.status === 'not_filed' && prevStatus !== 'not_filed') {
+      if (
+        dto.status === 'not_filed' &&
+        prevStatus !== 'not_filed' &&
+        !options?.allowRevertToNotParticipated
+      ) {
         throw new BadRequestException('Cannot change status back to Not Participated.');
       }
       doc.status = dto.status === 'not_evaluated' ? 'filed' : dto.status;
@@ -702,6 +707,7 @@ export class TendersService implements OnModuleInit {
   async bulkUpdate(
     ids: string[],
     patch: UpdateTenderDto,
+    options?: { allowRevertToNotParticipated?: boolean },
   ): Promise<{ updated: number; errors: string[] }> {
     const tenderIds = Array.from(
       new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
@@ -718,7 +724,7 @@ export class TendersService implements OnModuleInit {
 
     for (const id of tenderIds) {
       try {
-        await this.update(id, patch);
+        await this.update(id, patch, '', options);
         updated += 1;
       } catch (err) {
         errors.push(

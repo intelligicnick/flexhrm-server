@@ -87,8 +87,13 @@ export class TendersController {
 
   @Post('bulk-update')
   @RequirePermissions('bids', 'edit')
-  bulkUpdate(@Body() dto: BulkUpdateTenderDto) {
-    return this.tendersService.bulkUpdate(dto.ids || [], dto.patch || {});
+  bulkUpdate(
+    @Body() dto: BulkUpdateTenderDto,
+    @CurrentUser() user: AdminSessionPayload,
+  ) {
+    return this.tendersService.bulkUpdate(dto.ids || [], dto.patch || {}, {
+      allowRevertToNotParticipated: isSuperAdminSession(user),
+    });
   }
 
   @Post('bulk-delete')
@@ -137,9 +142,12 @@ export class TendersController {
   update(
     @Param('id') id: string,
     @CurrentUsername() username: string,
+    @CurrentUser() user: AdminSessionPayload,
     @Body() dto: UpdateTenderDto,
   ) {
-    return this.tendersService.update(id, dto, username);
+    return this.tendersService.update(id, dto, username, {
+      allowRevertToNotParticipated: isSuperAdminSession(user),
+    });
   }
 
   @Delete(':id/permanent')
