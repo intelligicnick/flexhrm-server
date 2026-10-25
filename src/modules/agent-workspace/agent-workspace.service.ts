@@ -2,11 +2,14 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 import type { Response } from 'express';
 import {
   AgentTask,
@@ -14,13 +17,23 @@ import {
   AgentTaskStatus,
 } from '../../database/schemas/agent-task.schema';
 import {
+  AgentRecurringTask,
+  AgentRecurringTaskDocument,
+} from '../../database/schemas/agent-recurring-task.schema';
+import {
   AgentSharedFile,
   AgentSharedFileDocument,
 } from '../../database/schemas/agent-shared-file.schema';
+import {
+  AgentLanSharedFolder,
+  AgentLanSharedFolderDocument,
+} from '../../database/schemas/agent-lan-shared-folder.schema';
 import { Employee, EmployeeDocument } from '../../database/schemas/employee.schema';
 import {
   DeviceAgent,
   DeviceAgentDocument,
+  MonitorCommand,
+  MonitorCommandDocument,
 } from '../../database/schemas/monitor-device.schema';
 import { MediaStorageService } from '../../common/storage/media-storage.service';
 import { DEFAULT_TENANT_ID } from '../../platform/common/platform.constants';
@@ -29,10 +42,14 @@ import {
   canCompleteTask,
   canDeleteSharedFile,
   canUploadToFolder,
+  isRecurringIssueToday,
+  isoDateFromParts,
 } from './agent-workspace.util';
 import {
   CreateAdminAgentTaskDto,
+  CreateRecurringAgentTaskDto,
   PatchPlatformAgentTaskDto,
+  RegisterLanSharedFolderDto,
   UploadAgentSharedFileDto,
 } from './dto/agent-workspace.dto';
 import { getCurrentTenantId } from '../../platform/common/tenant-context.store';
@@ -62,6 +79,12 @@ function toTaskPlain(doc: AgentTaskDocument) {
   return rest;
 }
 
+function toRecurringPlain(doc: AgentRecurringTaskDocument) {
+  const o = doc.toObject() as unknown as Record<string, unknown>;
+  const { _id, __v, ...rest } = o;
+  return rest;
+}
+
 function toFilePlain(doc: AgentSharedFileDocument) {
   const o = doc.toObject() as unknown as Record<string, unknown>;
   const { _id, __v, fileDataBase64, ...rest } = o;
@@ -69,15 +92,55 @@ function toFilePlain(doc: AgentSharedFileDocument) {
 }
 
 @Injectable()
-export class AgentWorkspaceService {
+export class AgentWorkspaceService implements OnModuleInit {
+  private readonly logger = new Logger(AgentWorkspaceService.name);
+  private recurringTimer?: ReturnType<typeof setInterval>;
+
   constructor(
     @InjectModel(AgentTask.name) private readonly taskModel: Model<AgentTaskDocument>,
+    @InjectModel(AgentRecurringTask.name)
+    private readonly recurringModel: Model<AgentRecurringTaskDocument>,
     @InjectModel(AgentSharedFile.name)
     private readonly fileModel: Model<AgentSharedFileDocument>,
+    @InjectModel(AgentLanSharedFolder.name)
+    private readonly lanFolderModel: Model<AgentLanSharedFolderDocument>,
     @InjectModel(Employee.name) private readonly employeeModel: Model<EmployeeDocument>,
     @InjectModel(DeviceAgent.name) private readonly deviceAgentModel: Model<DeviceAgentDocument>,
+    @InjectModel(MonitorCommand.name)
+    private readonly commandModel: Model<MonitorCommandDocument>,
     private readonly mediaStorage: MediaStorageService,
   ) {}
+
+  onModuleInit(): void {
+    void this.materializeRecurringTasks();
+    this.recurringTimer = setInterval(() => void this.materializeRecurringTasks(), 60 * 60 * 1000);
+  }
+
+  /** Tell the employee's desktop agent(s) to open FLEX WORKSPACE (picked up on next config poll). */
+  private async queueOpenWorkspaceForEmployee(employeeId: string, requestedBy: string) {
+    const agents = await runWithoutTenantScope(() =>
+      this.deviceAgentModel
+        .find({ employeeId, status: { $ne: 'revoked' } })
+        .select({ id: 1, employeeId: 1 })
+        .lean()
+        .exec(),
+    );
+    if (!agents.length) return;
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    for (const agent of agents) {
+      await runWithoutTenantScope(() =>
+        this.commandModel.create({
+          id: randomUUID(),
+          deviceAgentId: agent.id,
+          employeeId: agent.employeeId,
+          type: 'open_workspace',
+          status: 'pending',
+          requestedBy: requestedBy || 'admin',
+          expiresAt,
+        }),
+      );
+    }
+  }
 
   private async resolveOwnerLanPeer(ownerEmployeeId: string): Promise<{ lanHost: string; lanPort: number }> {
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -318,6 +381,107 @@ export class AgentWorkspaceService {
     });
   }
 
+  private async resolveDeviceLanPeer(deviceAgentId: string): Promise<{ lanHost: string; lanPort: number }> {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const peer = await this.deviceAgentModel
+      .findOne({
+        id: deviceAgentId,
+        status: 'active',
+        lanHost: { $ne: '' },
+        lanPort: { $gt: 0 },
+        lastHeartbeatAt: { $gte: fiveMinAgo },
+      })
+      .select({ lanHost: 1, lanPort: 1 })
+      .exec();
+    return {
+      lanHost: peer?.lanHost?.trim() ?? '',
+      lanPort: peer?.lanPort ?? 0,
+    };
+  }
+
+  async registerLanSharedFolder(agent: DeviceAgentDocument, dto: RegisterLanSharedFolderDto) {
+    const tenantId = await this.resolveAgentTenantId(agent);
+    return runWithTenantScope(tenantId, async () => {
+      const folderId = dto.folderId.trim();
+      const label = dto.label.trim();
+      const lanFolderKey = dto.lanFolderKey.trim();
+      if (!folderId || !label || lanFolderKey.length < 16) {
+        throw new BadRequestException('Invalid folder registration.');
+      }
+      const employee = await this.employeeModel
+        .findOne({ id: agent.employeeId })
+        .select({ nameAsPerAadhar: 1, employeeCode: 1 })
+        .exec();
+      const employeeName =
+        employee?.nameAsPerAadhar?.trim() ||
+        employee?.employeeCode?.trim() ||
+        agent.employeeId;
+
+      const existing = await this.lanFolderModel.findOne({ id: folderId }).exec();
+      if (existing) {
+        if (existing.deviceAgentId !== agent.id) {
+          throw new ForbiddenException('Folder id already registered on another device.');
+        }
+        existing.label = label;
+        existing.lanFolderKey = lanFolderKey;
+        existing.employeeName = employeeName;
+        await existing.save();
+        return {
+          folderId: existing.id,
+          label: existing.label,
+          employeeId: existing.employeeId,
+        };
+      }
+
+      const doc = await this.lanFolderModel.create({
+        id: folderId,
+        tenantId,
+        employeeId: agent.employeeId,
+        deviceAgentId: agent.id,
+        employeeName,
+        label,
+        lanFolderKey,
+      });
+      return { folderId: doc.id, label: doc.label, employeeId: doc.employeeId };
+    });
+  }
+
+  async listLanSharedFolders(agent: DeviceAgentDocument) {
+    const tenantId = await this.resolveAgentTenantId(agent);
+    return runWithTenantScope(tenantId, async () => {
+      const docs = await this.lanFolderModel.find({}).sort({ label: 1 }).limit(200).exec();
+      const rows = [];
+      for (const doc of docs) {
+        const peer = await this.resolveDeviceLanPeer(doc.deviceAgentId);
+        rows.push({
+          folderId: doc.id,
+          label: doc.label,
+          employeeId: doc.employeeId,
+          employeeName: doc.employeeName || doc.employeeId,
+          deviceAgentId: doc.deviceAgentId,
+          lanFolderKey: doc.lanFolderKey,
+          peerLanHost: peer.lanHost,
+          peerLanPort: peer.lanPort,
+          isOnline: Boolean(peer.lanHost && peer.lanPort > 0),
+        });
+      }
+      return rows;
+    });
+  }
+
+  async deleteLanSharedFolder(agent: DeviceAgentDocument, folderId: string) {
+    const tenantId = await this.resolveAgentTenantId(agent);
+    return runWithTenantScope(tenantId, async () => {
+      const doc = await this.lanFolderModel.findOne({ id: folderId.trim() }).exec();
+      if (!doc) throw new NotFoundException('Folder not found.');
+      if (doc.deviceAgentId !== agent.id) {
+        throw new ForbiddenException('You can only remove folders shared from this device.');
+      }
+      await this.lanFolderModel.deleteOne({ id: doc.id }).exec();
+      return { success: true };
+    });
+  }
+
   async deleteSharedFile(agent: DeviceAgentDocument, fileId: string) {
     const tenantId = await this.resolveAgentTenantId(agent);
     return runWithTenantScope(tenantId, async () => {
@@ -333,11 +497,105 @@ export class AgentWorkspaceService {
   }
 
   async listAdminTasks(filters: { employeeId?: string; status?: AgentTaskStatus }) {
+    await this.materializeRecurringTasks();
     const query: Record<string, unknown> = {};
     if (filters.employeeId) query.employeeId = filters.employeeId;
     if (filters.status) query.status = filters.status;
     const docs = await this.taskModel.find(query).sort({ createdAt: -1 }).limit(500).exec();
     return docs.map(toTaskPlain);
+  }
+
+  async listRecurringTasks() {
+    const docs = await this.recurringModel.find().sort({ createdAt: -1 }).limit(200).exec();
+    return docs.map(toRecurringPlain);
+  }
+
+  async createRecurringTask(dto: CreateRecurringAgentTaskDto, createdBy: string) {
+    const ids = dto.employeeIds?.length
+      ? [...new Set(dto.employeeIds.map((id) => id.trim()).filter(Boolean))]
+      : dto.employeeId?.trim()
+        ? [dto.employeeId.trim()]
+        : [];
+    if (!ids.length) {
+      throw new BadRequestException('Select at least one employee.');
+    }
+    for (const employeeId of ids) {
+      const employee = await this.employeeModel.findOne({ id: employeeId }).exec();
+      if (!employee) {
+        throw new NotFoundException(`Employee not found: ${employeeId}`);
+      }
+    }
+    const tenantId = getCurrentTenantId()?.trim() || DEFAULT_TENANT_ID;
+    const doc = await this.recurringModel.create({
+      id: newId('artask'),
+      tenantId,
+      employeeIds: ids,
+      title: dto.title.trim(),
+      description: (dto.description ?? '').trim(),
+      issueDay: dto.issueDay,
+      dueDay: dto.dueDay,
+      active: true,
+      createdBy,
+    });
+    await this.materializeRecurringTasks();
+    return toRecurringPlain(doc);
+  }
+
+  async patchRecurringTask(templateId: string, body: { active?: boolean }) {
+    const doc = await this.recurringModel.findOne({ id: templateId }).exec();
+    if (!doc) throw new NotFoundException('Recurring task not found.');
+    if (body.active !== undefined) doc.active = body.active;
+    await doc.save();
+    return toRecurringPlain(doc);
+  }
+
+  async materializeRecurringTasks(): Promise<void> {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const dom = now.getDate();
+    const period = `${year}-${String(month).padStart(2, '0')}`;
+
+    try {
+      await runWithoutTenantScope(async () => {
+        const templates = await this.recurringModel.find({ active: true }).exec();
+        for (const template of templates) {
+          if (!isRecurringIssueToday(year, month, dom, template.issueDay)) continue;
+          const tenantId = template.tenantId?.trim() || DEFAULT_TENANT_ID;
+          const dueDate = isoDateFromParts(year, month, template.dueDay);
+          await runWithTenantScope(tenantId, async () => {
+            for (const employeeId of template.employeeIds) {
+              const exists = await this.taskModel.exists({
+                recurringTemplateId: template.id,
+                employeeId,
+                recurringPeriod: period,
+              });
+              if (exists) continue;
+              try {
+                await this.createOneAdminTask(
+                  employeeId,
+                  {
+                    title: template.title,
+                    description: template.description,
+                    dueDate,
+                  },
+                  template.createdBy || 'system',
+                  { recurringTemplateId: template.id, recurringPeriod: period },
+                );
+              } catch (err) {
+                this.logger.warn(
+                  `Skipped recurring task ${template.id} for ${employeeId}: ${err instanceof Error ? err.message : err}`,
+                );
+              }
+            }
+          });
+        }
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Recurring task materialize failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   async adminSummary() {
@@ -391,6 +649,7 @@ export class AgentWorkspaceService {
     employeeId: string,
     dto: CreateAdminAgentTaskDto,
     createdBy: string,
+    recurring?: { recurringTemplateId: string; recurringPeriod: string },
   ) {
     const employee = await this.employeeModel.findOne({ id: employeeId }).exec();
     const tenantId =
@@ -408,7 +667,10 @@ export class AgentWorkspaceService {
       status: 'pending',
       dueDate: (dto.dueDate ?? '').trim(),
       createdBy,
+      recurringTemplateId: recurring?.recurringTemplateId ?? '',
+      recurringPeriod: recurring?.recurringPeriod ?? '',
     });
+    await this.queueOpenWorkspaceForEmployee(employeeId, createdBy);
     return toTaskPlain(doc);
   }
 

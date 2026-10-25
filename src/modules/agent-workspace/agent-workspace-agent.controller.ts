@@ -18,6 +18,7 @@ import { AgentAuthGuard } from '../employee-monitor/guards/agent-auth.guard';
 import { AgentWorkspaceService } from './agent-workspace.service';
 import {
   CompleteAgentTaskDto,
+  RegisterLanSharedFolderDto,
   ReportSelfCompletedTaskDto,
   UploadAgentSharedFileDto,
 } from './dto/agent-workspace.dto';
@@ -101,5 +102,33 @@ export class AgentWorkspaceAgentController {
   @Delete('shared-files/:id')
   deleteFile(@Req() req: { deviceAgent: DeviceAgentDocument }, @Param('id') id: string) {
     return this.workspaceService.deleteSharedFile(req.deviceAgent, id);
+  }
+
+  @Public()
+  @UseGuards(AgentAuthGuard)
+  @Get('lan-shared-folders')
+  listLanSharedFolders(@Req() req: { deviceAgent: DeviceAgentDocument }) {
+    return this.workspaceService.listLanSharedFolders(req.deviceAgent);
+  }
+
+  @Public()
+  @UseGuards(AgentAuthGuard)
+  @Post('lan-shared-folders')
+  @HttpCode(200)
+  registerLanSharedFolder(
+    @Req() req: { deviceAgent: DeviceAgentDocument },
+    @Body() dto: RegisterLanSharedFolderDto,
+  ) {
+    return this.workspaceService.registerLanSharedFolder(req.deviceAgent, dto);
+  }
+
+  @Public()
+  @UseGuards(AgentAuthGuard)
+  @Delete('lan-shared-folders/:folderId')
+  deleteLanSharedFolder(
+    @Req() req: { deviceAgent: DeviceAgentDocument },
+    @Param('folderId') folderId: string,
+  ) {
+    return this.workspaceService.deleteLanSharedFolder(req.deviceAgent, folderId);
   }
 }

@@ -43,6 +43,12 @@ export class AgentTask {
 
   @Prop({ default: '' })
   completedByDeviceId!: string;
+
+  @Prop({ default: '', index: true })
+  recurringTemplateId!: string;
+
+  @Prop({ default: '' })
+  recurringPeriod!: string;
 }
 
 export const AgentTaskSchema = SchemaFactory.createForClass(AgentTask);

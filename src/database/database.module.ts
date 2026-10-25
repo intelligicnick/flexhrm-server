@@ -190,6 +190,14 @@ import {
   AgentSharedFile,
   AgentSharedFileSchema,
 } from './schemas/agent-shared-file.schema';
+import {
+  AgentLanSharedFolder,
+  AgentLanSharedFolderSchema,
+} from './schemas/agent-lan-shared-folder.schema';
+import {
+  AgentRecurringTask,
+  AgentRecurringTaskSchema,
+} from './schemas/agent-recurring-task.schema';
 
 const MODELS = [
   { name: Employee.name, schema: EmployeeSchema },
@@ -281,6 +289,8 @@ const MODELS = [
   { name: FirewallLoginAttempt.name, schema: FirewallLoginAttemptSchema },
   { name: AgentTask.name, schema: AgentTaskSchema },
   { name: AgentSharedFile.name, schema: AgentSharedFileSchema },
+  { name: AgentLanSharedFolder.name, schema: AgentLanSharedFolderSchema },
+  { name: AgentRecurringTask.name, schema: AgentRecurringTaskSchema },
 ];
 
 for (const model of MODELS) {

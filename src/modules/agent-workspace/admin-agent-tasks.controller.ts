@@ -12,6 +12,7 @@ import { RequirePermissions } from '../../common/decorators/auth.decorators';
 import { AgentWorkspaceService } from './agent-workspace.service';
 import {
   CreateAdminAgentTaskDto,
+  CreateRecurringAgentTaskDto,
   PatchPlatformAgentTaskDto,
 } from './dto/agent-workspace.dto';
 import { AGENT_TASK_STATUSES, AgentTaskStatus } from '../../database/schemas/agent-task.schema';
@@ -40,6 +41,24 @@ export class AdminAgentTasksController {
       employeeId: employeeId?.trim() || undefined,
       status: normalized,
     });
+  }
+
+  @Get('recurring')
+  @RequirePermissions('monitor', 'view')
+  listRecurring() {
+    return this.workspaceService.listRecurringTasks();
+  }
+
+  @Post('recurring')
+  @RequirePermissions('monitor', 'edit')
+  createRecurring(@CurrentUsername() username: string, @Body() dto: CreateRecurringAgentTaskDto) {
+    return this.workspaceService.createRecurringTask(dto, username);
+  }
+
+  @Patch('recurring/:id')
+  @RequirePermissions('monitor', 'edit')
+  patchRecurring(@Param('id') id: string, @Body() body: { active?: boolean }) {
+    return this.workspaceService.patchRecurringTask(id, body);
   }
 
   @Post()

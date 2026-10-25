@@ -153,7 +153,10 @@ export class MonitorCommand {
   @Prop({ required: true, unique: true, index: true }) id!: string;
   @Prop({ required: true, index: true }) deviceAgentId!: string;
   @Prop({ required: true, index: true }) employeeId!: string;
-  @Prop({ enum: ['capture_screenshot', 'start_live_view', 'stop_live_view'], required: true })
+  @Prop({
+    enum: ['capture_screenshot', 'start_live_view', 'stop_live_view', 'open_workspace'],
+    required: true,
+  })
   type!: string;
   @Prop({ enum: ['pending', 'completed', 'failed', 'expired'], default: 'pending', index: true })
   status!: string;
