@@ -49,6 +49,12 @@ export class AgentTask {
 
   @Prop({ default: '' })
   recurringPeriod!: string;
+
+  @Prop({ default: false, index: true })
+  archived!: boolean;
+
+  @Prop({ type: Date })
+  archivedAt?: Date;
 }
 
 export const AgentTaskSchema = SchemaFactory.createForClass(AgentTask);

@@ -48,6 +48,7 @@ import {
 import {
   CreateAdminAgentTaskDto,
   CreateRecurringAgentTaskDto,
+  PatchRecurringAgentTaskDto,
   PatchPlatformAgentTaskDto,
   RegisterLanSharedFolderDto,
   UploadAgentSharedFileDto,
@@ -142,23 +143,34 @@ export class AgentWorkspaceService implements OnModuleInit {
     }
   }
 
+  private lanPeerFromAgent(
+    agent: { lanHost?: string; lanPort?: number; lastHeartbeatAt?: Date | null } | null | undefined,
+  ): { lanHost: string; lanPort: number; isOnline: boolean } {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const lanHost = agent?.lanHost?.trim() ?? '';
+    const lanPort = agent?.lanPort ?? 0;
+    const heartbeatFresh =
+      !!agent?.lastHeartbeatAt && agent.lastHeartbeatAt >= fiveMinAgo;
+    return {
+      lanHost,
+      lanPort,
+      isOnline: Boolean(lanHost && lanPort > 0 && heartbeatFresh),
+    };
+  }
+
   private async resolveOwnerLanPeer(ownerEmployeeId: string): Promise<{ lanHost: string; lanPort: number }> {
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
     const agent = await this.deviceAgentModel
       .findOne({
         employeeId: ownerEmployeeId,
         status: 'active',
-        lanHost: { $ne: '' },
-        lanPort: { $gt: 0 },
         lastHeartbeatAt: { $gte: fiveMinAgo },
       })
       .sort({ lastHeartbeatAt: -1 })
-      .select({ lanHost: 1, lanPort: 1 })
+      .select({ lanHost: 1, lanPort: 1, lastHeartbeatAt: 1 })
       .exec();
-    return {
-      lanHost: agent?.lanHost?.trim() ?? '',
-      lanPort: agent?.lanPort ?? 0,
-    };
+    const peer = this.lanPeerFromAgent(agent);
+    return { lanHost: peer.lanHost, lanPort: peer.lanPort };
   }
 
   private resolveTenantId(agent: DeviceAgentDocument): string {
@@ -176,6 +188,7 @@ export class AgentWorkspaceService implements OnModuleInit {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const query = {
       employeeId: agent.employeeId,
+      archived: { $ne: true },
       $or: [
         { status: 'pending' },
         { status: 'done', completedAt: { $gte: sevenDaysAgo } },
@@ -381,22 +394,16 @@ export class AgentWorkspaceService implements OnModuleInit {
     });
   }
 
-  private async resolveDeviceLanPeer(deviceAgentId: string): Promise<{ lanHost: string; lanPort: number }> {
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+  private async resolveDeviceLanPeer(deviceAgentId: string): Promise<{
+    lanHost: string;
+    lanPort: number;
+    isOnline: boolean;
+  }> {
     const peer = await this.deviceAgentModel
-      .findOne({
-        id: deviceAgentId,
-        status: 'active',
-        lanHost: { $ne: '' },
-        lanPort: { $gt: 0 },
-        lastHeartbeatAt: { $gte: fiveMinAgo },
-      })
-      .select({ lanHost: 1, lanPort: 1 })
+      .findOne({ id: deviceAgentId, status: { $ne: 'revoked' } })
+      .select({ lanHost: 1, lanPort: 1, lastHeartbeatAt: 1 })
       .exec();
-    return {
-      lanHost: peer?.lanHost?.trim() ?? '',
-      lanPort: peer?.lanPort ?? 0,
-    };
+    return this.lanPeerFromAgent(peer);
   }
 
   async registerLanSharedFolder(agent: DeviceAgentDocument, dto: RegisterLanSharedFolderDto) {
@@ -462,7 +469,7 @@ export class AgentWorkspaceService implements OnModuleInit {
           lanFolderKey: doc.lanFolderKey,
           peerLanHost: peer.lanHost,
           peerLanPort: peer.lanPort,
-          isOnline: Boolean(peer.lanHost && peer.lanPort > 0),
+          isOnline: peer.isOnline,
         });
       }
       return rows;
@@ -496,11 +503,18 @@ export class AgentWorkspaceService implements OnModuleInit {
     });
   }
 
-  async listAdminTasks(filters: { employeeId?: string; status?: AgentTaskStatus }) {
+  async listAdminTasks(filters: {
+    employeeId?: string;
+    status?: AgentTaskStatus;
+    archived?: 'exclude' | 'only' | 'include';
+  }) {
     await this.materializeRecurringTasks();
     const query: Record<string, unknown> = {};
     if (filters.employeeId) query.employeeId = filters.employeeId;
     if (filters.status) query.status = filters.status;
+    const archivedMode = filters.archived ?? 'exclude';
+    if (archivedMode === 'exclude') query.archived = { $ne: true };
+    else if (archivedMode === 'only') query.archived = true;
     const docs = await this.taskModel.find(query).sort({ createdAt: -1 }).limit(500).exec();
     return docs.map(toTaskPlain);
   }
@@ -541,12 +555,32 @@ export class AgentWorkspaceService implements OnModuleInit {
     return toRecurringPlain(doc);
   }
 
-  async patchRecurringTask(templateId: string, body: { active?: boolean }) {
+  async patchRecurringTask(templateId: string, dto: PatchRecurringAgentTaskDto) {
     const doc = await this.recurringModel.findOne({ id: templateId }).exec();
     if (!doc) throw new NotFoundException('Recurring task not found.');
-    if (body.active !== undefined) doc.active = body.active;
+    if (dto.employeeIds !== undefined) {
+      const ids = [...new Set(dto.employeeIds.map((id) => id.trim()).filter(Boolean))];
+      if (!ids.length) throw new BadRequestException('Select at least one employee.');
+      for (const employeeId of ids) {
+        const employee = await this.employeeModel.findOne({ id: employeeId }).exec();
+        if (!employee) throw new NotFoundException(`Employee not found: ${employeeId}`);
+      }
+      doc.employeeIds = ids;
+    }
+    if (dto.title !== undefined) doc.title = dto.title.trim();
+    if (dto.description !== undefined) doc.description = dto.description.trim();
+    if (dto.issueDay !== undefined) doc.issueDay = dto.issueDay;
+    if (dto.dueDay !== undefined) doc.dueDay = dto.dueDay;
+    if (dto.active !== undefined) doc.active = dto.active;
     await doc.save();
     return toRecurringPlain(doc);
+  }
+
+  async deleteRecurringTask(templateId: string) {
+    const doc = await this.recurringModel.findOne({ id: templateId }).exec();
+    if (!doc) throw new NotFoundException('Recurring task not found.');
+    await doc.deleteOne();
+    return { success: true };
   }
 
   async materializeRecurringTasks(): Promise<void> {
@@ -603,8 +637,14 @@ export class AgentWorkspaceService implements OnModuleInit {
     const start = new Date(`${today}T00:00:00.000Z`);
     const end = new Date(`${today}T23:59:59.999Z`);
     const [pending, doneToday] = await Promise.all([
-      this.taskModel.countDocuments({ status: 'pending' }).exec(),
-      this.taskModel.countDocuments({ status: 'done', completedAt: { $gte: start, $lte: end } }).exec(),
+      this.taskModel.countDocuments({ status: 'pending', archived: { $ne: true } }).exec(),
+      this.taskModel
+        .countDocuments({
+          status: 'done',
+          archived: { $ne: true },
+          completedAt: { $gte: start, $lte: end },
+        })
+        .exec(),
     ]);
     return { pending, doneToday };
   }
@@ -683,16 +723,27 @@ export class AgentWorkspaceService implements OnModuleInit {
     if (dto.status !== undefined) {
       if (dto.status === 'cancelled') {
         task.status = 'cancelled';
-      } else if (dto.status === 'pending' && task.status === 'cancelled') {
+      } else if (dto.status === 'pending' && (task.status === 'cancelled' || task.status === 'done')) {
         task.status = 'pending';
         task.completedAt = undefined;
         task.completionNote = '';
         task.completedByDeviceId = '';
       } else if (dto.status !== task.status) {
-        throw new BadRequestException('Only cancel or reopen cancelled tasks from admin.');
+        throw new BadRequestException('Invalid status change from admin.');
       }
+    }
+    if (dto.archived !== undefined) {
+      task.archived = dto.archived;
+      task.archivedAt = dto.archived ? new Date() : undefined;
     }
     await task.save();
     return toTaskPlain(task);
+  }
+
+  async deleteAdminTask(taskId: string) {
+    const task = await this.taskModel.findOne({ id: taskId }).exec();
+    if (!task) throw new NotFoundException('Task not found.');
+    await task.deleteOne();
+    return { success: true };
   }
 }

@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -127,6 +128,41 @@ export class CreateRecurringAgentTaskDto {
   dueDay!: number;
 }
 
+export class PatchRecurringAgentTaskDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  employeeIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  description?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  issueDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  dueDay?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
 export class PatchPlatformAgentTaskDto {
   @IsOptional()
   @IsString()
@@ -146,4 +182,8 @@ export class PatchPlatformAgentTaskDto {
   @IsOptional()
   @IsIn(AGENT_TASK_STATUSES)
   status?: (typeof AGENT_TASK_STATUSES)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  archived?: boolean;
 }
