@@ -35,6 +35,13 @@ export class AdminAgentTasksController {
     @Query('employeeId') employeeId?: string,
     @Query('status') status?: string,
     @Query('archived') archived?: string,
+    @Query('recurringTemplateId') recurringTemplateId?: string,
+    @Query('dueFrom') dueFrom?: string,
+    @Query('dueTo') dueTo?: string,
+    @Query('deadline') deadline?: string,
+    @Query('search') search?: string,
+    @Query('source') source?: string,
+    @Query('sort') sort?: string,
   ) {
     const normalized =
       status && AGENT_TASK_STATUSES.includes(status as AgentTaskStatus)
@@ -46,10 +53,28 @@ export class AdminAgentTasksController {
         : archived === 'all'
           ? 'include'
           : 'exclude';
+    const deadlineNorm =
+      deadline === 'overdue' ||
+      deadline === 'today' ||
+      deadline === 'week' ||
+      deadline === 'no_due'
+        ? deadline
+        : undefined;
+    const sourceNorm = source === 'recurring' || source === 'manual' ? source : undefined;
+    const sortNorm =
+      sort === 'due_asc' || sort === 'due_desc' || sort === 'created' ? sort : undefined;
+
     return this.workspaceService.listAdminTasks({
       employeeId: employeeId?.trim() || undefined,
       status: normalized,
       archived: archivedFilter,
+      recurringTemplateId: recurringTemplateId?.trim() || undefined,
+      dueFrom: dueFrom?.trim() || undefined,
+      dueTo: dueTo?.trim() || undefined,
+      deadline: deadlineNorm,
+      search: search?.trim() || undefined,
+      source: sourceNorm,
+      sort: sortNorm,
     });
   }
 

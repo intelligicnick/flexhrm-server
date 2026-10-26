@@ -67,6 +67,23 @@ function todayIsoDate(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
+function isoWeekRangeLocal(): { start: string; end: string } {
+  const now = new Date();
+  const day = now.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(now);
+  start.setDate(now.getDate() + mondayOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { start: fmt(start), end: fmt(end) };
+}
+
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function splitTaskBulletLines(description: string): string[] {
   return (description ?? '')
     .split(/\r?\n/)
@@ -507,15 +524,73 @@ export class AgentWorkspaceService implements OnModuleInit {
     employeeId?: string;
     status?: AgentTaskStatus;
     archived?: 'exclude' | 'only' | 'include';
+    recurringTemplateId?: string;
+    dueFrom?: string;
+    dueTo?: string;
+    deadline?: 'overdue' | 'today' | 'week' | 'no_due';
+    search?: string;
+    source?: 'recurring' | 'manual';
+    sort?: 'created' | 'due_asc' | 'due_desc';
   }) {
     await this.materializeRecurringTasks();
     const query: Record<string, unknown> = {};
     if (filters.employeeId) query.employeeId = filters.employeeId;
     if (filters.status) query.status = filters.status;
+    if (filters.recurringTemplateId) query.recurringTemplateId = filters.recurringTemplateId;
     const archivedMode = filters.archived ?? 'exclude';
     if (archivedMode === 'exclude') query.archived = { $ne: true };
     else if (archivedMode === 'only') query.archived = true;
-    const docs = await this.taskModel.find(query).sort({ createdAt: -1 }).limit(500).exec();
+
+    if (filters.source === 'recurring') {
+      query.recurringTemplateId = { $exists: true, $nin: ['', null] };
+    } else if (filters.source === 'manual') {
+      query.$or = [
+        { recurringTemplateId: '' },
+        { recurringTemplateId: { $exists: false } },
+        { recurringTemplateId: null },
+      ];
+    }
+
+    const today = todayIsoDate();
+    if (filters.deadline === 'overdue') {
+      query.status = 'pending';
+      query.dueDate = { $exists: true, $nin: ['', null], $lt: today };
+    } else if (filters.deadline === 'today') {
+      query.dueDate = today;
+    } else if (filters.deadline === 'week') {
+      const { start, end } = isoWeekRangeLocal();
+      query.dueDate = { $gte: start, $lte: end };
+    } else if (filters.deadline === 'no_due') {
+      query.$and = [
+        ...(Array.isArray(query.$and) ? (query.$and as unknown[]) : []),
+        { $or: [{ dueDate: '' }, { dueDate: { $exists: false } }, { dueDate: null }] },
+      ];
+    } else if (filters.dueFrom || filters.dueTo) {
+      const range: Record<string, string> = {};
+      if (filters.dueFrom) range.$gte = filters.dueFrom;
+      if (filters.dueTo) range.$lte = filters.dueTo;
+      query.dueDate = range;
+    }
+
+    const search = filters.search?.trim();
+    if (search) {
+      const re = new RegExp(escapeRegexLiteral(search), 'i');
+      const searchClause = { $or: [{ title: re }, { description: re }, { completionNote: re }] };
+      if (query.$and) {
+        (query.$and as unknown[]).push(searchClause);
+      } else {
+        query.$and = [searchClause];
+      }
+    }
+
+    const sort: Record<string, 1 | -1> =
+      filters.sort === 'due_asc'
+        ? { dueDate: 1, createdAt: -1 }
+        : filters.sort === 'due_desc'
+          ? { dueDate: -1, createdAt: -1 }
+          : { createdAt: -1 };
+
+    const docs = await this.taskModel.find(query).sort(sort).limit(500).exec();
     return docs.map(toTaskPlain);
   }
 
